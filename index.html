@@ -68,6 +68,30 @@
              border:1px solid #263449}
   #setup .go:hover:not(:disabled){border-color:#22d3ee;color:#e6edf6}
   #setup .go:disabled{opacity:.45;cursor:default}
+  .sens{display:flex;align-items:center;gap:10px;margin-top:20px;padding-top:18px;
+        border-top:1px solid #1c2838;font-size:9.5px;letter-spacing:.18em;color:#4d5c72}
+  .sens input{-webkit-appearance:none;appearance:none;flex:1;height:3px;border-radius:2px;
+              background:#22303f;outline:none;cursor:pointer}
+  .sens input::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
+              border-radius:50%;background:#22d3ee;cursor:pointer}
+  .sens .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:34px;text-align:right}
+
+  #sensBar{position:fixed;bottom:14px;right:16px;z-index:9;display:none;align-items:center;
+           gap:9px;font-size:9.5px;letter-spacing:.16em;color:#4d5c72;
+           text-shadow:0 1px 3px #000}
+  body.playing #sensBar{display:flex}
+  #sensBar input{-webkit-appearance:none;appearance:none;width:110px;height:3px;
+                 border-radius:2px;background:#22303f;outline:none;cursor:pointer}
+  #sensBar input::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;
+                 border-radius:50%;background:#22d3ee;cursor:pointer}
+  #sensBar .v{color:#8fa3bd;font-variant-numeric:tabular-nums;min-width:30px}
+
+  #lockHint{position:fixed;bottom:56px;left:50%;transform:translateX(-50%);z-index:9;
+            display:none;padding:7px 15px;border-radius:20px;font-size:10px;
+            letter-spacing:.16em;color:#8fa3bd;background:rgba(12,17,26,.85);
+            border:1px solid #24344a;pointer-events:none}
+  body.playing:not(.locked) #lockHint{display:block}
+
   #setup .msg{margin-top:13px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:16px}
   #menu .card{width:340px;padding:26px 26px 22px;border:1px solid #1d2939;border-radius:14px;
               background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.6);text-align:center}
@@ -102,6 +126,12 @@
 <div id="help"></div>
 <div id="build"></div>
 <div id="status"></div>
+<div id="sensBar">
+  <span>MOUSE</span>
+  <input id="sensPlay" type="range" min="0.2" max="3" step="0.05" value="1">
+  <span class="v" id="sensPlayVal">1.00</span>
+</div>
+<div id="lockHint">click to capture the mouse</div>
 <div id="setup" class="hidden">
   <div class="card">
     <div id="setupOwner">
@@ -119,6 +149,11 @@
     <div id="setupWait" class="hidden">
       <h1>WAITING FOR HOST</h1>
       <div class="hint">The host is choosing the settings.</div>
+    </div>
+    <div class="sens">
+      <span>MOUSE</span>
+      <input id="sensSetup" type="range" min="0.2" max="3" step="0.05" value="1">
+      <span class="v" id="sensSetupVal">1.00</span>
     </div>
     <div class="msg" id="setupMsg"></div>
   </div>
@@ -445,11 +480,12 @@ function makePaddle(side) {
    overshooting stops accumulating dead travel you would have to drag back. */
 const cursor = { x: 0, y: 0 };
 
-/* Mouse capture is off while we find out whether the drawn cursor alone is
-   enough. Note the clamp only does half its job without it: absolute mapping
-   means overshooting the field still banks travel you have to drag back, and
-   only integrating raw movement removes that. */
-const USE_POINTER_LOCK = false;
+/* Capture integrates raw mouse movement instead of mapping absolute position,
+   which is what makes both the clamp and a sensitivity setting possible: an
+   absolute mapping has no scale factor to adjust. Sensitivity is a LOCAL
+   preference — it depends on the desk, not the match — so it is never sent. */
+const USE_POINTER_LOCK = true;
+const MOUSE = { sens: 1 };
 let pointerLocked = false;
 
 const intent = { tx: 0, ty: 0, ta: 0 };          // what the player wants, live
@@ -1406,8 +1442,9 @@ function buildReadout() {
    used, so the feel is unchanged — only the escape route is removed. */
 canvas.addEventListener('mousemove', e => {
   if (pointerLocked) {
-    cursor.x += (e.movementX || 0) / view.scale;
-    cursor.y -= (e.movementY || 0) / view.scale;
+    const k = MOUSE.sens / view.scale;
+    cursor.x += (e.movementX || 0) * k;
+    cursor.y -= (e.movementY || 0) * k;
   } else {
     const r = canvas.getBoundingClientRect();
     const w = toWorld(e.clientX - r.left, e.clientY - r.top);
@@ -1424,6 +1461,7 @@ canvas.addEventListener('mousedown', e => {
 });
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === canvas;
+  document.body.classList.toggle('locked', pointerLocked);
 });
 document.addEventListener('pointerlockerror', () => { pointerLocked = false; });
 let fineRotate = false;   // right mouse button held
@@ -1451,6 +1489,8 @@ addEventListener('keydown', e => {
   if (k === ' ') frozen = !frozen;
   if (k === '.') { stepOnce = true; frozen = true; }
   if (k === 's') intent.ta = 0;
+  if (k === '[') setSens(MOUSE.sens - 0.05);   // capture blocks the slider,
+  if (k === ']') setSens(MOUSE.sens + 0.05);   // so keys work mid-match too
   if (k === 'escape') { leaveGame(); return; }
   if (k === 'f') { if (server.active) resetRound(server.world, false); }
   if (k === 'r') { if (server.active) resetRound(server.world, true); }
@@ -1555,8 +1595,9 @@ function buildPanel() {
 document.getElementById('help').innerHTML =
   '<b>mouse</b> move &nbsp; <b>wheel</b> rotate &nbsp; ' +
   '<b>hold right-click</b> fine rotate &nbsp; <b>S</b> level<br>' +
-  '<b>F</b> serve &nbsp; <b>R</b> reset score &nbsp; <b>H</b> settings' +
-  ' &nbsp; <b>esc</b> menu';
+  '<b>click</b> capture mouse &nbsp; <b>[</b> <b>]</b> sensitivity &nbsp; ' +
+  '<b>F</b> serve &nbsp; <b>R</b> reset score<br>' +
+  '<b>H</b> settings &nbsp; <b>esc</b> release mouse, again for menu';
 
 /* ---- loop -----------------------------------------------------------------
    Physics runs at a fixed rate, decoupled from the display, and the renderer
@@ -1665,6 +1706,7 @@ function startGame() {
 function releaseMouse() {
   if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
   pointerLocked = false;
+  document.body.classList.remove('locked');
 }
 
 function endMatch() {
@@ -1784,7 +1826,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v7.6-dev';
+const BUILD = 'v7.7-dev';
 
 /* ==========================================================================
    SERVER
@@ -2346,6 +2388,20 @@ function showSetup() {
   if (owner) paintTarget();
 }
 
+function paintSens() {
+  const v = MOUSE.sens.toFixed(2);
+  $('sensSetup').value = MOUSE.sens;
+  $('sensPlay').value = MOUSE.sens;
+  $('sensSetupVal').textContent = v;
+  $('sensPlayVal').textContent = v;
+}
+
+function setSens(v) {
+  MOUSE.sens = Math.max(0.2, Math.min(3, Math.round(v * 100) / 100));
+  try { localStorage.setItem('flickball.sens', MOUSE.sens); } catch (e) {}
+  paintSens();
+}
+
 function paintTarget() {
   const t = MATCH.target;
   $('ptVal').textContent = t === 0 ? '∞' : t;
@@ -2536,12 +2592,17 @@ $('btnStart').addEventListener('click', beginMatch);
 $('ptMinus').addEventListener('click', () => setTarget(MATCH.target - 1));
 $('ptPlus').addEventListener('click', () => setTarget(MATCH.target + 1));
 $('ptRange').addEventListener('input', e => setTarget(parseInt(e.target.value, 10)));
+$('sensSetup').addEventListener('input', e => setSens(parseFloat(e.target.value)));
+$('sensPlay').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 
 try {
   const saved = parseInt(localStorage.getItem('flickball.target'), 10);
   if (!isNaN(saved)) MATCH.target = Math.max(0, Math.min(100, saved));
+  const ms = parseFloat(localStorage.getItem('flickball.sens'));
+  if (!isNaN(ms)) MOUSE.sens = Math.max(0.2, Math.min(3, ms));
 } catch (e) {}
 paintTarget();
+paintSens();
 $('btnHost').addEventListener('click', hostGame);
 $('btnJoin').addEventListener('click', joinGame);
 $('codeIn').addEventListener('keydown', function (e) { if (e.key === 'Enter') joinGame(); });
