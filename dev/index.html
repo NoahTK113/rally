@@ -1,0 +1,1978 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rally</title>
+<style>
+  html,body{margin:0;height:100%;background:#070910;overflow:hidden;
+    font-family:ui-monospace,Consolas,monospace;color:#c9d4e2}
+  /* Nothing of the game is present until a mode is chosen — the menu is a
+     screen in its own right, not a scrim over a game already in progress. */
+  canvas{display:none;width:100vw;height:100vh}
+  body.playing canvas{display:block}
+  #tag,#help,#status{display:none}
+  body.playing #tag,body.playing #help,body.playing #status{display:block}
+  #tag{position:fixed;bottom:66px;left:16px;font-size:11px;line-height:1.65;color:#66788f;
+       pointer-events:none;text-shadow:0 1px 3px #000}
+  #help{position:fixed;bottom:14px;left:16px;font-size:10.5px;line-height:1.8;color:#4d5c72;
+        pointer-events:none;text-shadow:0 1px 3px #000}
+  #help b{color:#8fa3bd;font-weight:600}
+
+  #panel{position:fixed;top:0;left:0;right:0;z-index:10;display:none;flex-wrap:wrap;
+         align-items:flex-end;gap:9px 13px;padding:9px 14px 10px;font-size:10px;
+         background:rgba(8,12,19,.92);border-bottom:1px solid #1a2534;backdrop-filter:blur(8px)}
+  body.playing #panel:not(.hidden){display:flex}
+  #panel .grp{align-self:center;font-size:9px;letter-spacing:.15em;text-transform:uppercase;
+              color:#3f4d61;padding-left:11px;border-left:1px solid #1c2838}
+  #panel .grp.first{padding-left:0;border-left:0}
+  .knob{display:flex;flex-direction:column;gap:4px;width:100px}
+  .knob .row{display:flex;justify-content:space-between;gap:5px;line-height:1;color:#67788d}
+  .knob .v{color:#c9d4e2;font-variant-numeric:tabular-nums}
+  .knob input{-webkit-appearance:none;appearance:none;width:100%;height:3px;border-radius:2px;
+              background:#22303f;outline:none;margin:0;cursor:pointer}
+  .knob input::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;
+              border-radius:50%;background:#22d3ee;cursor:pointer}
+  #panel button{background:#141c28;color:#c9d4e2;border:1px solid #24344a;border-radius:5px;
+                padding:5px 10px;font:inherit;font-size:10px;cursor:pointer}
+  #panel button:hover{border-color:#33496a}
+
+  #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
+        background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
+  #menu.hidden{display:none}
+  #menu .card{width:340px;padding:26px 26px 22px;border:1px solid #1d2939;border-radius:14px;
+              background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.6);text-align:center}
+  #menu h1{margin:0 0 4px;font-size:30px;letter-spacing:.32em;font-weight:700;color:#e6edf6}
+  #menu .sub{margin:0 0 22px;font-size:10px;letter-spacing:.2em;color:#4d5c72}
+  #menu button{width:100%;padding:11px;margin-bottom:9px;font:inherit;font-size:11px;
+               letter-spacing:.13em;border-radius:8px;cursor:pointer;
+               background:#151d2b;color:#c9d4e2;border:1px solid #263449}
+  #menu button:hover:not(:disabled){border-color:#22d3ee;color:#e6edf6}
+  #menu button:disabled{opacity:.4;cursor:default}
+  #menu .join{display:flex;gap:7px}
+  #menu input{flex:1;min-width:0;padding:11px;font:inherit;font-size:12px;letter-spacing:.28em;
+              text-align:center;text-transform:uppercase;border-radius:8px;
+              background:#0b1119;color:#e6edf6;border:1px solid #263449;outline:none}
+  #menu input:focus{border-color:#22d3ee}
+  #menu .join button{width:92px;margin:0}
+  #menu .msg{margin-top:14px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:30px}
+  #menu .code{display:block;margin-top:6px;font-size:26px;letter-spacing:.42em;color:#22d3ee}
+
+  /* Above the menu's z-index on purpose: you want to check the build BEFORE
+     connecting, not after. */
+  #build{position:fixed;top:10px;left:14px;z-index:30;font-size:10px;letter-spacing:.14em;
+         color:#3f4d61;pointer-events:none;text-shadow:0 1px 3px #000}
+  #status{position:fixed;top:10px;right:14px;z-index:9;font-size:10px;letter-spacing:.1em;
+          color:#5b6c82;text-shadow:0 1px 3px #000;pointer-events:none;text-align:right}
+  #status b{color:#c9d4e2;font-weight:600;letter-spacing:.24em}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel" class="hidden"></div>
+<div id="tag"></div>
+<div id="help"></div>
+<div id="build"></div>
+<div id="status"></div>
+<div id="menu">
+  <div class="card">
+    <h1>RALLY</h1>
+    <p class="sub">HIT IT OVER. PUT IT IN.</p>
+    <button id="btnSolo">PRACTICE ALONE</button>
+    <button id="btnHost">HOST A GAME</button>
+    <div class="join">
+      <input id="codeIn" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false">
+      <button id="btnJoin">JOIN</button>
+    </div>
+    <div class="msg" id="netMsg"></div>
+  </div>
+</div>
+<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<script>
+'use strict';
+
+// ---- arena, all in metres -------------------------------------------------
+const A = {
+  width: 12, height: 7,     // inner playing area
+  netHeight: 2.25, netT: 0.10,
+  goalLip: 1.00,            // gap between the floor and the bottom of the opening
+  goalHeight: 2.10,         // size of the opening
+  goalDepth: 0.70,          // how far the box extends outside the field
+  cornerR: 0.11,            // rounding on the arena contour. WORLD units, not
+                            // derived from the hairline, so collision geometry
+                            // never changes when the window resizes.
+  crossFrac: 0.20,         // how far a paddle may reach into the far half,
+                            // as a fraction of that half's width
+  paddleLength: 0.90,
+  paddleT: 0.10,
+  margin: 0.9,
+};
+
+/* Paddle response. Springs are given as (frequency, damping ratio) rather than
+   (k, c) because those are the numbers you can reason about: frequency is how
+   hard it chases, damping below 1 overshoots. The paddle is never teleported to
+   the cursor — it CHASES it, which is what gives it real linear and angular
+   velocity for the ball impulse to read later. */
+const FEEL = {
+  posFreq   : 12.0,   // Hz
+  posDamp   : 2.00,   // 1.0 = critically damped
+  angFreq   : 7.0,    // Hz
+  angDamp   : 1.80,
+  keyRate   : 220,    // degrees/sec for A and D
+  maxError  : 0.60,   // metres. The proportional term is clamped to this, so
+                      // the spring has the SAME authority everywhere — in open
+                      // space a distant cursor no longer buys extra force that
+                      // a wall-pinned target cannot match. Effectively this,
+                      // not the cursor distance, is what sets top paddle speed;
+                      // freq and damping just set how fast it gets there.
+                      // Must stay <= reach, or boundaries go mushy again.
+  reach     : 0.80,   // metres the TARGET may run past the legal box. World
+                      // units on purpose: screen-space overshoot would give
+                      // players with wider windows more force at the walls.
+};
+
+/* Wheel rotation is QUANTISED rather than accumulated. A wheel only emits
+   coarse discrete notches, so free accumulation drifts off the angles that
+   actually matter and you can never quite reach flat or upright.
+
+   Both steps are exact divisors of 90 degrees, so 0 and 90 and every multiple
+   are always on the grid. And the coarse step is a whole multiple of the fine
+   one, so switching between them never strands the paddle between grids. */
+const STEP_COARSE = 30.0 * Math.PI / 180;   // 90 / 3
+const STEP_FINE   =  7.5 * Math.PI / 180;   // 90 / 12, and exactly a quarter of coarse
+const FINE_DIV    = STEP_COARSE / STEP_FINE;
+
+/* Which paddle THIS browser drives. The host takes blue (+1) and the joining
+   player takes red (-1); solo play is blue. Everything else keys off the side
+   value, so nothing else needs to know about roles. */
+let mySide = +1;
+
+// One stroke weight for the whole game. Strokes only ever delineate; anything
+// that needs to look thick is real geometry instead. linePx is the width of the
+// line you actually SEE, in device pixels — kept even so a stroke centred on an
+// integer device coordinate covers whole pixels.
+const VIS = { linePx: 2, glow: 1.9 };
+
+// Markings (centre line, goal lines) are drawn on top of everything, so the
+// whole stroke is visible and this is their width directly.
+const lineW = () => VIS.linePx / view.sDev;
+
+// The arena contour is stroked BEFORE the interior fill, which then covers its
+// inward half — so it has to be stroked at twice the visible width to end up
+// looking the same weight as a marking.
+const contourW = () => (VIS.linePx * 2) / view.sDev;
+
+/* Latency injected into the HOST's own link to its own server. The whole
+   point of a listen server is that we can raise the host's delay but can never
+   lower the guest's, so fairness means levelling the host down to match. */
+const NET = {
+  hostDelay: 25,      // ms one-way, used when autoDelay is off
+  autoDelay: true,    // otherwise track half the measured round trip
+  floor: 15,          // never below this, so practice resembles a real match
+};
+
+const PHYS = {
+  gravity      : 5.50,   // m/s^2
+  ballR        : 0.15,   // m
+  restitution  : 0.65,   // bounciness against arena and net
+  friction     : 0.35,   // tangential -> this is what generates spin
+  paddleRest   : 0.30,   // paddles are livelier than walls
+  paddleFriction: 0.60,  // and grippier, so slicing actually bites
+  goalPull     : 28.0,   // outward pull inside a goal box, so a ball that
+                         // trickles in is always drawn out through the back
+  restThreshold: 0.60,   // below this closing speed a contact stops bouncing,
+                         // otherwise the ball jitters forever on the floor
+};
+
+const COL = {
+  border    : '#3b82f6',
+  court     : '#090a0c',
+  net       : '#fdba74',
+  netCap    : '#fed7aa',
+  center    : '#3b82f6',    // same blue as the border; alpha applied at draw time
+  pocket       : '#05070b',
+  blue         : '#22d3ee',   // ALWAYS the right side, for both players
+  red          : '#fb7185',   // ALWAYS the left side
+  ball         : '#f8fafc',
+  ballSeam     : 'rgba(15,23,42,.55)',
+  blueFill     : 'rgba(34,211,238,.10)',
+  redFill      : 'rgba(251,113,133,.10)',
+};
+
+// A goal belongs to whoever defends it.
+/* Sides are coloured absolutely — right is blue, left is red — for BOTH
+   players. If each browser painted "me" blue the two would disagree about who
+   just scored, which is the kind of confusion no amount of UI fixes. */
+const goalColour = side => side > 0 ? COL.blue : COL.red;
+const goalFill   = side => side > 0 ? COL.blueFill : COL.redFill;
+
+const opts = { showTarget: true, showVectors: true };
+let renderAlpha = 1;
+
+// Outward glow: the same contour stroked a few times, widening and fading.
+// Cheap, corner-safe (lineJoin handles it), and no shadowBlur cost.
+const GLOW = [
+  [40, 0.035], [30, 0.045], [22, 0.055], [16, 0.070],
+  [11, 0.090], [7.5, 0.115], [5, 0.150], [3, 0.220],
+];
+
+const goalY0 = () => A.goalLip;
+const goalY1 = () => A.goalLip + A.goalHeight;
+
+// ---- world -> screen ------------------------------------------------------
+const view = { scale: 1, ox: 0, oy: 0, dpr: 1 };
+
+function bounds() {
+  const out = A.goalDepth + A.margin;
+  return {
+    minX: -out,       maxX: A.width  + out,
+    minY: -A.margin,  maxY: A.height + A.margin,
+  };
+}
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  const dpr = view.dpr = Math.min(devicePixelRatio || 1, 2);
+  const cw = view.cw = innerWidth, ch = view.ch = innerHeight;
+  const cwDev = Math.round(cw * dpr), chDev = Math.round(ch * dpr);
+  canvas.width = cwDev;
+  canvas.height = chDev;
+
+  // Keep the arena clear of the tuning panel rather than letting it overlap.
+  const panelEl = document.getElementById('panel');
+  const panelDev = panelEl.classList.contains('hidden')
+    ? 0 : Math.round(panelEl.offsetHeight * dpr);
+  const availDev = Math.max(1, chDev - panelDev);
+
+  const b = bounds();
+  const w = b.maxX - b.minX, h = b.maxY - b.minY;
+
+  // Quantise to a whole number of DEVICE pixels per metre. The court is a
+  // whole number of metres across, so this lands x=0, x=W, y=0 and y=H on the
+  // same pixel world.phase and vertical walls rasterise identically to horizontal
+  // ones. Without it the two axes sit at unrelated sub-pixel offsets and the
+  // antialiaser spreads their ink differently, which reads as a colour shift.
+  const sDev = view.sDev = Math.max(1, Math.floor(Math.min(cwDev / w, availDev / h)));
+  view.scale = sDev / dpr;
+
+  // Snap the world origin to a whole device pixel, for the same reason.
+  view.oxDev = Math.round((cwDev - w * sDev) / 2 - b.minX * sDev);
+  view.oyDev = Math.round(panelDev + (availDev - h * sDev) / 2 + b.maxY * sDev);
+  view.ox = view.oxDev / dpr;
+  view.oy = view.oyDev / dpr;
+
+  render();
+}
+
+// Built from the snapped integers directly, so no float drift creeps back in.
+const worldCtx  = () => ctx.setTransform(view.sDev, 0, 0, -view.sDev,
+                                         view.oxDev, view.oyDev);
+const screenCtx = () => ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+const toWorld = (px, py) => ({ x: (px - view.ox) / view.scale, y: (view.oy - py) / view.scale });
+
+/* ==========================================================================
+   ARENA CONTOUR
+   The single source of truth for the arena boundary. These are the segments
+   the ball will collide against; the renderer strokes the same list. There is
+   no separate collider and no offset copy, so the two cannot drift apart.
+   ========================================================================== */
+function arenaPoints() {
+  const W = A.width, H = A.height, d = A.goalDepth;
+  const y0 = goalY0(), y1 = goalY1();
+  return [
+    { x: 0,     y: 0  },   // bottom-left
+    { x: 0,     y: y0 },   // left lip, inner
+    { x: -d,    y: y0 },   // left box, bottom-outer
+    { x: -d,    y: y1 },   // left box, top-outer
+    { x: 0,     y: y1 },   // left crossbar, inner
+    { x: 0,     y: H  },   // top-left
+    { x: W,     y: H  },   // top-right
+    { x: W,     y: y1 },   // right crossbar, inner
+    { x: W + d, y: y1 },   // right box, top-outer
+    { x: W + d, y: y0 },   // right box, bottom-outer
+    { x: W,     y: y0 },   // right lip, inner
+    { x: W,     y: 0  },   // bottom-right
+  ];
+}
+
+// Closed polygon with rounded corners. Radius is clamped so it can never
+// exceed half the shortest edge (e.g. if goalLip is dialled down to zero).
+function traceRounded(pts, r) {
+  const n = pts.length;
+  let shortest = Infinity;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    shortest = Math.min(shortest, Math.hypot(b.x - a.x, b.y - a.y));
+  }
+  r = Math.min(r, shortest * 0.45);
+
+  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
+  ctx.beginPath();
+  const start = mid(pts[n - 1], pts[0]);
+  ctx.moveTo(start.x, start.y);
+  for (let i = 0; i < n; i++) {
+    const cur = pts[i], m = mid(cur, pts[(i + 1) % n]);
+    if (r > 0) ctx.arcTo(cur.x, cur.y, m.x, m.y, r);
+    else ctx.lineTo(cur.x, cur.y);
+    ctx.lineTo(m.x, m.y);
+  }
+  ctx.closePath();
+}
+
+function traceArena() { traceRounded(arenaPoints(), A.cornerR); }
+
+/* The same contour cut in two at mid-court, so each team's half can be drawn
+   in its own colour. Split points land mid-edge, never on a corner, and the
+   arcs are generated from the same vertices and radius as the closed path —
+   so the two halves lie exactly on it and the interior fill still trims them. */
+function halfPoints(side) {
+  const W = A.width, H = A.height, d = A.goalDepth;
+  const y0 = goalY0(), y1 = goalY1(), m = W / 2;
+  return side < 0
+    ? [{ x: m, y: 0 }, { x: 0, y: 0 }, { x: 0, y: y0 }, { x: -d, y: y0 },
+       { x: -d, y: y1 }, { x: 0, y: y1 }, { x: 0, y: H }, { x: m, y: H }]
+    : [{ x: m, y: H }, { x: W, y: H }, { x: W, y: y1 }, { x: W + d, y: y1 },
+       { x: W + d, y: y0 }, { x: W, y: y0 }, { x: W, y: 0 }, { x: m, y: 0 }];
+}
+
+function traceHalf(side) {
+  const pts = halfPoints(side), n = pts.length;
+  let shortest = Infinity;
+  for (let i = 0; i < n - 1; i++) {
+    shortest = Math.min(shortest, Math.hypot(pts[i + 1].x - pts[i].x,
+                                             pts[i + 1].y - pts[i].y));
+  }
+  const r = Math.min(A.cornerR, shortest * 0.45);
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < n - 1; i++) {
+    ctx.arcTo(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y, r);
+  }
+  ctx.lineTo(pts[n - 1].x, pts[n - 1].y);
+}
+
+// Net is a BODY, not a boundary: the ball can hit either face or the cap, so
+// it keeps real thickness and a matching capsule collider later.
+function traceNet() {
+  const nx = A.width / 2, r = A.netT / 2, top = A.netHeight - r;
+  ctx.beginPath();
+  ctx.moveTo(nx - r, 0);
+  ctx.lineTo(nx - r, top);
+  ctx.arc(nx, top, r, Math.PI, 0, true);
+  ctx.lineTo(nx + r, 0);
+  ctx.closePath();
+}
+
+/* ==========================================================================
+   PADDLES
+   ========================================================================== */
+const DEG = Math.PI / 180;
+const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
+const lerp  = (a, b, t) => a + (b - a) * t;
+
+function makePaddle(side) {
+  const x = side < 0 ? A.width * 0.22 : A.width * 0.78;
+  const y = A.height * 0.35;
+  return {
+    side,                        // -1 left (player), +1 right
+    x, y, a: 0,                  // pose
+    vx: 0, vy: 0, w: 0,          // linear velocity, angular velocity (rad/s)
+    tx: x, ty: y, ta: 0,         // spring targets
+    px: x, py: y, pa: 0,         // previous pose, for render interpolation
+  };
+}
+
+/* INPUT is captured once per tick and stored, never read from inside the
+   simulation. That is the whole point: re-running tick 400 must use tick 400's
+   input, not whatever the mouse is doing now. Without this, replay — and
+   therefore rollback — is impossible by construction. */
+const intent = { tx: 0, ty: 0, ta: 0 };          // what the player wants, live
+const liveInput = { '-1': { tx: 0, ty: 0, ta: 0 },
+                    '1':  { tx: 0, ty: 0, ta: 0 } };
+
+function captureInto(dst, dt) {
+  if (mouseInside) { intent.tx = mouse.x; intent.ty = mouse.y; }
+  let rot = 0;
+  if (keys.has('a')) rot += 1;
+  if (keys.has('d')) rot -= 1;
+  if (rot) intent.ta += rot * FEEL.keyRate * (fineRotate ? 1 / FINE_DIV : 1) * DEG * dt;
+  dst.tx = intent.tx; dst.ty = intent.ty; dst.ta = intent.ta;
+}
+
+const keys = new Set();
+let mouse = { x: A.width / 2, y: A.height / 2 }, mouseInside = false;
+
+// Semi-implicit Euler on a (frequency, damping) spring. Scalar on purpose:
+// this runs 240x a second and object-literal vectors would just make garbage.
+function spring(cur, vel, target, freq, damp, dt) {
+  const w = 2 * Math.PI * freq;
+  const nv = vel + (w * w * (target - cur) - 2 * damp * w * vel) * dt;
+  return [cur + nv * dt, nv];
+}
+
+/* The boxes the paddle's CENTRE may occupy. Its own half plus a slice of the
+   far one, and — because the goal line is only a scoring plane, not a wall —
+   the inside of its own goal box too. Extents come from the rotated paddle, so
+   the whole body stays inside whichever box it is in.
+
+   Two boxes rather than one because the legal region is L-shaped. The clamp
+   below snaps to whichever is NEAREST, which keeps the correction tiny: at
+   240 Hz the paddle only ever moves a few centimetres per step, so it can
+   never be far enough outside for the choice to jump it anywhere visible. */
+function paddleBoxes(p) {
+  const c = Math.abs(Math.cos(p.a)), s = Math.abs(Math.sin(p.a));
+  const L = A.paddleLength / 2, T = A.paddleT / 2;
+  const hx = L * c + T * s, hy = L * s + T * c;
+
+  const mid = A.width / 2, cross = mid * A.crossFrac;
+  let fx0, fx1;
+  if (p.side < 0) { fx0 = hx;               fx1 = mid + cross - hx; }
+  else            { fx0 = mid - cross + hx; fx1 = A.width - hx; }
+
+  const boxes = [{ x0: fx0, x1: fx1, y0: hy, y1: A.height - hy }];
+
+  // own goal pocket, only if the paddle actually fits through the mouth
+  const gy0 = goalY0() + hy, gy1 = goalY1() - hy;
+  if (gy1 >= gy0) {
+    boxes.push(p.side > 0
+      ? { x0: fx0, x1: A.width + A.goalDepth - hx, y0: gy0, y1: gy1 }
+      : { x0: -A.goalDepth + hx, x1: fx1,          y0: gy0, y1: gy1 });
+  }
+  for (const b of boxes) {
+    if (b.x0 > b.x1) b.x0 = b.x1 = (b.x0 + b.x1) / 2;
+    if (b.y0 > b.y1) b.y0 = b.y1 = (b.y0 + b.y1) / 2;
+  }
+  return boxes;
+}
+
+// Nearest legal point across all boxes, plus which axes were corrected.
+function nearestLegal(boxes, x, y) {
+  let best = null, bestD = Infinity;
+  for (const b of boxes) {
+    const cx = clamp(x, b.x0, b.x1), cy = clamp(y, b.y0, b.y1);
+    const d = (cx - x) * (cx - x) + (cy - y) * (cy - y);
+    if (d < bestD) { bestD = d; best = { x: cx, y: cy }; }
+  }
+  return best;
+}
+
+// Pure: the paddle's target comes from the input record, never from a global.
+function stepPaddle(p, inp, dt) {
+  p.px = p.x; p.py = p.y; p.pa = p.a;
+  p.tx = inp.tx; p.ty = inp.ty; p.ta = inp.ta;
+  /* The POSE is constrained, not the target. Clamping the target would make
+     the spring error — and therefore the force — collapse to zero as the
+     paddle neared a wall, so it would creep in instead of driving in. Here the
+     target stays out ahead, the spring keeps full authority right up to the
+     boundary, and the paddle is then stopped hard against it.
+     The target is still bounded, but by a fixed distance in METRES, so window
+     size can't buy anyone extra force at the walls. */
+  const boxes = paddleBoxes(p);
+  const reach = FEEL.reach;
+  const t = nearestLegal(boxes, p.tx, p.ty);
+  p.tx = p.tx < t.x - reach ? t.x - reach : p.tx > t.x + reach ? t.x + reach : p.tx;
+  p.ty = p.ty < t.y - reach ? t.y - reach : p.ty > t.y + reach ? t.y + reach : p.ty;
+
+  /* Position uses a clamped error, and clamps the error VECTOR rather than
+     each axis, so top speed is the same in every direction instead of being
+     sqrt(2) faster on the diagonals. */
+  {
+    const w = 2 * Math.PI * FEEL.posFreq, z = FEEL.posDamp;
+    const maxE = Math.min(FEEL.maxError, FEEL.reach);
+    let ex = p.tx - p.x, ey = p.ty - p.y;
+    const e = Math.hypot(ex, ey);
+    if (e > maxE) { const k = maxE / e; ex *= k; ey *= k; }
+    p.vx += (w * w * ex - 2 * z * w * p.vx) * dt;
+    p.vy += (w * w * ey - 2 * z * w * p.vy) * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+  }
+
+  // Hard stop at the boundary, per axis so the paddle still slides along a
+  // wall it is pressed against. Velocity into the wall is killed, not
+  // reflected — this is a kinematic limit, not a bounce.
+  const legal = nearestLegal(boxes, p.x, p.y);
+  if (legal.x !== p.x) { if ((legal.x - p.x) * p.vx < 0) p.vx = 0; p.x = legal.x; }
+  if (legal.y !== p.y) { if ((legal.y - p.y) * p.vy < 0) p.vy = 0; p.y = legal.y; }
+  [p.a, p.w ] = spring(p.a, p.w , p.ta, FEEL.angFreq, FEEL.angDamp, dt);
+
+  /* NO ANGLE WRAPPING. It used to shift target and pose together by a turn to
+     keep the numbers tidy, which is invisible locally — the spring only reads
+     their difference — but catastrophic across a network: the moment one peer
+     wraps, it sends a target 360 degrees away from the other peer's pose, and
+     that peer's spring answers a ~358 degree error with a full-speed flick.
+     Angles are unbounded instead. A double carries thousands of radians with
+     more precision than we could ever need. */
+}
+
+// Velocity of a point rigidly attached to the paddle: v + omega x r.
+// Exactly the quantity the ball impulse will need once collisions exist.
+function tipVelocity(p, endSign) {
+  const c = Math.cos(p.a), s = Math.sin(p.a);
+  const rx = endSign * (A.paddleLength / 2) * c;
+  const ry = endSign * (A.paddleLength / 2) * s;
+  return { x: p.x + rx, y: p.y + ry, vx: p.vx - p.w * ry, vy: p.vy + p.w * rx };
+}
+
+/* ==========================================================================
+   BALL
+   Rigid disc: position, velocity, orientation and spin. Spin is carried from
+   the start even though nothing reads it yet — retrofitting angular state into
+   a collision solver later is far more painful than carrying it now.
+   ========================================================================== */
+function makeBall() {
+  return {
+    x: 0, y: 0, a: 0,        // pose (a = orientation, for the spin marker)
+    vx: 0, vy: 0, w: 0,      // velocity, angular velocity (rad/s)
+    px: 0, py: 0, pa: 0,     // previous pose, for render interpolation
+  };
+}
+
+/* A goal is scored when the ball's CENTRE crosses a goal line, inside the
+   mouth. The line is a scoring plane only — it never blocks anything.
+
+   Scoring runs a small state machine rather than a single pause:
+     play      normal
+     exit      ball is ghosted: gravity only, no collisions, so it sails out
+               through the back of the goal and off the board
+     announce  "<TEAM> TEAM SCORED" for two seconds
+     count     3 - 2 - 1, then the tip-off drops */
+const PHASE = { PLAY: 'play', EXIT: 'exit', ANNOUNCE: 'announce', COUNT: 'count' };
+const ANNOUNCE_T = 2.0;
+const COUNT_T    = 3.0;
+const EXIT_MAX_T = 1.5;          // fallback if the ball never clears the back
+
+/* ==========================================================================
+   THE WORLD
+   Every value the simulation reads or writes lives here, in one object that
+   can be copied wholesale. That is what makes save, compare and restore
+   possible — the three things rollback is built out of. Tuning constants
+   (A, FEEL, PHYS) stay outside: they are settings, not state.
+   ========================================================================== */
+function makeWorld() {
+  return {
+    tick: 0,
+    p: { '-1': makePaddle(-1), '1': makePaddle(1) },
+    ball: makeBall(),
+    scores: { '-1': 0, '1': 0 },
+    phase: PHASE.PLAY,
+    phaseT: 0,
+    lastScorer: 0,
+    ballHidden: false,
+  };
+}
+
+const PADDLE_F = ['x', 'y', 'a', 'vx', 'vy', 'w', 'tx', 'ty', 'ta', 'px', 'py', 'pa'];
+const BALL_F   = ['x', 'y', 'a', 'vx', 'vy', 'w', 'px', 'py', 'pa'];
+
+// Copies INTO an existing world rather than returning a new one, so the
+// aliases below stay valid forever and rollback allocates nothing.
+function copyWorld(dst, src) {
+  dst.tick = src.tick;
+  for (const k of ['-1', '1']) {
+    for (const f of PADDLE_F) dst.p[k][f] = src.p[k][f];
+    dst.scores[k] = src.scores[k];
+  }
+  for (const f of BALL_F) dst.ball[f] = src.ball[f];
+  dst.phase = src.phase;
+  dst.phaseT = src.phaseT;
+  dst.lastScorer = src.lastScorer;
+  dst.ballHidden = src.ballHidden;
+}
+
+const world = makeWorld();
+
+// Stable references into the live world. Safe because copyWorld never
+// replaces these objects, it only overwrites their fields.
+const paddles = world.p;
+const ball = world.ball;
+const scores = world.scores;
+
+const me   = () => paddles[mySide];
+const them = () => paddles[-mySide];
+
+const teamName = side => side > 0 ? 'BLUE' : 'RED';
+
+function checkGoal(w) {
+  const b = w.ball;
+  if (b.y < goalY0() || b.y > goalY1()) return;
+  if (b.x <= 0)            award(w, +1);     // left goal conceded
+  else if (b.x >= A.width) award(w, -1);
+}
+
+function award(w, side) {
+  w.scores[side]++;
+  w.lastScorer = side;
+  w.phase = PHASE.EXIT;
+  w.phaseT = EXIT_MAX_T;
+}
+
+function resetRound(w, clearScore) {
+  if (clearScore) { w.scores['-1'] = w.scores['1'] = 0; w.lastScorer = 0; }
+  w.phase = PHASE.PLAY;
+  w.phaseT = 0;
+  w.ballHidden = false;
+  serve(w);
+}
+
+// Tip-off: dropped dead centre from the ceiling with no velocity.
+function serve(w) {
+  const b = w.ball;
+  b.x = A.width / 2;
+  b.y = A.height - PHYS.ballR;
+  b.vx = 0; b.vy = 0;
+  b.a = 0;  b.w = 0;
+  b.px = b.x; b.py = b.y; b.pa = 0;
+}
+
+/* One contact against an immovable surface. `n` points OUT of the surface,
+   toward the ball; `pen` is how far the ball has sunk in.
+   Treated as a disc, so I = 1/2 m R^2, which makes the tangential impulse
+   needed to kill sliding exactly -vt/3. Friction is clamped to the Coulomb
+   cone, and whatever tangential impulse survives becomes spin. */
+function resolveContact(b, nx, ny, pen, rest, mu, svx = 0, svy = 0) {
+  b.x += nx * pen;
+  b.y += ny * pen;
+
+  const R = PHYS.ballR;
+  // velocity of the contact point: v + omega x r, with r = -R * n,
+  // measured RELATIVE to the surface, which may itself be moving.
+  const cvx = b.vx + b.w * ny * R - svx;
+  const cvy = b.vy - b.w * nx * R - svy;
+
+  const vn = cvx * nx + cvy * ny;
+  if (vn >= 0) return;                       // already separating
+
+  const tx = -ny, ty = nx;
+  const vt = cvx * tx + cvy * ty;
+
+  const e  = Math.abs(vn) < PHYS.restThreshold ? 0 : rest;
+  const jn = -(1 + e) * vn;
+
+  let jt = -vt / 3;
+  const maxF = mu * jn;
+  if (jt >  maxF) jt =  maxF;
+  if (jt < -maxF) jt = -maxF;
+
+  b.vx += jn * nx + jt * tx;
+  b.vy += jn * ny + jt * ty;
+  b.w  += -2 * jt / R;
+}
+
+/* ---------------------------------------------------------------------------
+   Arena collision features, derived from the SAME points and the SAME radius
+   the renderer rounds with, so the ball hits exactly what is drawn.
+
+   A rounded contour is not just "segments plus a radius". At a reflex vertex
+   (the goal-mouth tips — material poking into play) the arc is a convex
+   obstacle, so it becomes a circle collider of radius r and the two adjacent
+   segments must be TRIMMED back to their tangent points, or the sharp vertex
+   would still be the nearest feature and the rounding would do nothing.
+
+   Convex vertices (the field's own corners) are left sharp on purpose: there
+   the rounding cuts INTO the corner, forming a pocket the ball cannot enter
+   anyway whenever its radius is at least the corner radius — which it is by
+   default. Below that the ball can nose a few mm deeper than drawn.
+
+   Cached, because this runs up to eight times per tick and allocating it each
+   time would be pure garbage.
+--------------------------------------------------------------------------- */
+let _feat = null;
+const _featKey = [];
+
+function arenaFeatures() {
+  const sig = [A.width, A.height, A.goalLip, A.goalHeight, A.goalDepth, A.cornerR];
+  if (_feat && sig.every((v, i) => v === _featKey[i])) return _feat;
+  sig.forEach((v, i) => _featKey[i] = v);
+
+  const pts = arenaPoints(), n = pts.length;
+  let shortest = Infinity;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    shortest = Math.min(shortest, Math.hypot(b.x - a.x, b.y - a.y));
+  }
+  const r = Math.min(A.cornerR, shortest * 0.45);   // same clamp as the renderer
+
+  const trim = new Array(n).fill(0);
+  const arcs = [];
+  if (r > 1e-6) {
+    for (let i = 0; i < n; i++) {
+      const prev = pts[(i - 1 + n) % n], cur = pts[i], next = pts[(i + 1) % n];
+      // the outline is wound clockwise in this y-up space, so cross > 0 is reflex
+      const inx = cur.x - prev.x, iny = cur.y - prev.y;
+      const outx = next.x - cur.x, outy = next.y - cur.y;
+      if (inx * outy - iny * outx <= 0) continue;
+
+      let ax = -inx, ay = -iny; const al = Math.hypot(ax, ay) || 1; ax /= al; ay /= al;
+      let bx = outx, by = outy; const bl = Math.hypot(bx, by) || 1; bx /= bl; by /= bl;
+      const dot = Math.max(-1, Math.min(1, ax * bx + ay * by));
+      const sinH = Math.sqrt(Math.max(1e-9, (1 - dot) / 2));
+      const cosH = Math.sqrt(Math.max(0, (1 + dot) / 2));
+
+      let mx = ax + bx, my = ay + by; const ml = Math.hypot(mx, my) || 1; mx /= ml; my /= ml;
+      arcs.push({ x: cur.x + mx * r / sinH, y: cur.y + my * r / sinH, r });
+      trim[i] = r * cosH / sinH;              // r / tan(half-angle)
+    }
+  }
+
+  const backL = -A.goalDepth, backR = A.width + A.goalDepth;
+  const atBack = x => Math.abs(x - backL) < 1e-9 || Math.abs(x - backR) < 1e-9;
+  const CHUTE = 0.8;      // how far past the back plane the guides run
+
+  const segs = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
+    const t0 = trim[i], t1 = trim[(i + 1) % n];
+    if (len - t0 - t1 <= 1e-6) continue;      // wholly swallowed by its arcs
+
+    // The back of each goal box has NO collider — the ball passes straight
+    // through it and is hidden by the clip in drawBall.
+    if (atBack(a.x) && atBack(b.x)) continue;
+
+    const seg = { ax: a.x + ux * t0, ay: a.y + uy * t0,
+                  bx: b.x - ux * t1, by: b.y - uy * t1 };
+
+    // The pocket's top and bottom stay solid, and run on past the back plane
+    // so the ball leaves down a clean chute instead of catching on an endpoint
+    // it can no longer see. Invisible: it is all beyond the clip.
+    if (Math.abs(seg.ay - seg.by) < 1e-9) {
+      if (atBack(a.x)) seg.ax += (a.x < 0 ? -CHUTE : CHUTE);
+      if (atBack(b.x)) seg.bx += (b.x < 0 ? -CHUTE : CHUTE);
+    }
+    segs.push(seg);
+  }
+  return (_feat = { segs, arcs });
+}
+
+function collideArena(b) {
+  const { segs, arcs } = arenaFeatures();
+  const R = PHYS.ballR;
+
+  for (const g of segs) {
+    const ex = g.bx - g.ax, ey = g.by - g.ay;
+    const len2 = ex * ex + ey * ey;
+    let t = len2 > 0 ? ((b.x - g.ax) * ex + (b.y - g.ay) * ey) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    let dx = b.x - (g.ax + ex * t), dy = b.y - (g.ay + ey * t);
+    let d = Math.hypot(dx, dy);
+    if (d >= R) continue;
+    if (d < 1e-9) { dx = 0; dy = 1; d = 1e-9; }
+    resolveContact(b, dx / d, dy / d, R - d, PHYS.restitution, PHYS.friction);
+  }
+
+  for (const c of arcs) {
+    let dx = b.x - c.x, dy = b.y - c.y;
+    let d = Math.hypot(dx, dy);
+    const sum = R + c.r;
+    if (d >= sum) continue;
+    if (d < 1e-9) { dx = 1; dy = 0; d = 1e-9; }
+    resolveContact(b, dx / d, dy / d, sum - d, PHYS.restitution, PHYS.friction);
+  }
+}
+
+// The net is a body, so it gets a capsule: a segment with a rounded cap.
+function collideNet(b) {
+  const rNet = A.netT / 2;
+  const cx = A.width / 2;
+  const cy = clamp(b.y, 0, Math.max(0, A.netHeight - rNet));
+  let dx = b.x - cx, dy = b.y - cy;
+  let d = Math.hypot(dx, dy);
+  const R = PHYS.ballR + rNet;
+  if (d >= R) return;
+  if (d < 1e-9) { dx = 1; dy = 0; d = 1e-9; }
+  resolveContact(b, dx / d, dy / d, R - d, PHYS.restitution, PHYS.friction);
+}
+
+/* Ball vs paddle. The paddle is drawn as a rounded rectangle with radius
+   thickness/2, which makes it exactly a capsule — so the test is the same
+   shape as the drawing, and the same shape as the net.
+
+   This is where the spring-driven paddle finally pays off: the contact point
+   carries v + omega x r, so swinging into the ball adds energy, dragging
+   across it adds spin, and pulling away from it takes pace off. None of that
+   is possible if the paddle is teleported to the cursor. */
+function collidePaddle(b, p) {
+  const R = PHYS.ballR;
+  const half = Math.max(0, (A.paddleLength - A.paddleT) / 2);   // spine length
+  const rad  = A.paddleT / 2;
+
+  const c = Math.cos(p.a), s = Math.sin(p.a);
+  const dx = b.x - p.x, dy = b.y - p.y;
+  const lx =  dx * c + dy * s;          // ball in the paddle's local frame
+  const ly = -dx * s + dy * c;
+
+  const qx = clamp(lx, -half, half);    // closest point on the spine
+  let nx = lx - qx, ny = ly;
+  let d = Math.hypot(nx, ny);
+  const sum = R + rad;
+  if (d >= sum) return;
+  if (d < 1e-9) { nx = 0; ny = 1; d = 1e-9; }
+  nx /= d; ny /= d;
+
+  const wnx = nx * c - ny * s;          // normal back into world space
+  const wny = nx * s + ny * c;
+
+  // material point of the paddle at the contact, relative to its centre
+  const rx = qx * c + rad * wnx;
+  const ry = qx * s + rad * wny;
+  const svx = p.vx - p.w * ry;
+  const svy = p.vy + p.w * rx;
+
+  resolveContact(b, wnx, wny, sum - d, PHYS.paddleRest, PHYS.paddleFriction, svx, svy);
+}
+
+function stepBall(w, dt, collide = true) {
+  const b = w.ball;
+  b.px = b.x; b.py = b.y; b.pa = b.a;
+
+  // A fast ball against a fast-swinging paddle can close more than the contact
+  // depth in one tick. Substep the ball only — the paddles hold the pose they
+  // were stepped to, which is close enough at this rate and much simpler than
+  // interpolating them.
+  const speed = Math.hypot(b.vx, b.vy);
+  const sub = Math.min(8, 1 + Math.floor(speed * dt / (PHYS.ballR * 0.5)));
+  const h = dt / sub;
+
+  // Inside a goal box the ball is pulled outward, so one that dribbles in
+  // still leaves through the back rather than sitting in the net.
+  const inGoal = (b.x < 0 || b.x > A.width) &&
+                 b.y >= goalY0() && b.y <= goalY1();
+  const pull = inGoal ? (b.x < 0 ? -PHYS.goalPull : PHYS.goalPull) : 0;
+
+  for (let i = 0; i < sub; i++) {
+    b.vx += pull * h;
+    b.vy -= PHYS.gravity * h;
+    b.x  += b.vx * h;
+    b.y  += b.vy * h;
+    b.a  += b.w * h;
+    if (collide) {
+      collidePaddle(b, w.p['-1']);
+      collidePaddle(b, w.p['1']);
+      collideNet(b);
+      collideArena(b);      // last, so the ball can never be left inside a wall
+    }
+  }
+}
+
+// ---- layers ---------------------------------------------------------------
+const LAYERS = [
+  { name: 'background', space: 'screen', cacheable: true,  draw: drawBackground },
+  { name: 'field',      space: 'world',  cacheable: true,  draw: drawField      },
+  { name: 'actors',     space: 'world',  cacheable: false, draw: drawActors     },
+  { name: 'effects',    space: 'world',  cacheable: false, draw: drawEffects     },
+  { name: 'hud',        space: 'screen', cacheable: false, draw: drawHud        },
+];
+
+function render() {
+  for (const layer of LAYERS) {
+    (layer.space === 'screen' ? screenCtx : worldCtx)();
+    layer.draw();
+  }
+}
+
+function drawBackground() {
+  const bg = ctx.createLinearGradient(0, 0, 0, view.ch);
+  bg.addColorStop(0, '#0a0e17'); bg.addColorStop(1, '#05070c');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, view.cw, view.ch);
+}
+
+/* Draw order does the alignment work: the glow and the hairline are laid down
+   first on the exact boundary, then the interior fills are painted over the
+   top. The fills trim the inward half of every stroke, so the visible edge is
+   exactly x = 0 — an outside-aligned stroke with no offset maths anywhere. */
+function drawField() {
+  ctx.lineJoin = 'round';
+  ctx.lineCap  = 'round';
+
+  // 1 + 2. each half of the boundary in its own team colour, glow then line
+  for (const side of [-1, 1]) {
+    traceHalf(side);
+    ctx.strokeStyle = goalColour(side);
+    for (const [px, alpha] of GLOW) {
+      ctx.lineWidth = px / view.scale;
+      ctx.globalAlpha = alpha * VIS.glow;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = contourW();
+    ctx.stroke();
+  }
+
+  // 3. interior, filled with the SAME path. It has to be the contour and not
+  //    a rectangle: a rounded corner cuts diagonally across the corner, so an
+  //    axis-aligned fill would paint straight over the arc and erase it.
+  traceArena();
+  ctx.fillStyle = COL.court;
+  ctx.fill();
+
+  // 4. pocket shading, clipped to the contour for the same reason
+  ctx.save();
+  traceArena();
+  ctx.clip();
+  fillPocket(-1);
+  fillPocket(+1);
+  ctx.restore();
+
+  drawGoalLine(-1);
+  drawGoalLine(+1);
+  drawReachLines();
+  drawNet();
+}
+
+function fillPocket(side) {
+  const d = A.goalDepth, y0 = goalY0();
+  const x0 = side < 0 ? -d : A.width;
+  ctx.fillStyle = COL.pocket;
+  ctx.fillRect(x0, y0, d, A.goalHeight);
+  ctx.fillStyle = goalFill(side);
+  ctx.fillRect(x0, y0, d, A.goalHeight);
+}
+
+// The plane the ball must cross to score. A marking, not part of the silhouette.
+function drawGoalLine(side) {
+  const x = side < 0 ? 0 : A.width;
+  ctx.strokeStyle = goalColour(side);
+  ctx.globalAlpha = 0.30;
+  ctx.lineWidth = lineW();
+  ctx.beginPath();
+  ctx.moveTo(x, goalY0());
+  ctx.lineTo(x, goalY1());
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+/* One dashed line per paddle, marking how far that paddle may reach. A
+   paddle's line sits in the OPPONENT's half and carries that paddle's colour —
+   so the blue line is the furthest blue may come, drawn on red's ground. */
+function drawReachLines() {
+  const mid = A.width / 2, cross = mid * A.crossFrac;
+  ctx.lineWidth = lineW();
+  ctx.setLineDash([0.14, 0.16]);
+  for (const side of [-1, 1]) {
+    ctx.strokeStyle = goalColour(side);
+    ctx.globalAlpha = 0.28;
+    ctx.beginPath();
+    ctx.moveTo(mid - side * cross, 0);
+    ctx.lineTo(mid - side * cross, A.height);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+}
+
+function drawNet() {
+  traceNet();
+  ctx.strokeStyle = COL.net;
+  for (const [px, alpha] of GLOW) {
+    ctx.lineWidth = px * 0.5 / view.scale;
+    ctx.globalAlpha = alpha * 0.8 * VIS.glow;
+    ctx.stroke();
+  }
+  // Hollow, like the arena: fill with the court colour purely to knock the
+  // inward half of the glow back out, then lay the outline on top.
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = COL.court;
+  ctx.fill();
+  ctx.lineWidth = lineW();
+  ctx.strokeStyle = COL.net;
+  ctx.stroke();
+}
+
+function pathRR(x, y, w, h, r) {
+  r = Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);     ctx.arcTo(x + w, y,     x + w,     y + r,     r);
+  ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h,     r);
+  ctx.lineTo(x + r, y + h);     ctx.arcTo(x,     y + h, x,         y + h - r, r);
+  ctx.lineTo(x, y + r);         ctx.arcTo(x,     y,     x + r,     y,         r);
+  ctx.closePath();
+}
+
+function drawPaddle(x, y, a, colour, ghost) {
+  const L = A.paddleLength, T = A.paddleT;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(a);
+  pathRR(-L / 2, -T / 2, L, T, T / 2);
+  if (ghost) {
+    ctx.strokeStyle = colour;
+    ctx.globalAlpha = 0.20;
+    ctx.lineWidth = lineW();
+    ctx.setLineDash([0.10, 0.09]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  } else {
+    ctx.strokeStyle = colour;
+    for (const [px, alpha] of GLOW) {
+      ctx.lineWidth = px * 0.5 / view.scale;
+      ctx.globalAlpha = alpha * VIS.glow;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = colour;
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawBall() {
+  if (world.ballHidden) return;
+  // Clipped to the arena silhouette, so crossing the open back of a goal box
+  // cuts the ball off against the line — it slides behind it and is gone.
+  ctx.save();
+  traceArena();
+  ctx.clip();
+  const x = lerp(ball.px, ball.x, renderAlpha);
+  const y = lerp(ball.py, ball.y, renderAlpha);
+  const a = lerp(ball.pa, ball.a, renderAlpha);
+  const R = PHYS.ballR;
+
+  ctx.beginPath();
+  ctx.arc(x, y, R, 0, Math.PI * 2);
+  ctx.strokeStyle = COL.ball;
+  for (const [px, alpha] of GLOW) {
+    ctx.lineWidth = px * 0.4 / view.scale;
+    ctx.globalAlpha = alpha * VIS.glow;
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = COL.ball;
+  ctx.fill();
+
+  /* Seams, tennis-ball style: two arcs of a larger circle offset either side,
+     clipped to the ball. They read as curved surface lines rather than a flat
+     marker, and because they are asymmetric the spin direction is legible. */
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(a);
+  ctx.beginPath();
+  ctx.arc(0, 0, R, 0, Math.PI * 2);
+  ctx.clip();
+
+  ctx.strokeStyle = COL.ballSeam;
+  ctx.lineWidth = Math.max(lineW(), R * 0.13);
+  ctx.lineCap = 'round';
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.arc(side * R * 1.5, 0, R * 1.25, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // a short equator dash so pure spin is still readable head-on
+  ctx.globalAlpha = 0.5;
+  ctx.beginPath();
+  ctx.arc(0, 0, R * 0.42, -0.6, 0.6);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  ctx.restore();   // arena clip
+}
+
+function drawActors() {
+  const mine = me();
+  if (opts.showTarget) drawPaddle(mine.tx, mine.ty, mine.ta, goalColour(mine.side), true);
+  for (const key of ['-1', '1']) {
+    const p = paddles[key];
+    drawPaddle(lerp(p.px, p.x, renderAlpha),
+               lerp(p.py, p.y, renderAlpha),
+               lerp(p.pa, p.a, renderAlpha), goalColour(p.side), false);
+  }
+  drawBall();
+}
+
+function arrow(ox, oy, vx, vy, colour) {
+  const len = Math.hypot(vx, vy);
+  if (len < 1e-3) return;
+  const ux = vx / len, uy = vy / len;
+  const head = Math.min(0.16, len * 0.34);
+  ctx.strokeStyle = colour;
+  ctx.fillStyle = colour;
+  ctx.lineWidth = lineW();
+  ctx.beginPath();
+  ctx.moveTo(ox, oy);
+  ctx.lineTo(ox + vx - ux * head, oy + vy - uy * head);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(ox + vx, oy + vy);
+  ctx.lineTo(ox + vx - ux * head - uy * head * 0.45, oy + vy - uy * head + ux * head * 0.45);
+  ctx.lineTo(ox + vx - ux * head + uy * head * 0.45, oy + vy - uy * head - ux * head * 0.45);
+  ctx.closePath();
+  ctx.fill();
+}
+
+const VEL_SCALE = 0.11;   // metres of arrow per m/s
+
+function drawEffects() {
+  if (!opts.showVectors) return;
+  const p0 = me();
+  arrow(p0.x, p0.y, p0.vx * VEL_SCALE, p0.vy * VEL_SCALE, 'rgba(125,211,252,.9)');
+  for (const end of [-1, 1]) {
+    const t = tipVelocity(p0, end);
+    arrow(t.x, t.y, t.vx * VEL_SCALE, t.vy * VEL_SCALE, 'rgba(232,121,249,.85)');
+  }
+}
+// Canvas-space overlays land here; the corner readout is DOM for now.
+function drawHud() {
+  readout();
+
+  // Positioned from the world transform so it always sits over the court,
+  // but drawn in screen space — the world pass has a flipped y axis and would
+  // render text upside down.
+  const sx = view.ox + (A.width / 2) * view.scale;
+  const sy = view.oy - (A.height - 0.62) * view.scale;
+  const size = Math.max(13, Math.round(view.scale * 0.46));
+  const gap  = size * 0.62;
+
+  ctx.font = `600 ${size}px ui-monospace, Consolas, monospace`;
+  ctx.textBaseline = 'middle';
+  const flash = world.phase !== PHASE.PLAY;
+  ctx.globalAlpha = flash ? 1 : 0.75;
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = world.lastScorer === -1 && flash ? '#ffffff' : goalColour(-1);
+  ctx.fillText(String(scores['-1']), sx - gap, sy);
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = world.lastScorer === 1 && flash ? '#ffffff' : goalColour(1);
+  ctx.fillText(String(scores['1']), sx + gap, sy);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(140,160,185,.35)';
+  ctx.fillText('–', sx, sy);
+  ctx.globalAlpha = 1;
+
+  drawAnnouncement();
+}
+
+function drawAnnouncement() {
+  if (world.phase !== PHASE.ANNOUNCE && world.phase !== PHASE.COUNT) return;
+
+  const cx = view.ox + (A.width / 2) * view.scale;
+  const cy = view.oy - (A.height * 0.52) * view.scale;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  if (world.phase === PHASE.ANNOUNCE) {
+    const size = Math.max(16, Math.round(view.scale * 0.55));
+    ctx.font = `700 ${size}px ui-monospace, Consolas, monospace`;
+    ctx.fillStyle = goalColour(world.lastScorer);
+    // brief fade-in so it does not just snap on
+    ctx.globalAlpha = Math.min(1, (ANNOUNCE_T - world.phaseT) / 0.18);
+    ctx.fillText(`${teamName(world.lastScorer)} TEAM SCORED`, cx, cy);
+  } else {
+    const n = Math.max(1, Math.ceil(world.phaseT));
+    const frac = world.phaseT - Math.floor(world.phaseT);      // 1 -> 0 within each second
+    const size = Math.max(22, Math.round(view.scale * 1.25));
+    ctx.font = `700 ${size}px ui-monospace, Consolas, monospace`;
+    ctx.fillStyle = '#c9d4e2';
+    ctx.globalAlpha = 0.25 + 0.6 * frac;           // each digit fades as it ages
+    ctx.fillText(String(n), cx, cy);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Steady-state speed at full clamped error: w^2 * e = 2*z*w*v.
+function maxPaddleSpeed() {
+  const w = 2 * Math.PI * FEEL.posFreq;
+  return w * Math.min(FEEL.maxError, FEEL.reach) / (2 * FEEL.posDamp);
+}
+
+function readout() {
+  const p = me();
+  const tip = tipVelocity(p, 1);
+  const f = (n, d = 2) => n.toFixed(d).padStart(6);
+  document.getElementById('tag').innerHTML =
+    `${fps.toFixed(0).padStart(3)} fps   ${String(stepsLastFrame).padStart(2)} steps/frame` +
+    (frozen ? '   <b style="color:#fdba74">FROZEN</b>' : '') + '<br>' +
+    `pos   ${f(p.x)}, ${f(p.y)} m<br>` +
+    `angle ${f(p.a / DEG, 1)}&deg;  (target ${(p.ta / DEG).toFixed(1)})<br>` +
+    `vel   ${f(Math.hypot(p.vx, p.vy))} m/s   max ${f(maxPaddleSpeed())}<br>` +
+    `omega ${f(p.w / DEG, 1)} &deg;/s<br>` +
+    `tip   ${f(Math.hypot(tip.vx, tip.vy))} m/s<br>` +
+    `ball  ${f(Math.hypot(ball.vx, ball.vy))} m/s   spin ${f(ball.w / DEG, 0)} °/s<br>` +
+    `tick  srv ${server.active ? server.world.tick : '-'}   shown ${world.tick}`;
+}
+
+// ---- input ----------------------------------------------------------------
+canvas.addEventListener('mousemove', e => {
+  const r = canvas.getBoundingClientRect();
+  mouse = toWorld(e.clientX - r.left, e.clientY - r.top);
+  mouseInside = true;
+});
+canvas.addEventListener('mouseleave', () => { mouseInside = false; });
+let fineRotate = false;   // right mouse button held
+
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('mousedown', e => { if (e.button === 2) fineRotate = true; });
+addEventListener('mouseup',        e => { if (e.button === 2) fineRotate = false; });
+addEventListener('blur',           () => { fineRotate = false; });
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  // Snap to the active grid first, then advance exactly one notch, so the
+  // target is always a clean multiple however it was last nudged.
+  const step = fineRotate ? STEP_FINE : STEP_COARSE;
+  const dir  = -Math.sign(e.deltaY);
+  intent.ta = (Math.round(intent.ta / step) + dir) * step;
+}, { passive: false });
+
+addEventListener('keydown', e => {
+  if (!running) return;          // menu keys are the menu's business
+  const k = e.key.toLowerCase();
+  if (k === ' ' || k === '.') e.preventDefault();
+  if (e.repeat) return;
+  keys.add(k);
+  if (k === ' ') frozen = !frozen;
+  if (k === '.') { stepOnce = true; frozen = true; }
+  if (k === 's') intent.ta = 0;
+  if (k === 'escape') { leaveGame(); return; }
+  if (k === 'f') { if (server.active) resetRound(server.world, false); }
+  if (k === 'r') { if (server.active) resetRound(server.world, true); }
+  if (k === 'v') opts.showVectors = !opts.showVectors;
+  if (k === 'g') opts.showTarget = !opts.showTarget;
+  if (k === 'h') { document.getElementById('panel').classList.toggle('hidden'); resize(); }
+});
+addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+addEventListener('resize', resize);
+
+/* ---- tuning panel ---------------------------------------------------------
+   Each knob names the object it mutates, so adding a parameter is one row.
+   `refit` marks the ones that change arena geometry and need the camera to
+   refit; everything else takes effect on the next frame by itself. */
+const KNOBS = [
+  ['PADDLE'],
+  { o: FEEL, k: 'posFreq',    label: 'pos freq',   min: 1,   max: 25,  step: 0.1,  u: 'Hz' },
+  { o: FEEL, k: 'posDamp',    label: 'pos damp',   min: 0.2, max: 8,   step: 0.02, u: 'z'  },
+  { o: FEEL, k: 'angFreq',    label: 'ang freq',   min: 1,   max: 30,  step: 0.1,  u: 'Hz' },
+  { o: FEEL, k: 'angDamp',    label: 'ang damp',   min: 0.2, max: 8,   step: 0.02, u: 'z'  },
+  { o: FEEL, k: 'keyRate',    label: 'key rate',   min: 30,  max: 720, step: 10,   u: '°/s' },
+  { o: FEEL, k: 'maxError',   label: 'max error',  min: 0.05,max: 3,   step: 0.05, u: 'm'   },
+  { o: FEEL, k: 'reach',      label: 'reach',      min: 0,   max: 3,   step: 0.05, u: 'm'   },
+  { o: A,    k: 'paddleLength', label: 'length',   min: 0.4, max: 3,   step: 0.05, u: 'm' },
+  { o: A,    k: 'paddleT',      label: 'thickness',min: 0.04,max: 0.5, step: 0.01, u: 'm' },
+
+  ['ARENA'],
+  { o: A, k: 'width',      label: 'width',    min: 6,   max: 22, step: 1,    u: 'm', refit: 1 },
+  { o: A, k: 'height',     label: 'height',   min: 4,   max: 14, step: 1,    u: 'm', refit: 1 },
+  { o: A, k: 'netHeight',  label: 'net height',min: 0.3,max: 4,  step: 0.05, u: 'm' },
+  { o: A, k: 'netT',       label: 'net thick',min: 0.04,max: 0.5,step: 0.01, u: 'm' },
+  { o: A, k: 'goalLip',    label: 'goal lip', min: 0,   max: 3,  step: 0.05, u: 'm' },
+  { o: A, k: 'goalHeight', label: 'goal height',min:0.4,max: 4,  step: 0.05, u: 'm' },
+  { o: A, k: 'goalDepth',  label: 'goal depth',min: 0.2,max: 2,  step: 0.05, u: 'm', refit: 1 },
+  { o: A, k: 'cornerR',    label: 'corner r', min: 0,   max: 0.4,step: 0.01, u: 'm' },
+  { o: A, k: 'crossFrac',  label: 'reach across',min: 0, max: 0.9,step: 0.05, u: '' },
+  { o: A, k: 'margin',     label: 'margin',   min: 0,   max: 3,  step: 0.1,  u: 'm', refit: 1 },
+
+  ['PHYSICS'],
+  { o: PHYS, k: 'gravity',     label: 'gravity',     min: 0,    max: 30,  step: 0.1,  u: 'm/s²' },
+  { o: PHYS, k: 'ballR',       label: 'ball radius', min: 0.03, max: 0.4, step: 0.01, u: 'm' },
+  { o: PHYS, k: 'restitution', label: 'restitution', min: 0,    max: 1,   step: 0.01, u: '' },
+  { o: PHYS, k: 'friction',    label: 'friction',    min: 0,    max: 1.5, step: 0.01, u: '' },
+  { o: PHYS, k: 'paddleRest',  label: 'paddle rest', min: 0,    max: 1.4, step: 0.01, u: '' },
+  { o: PHYS, k: 'paddleFriction', label: 'paddle grip', min: 0, max: 1.5, step: 0.01, u: '' },
+  { o: PHYS, k: 'goalPull',    label: 'goal pull',   min: 0,    max: 80,  step: 1,    u: 'm/s²' },
+
+  ['LINK'],
+  { o: NET, k: 'hostDelay', label: 'host delay', min: 0, max: 200, step: 5, u: 'ms' },
+  { o: NET, k: 'floor',     label: 'delay floor',min: 0, max: 100, step: 5, u: 'ms' },
+
+  ['RENDER'],
+  { o: VIS, k: 'linePx', label: 'line width', min: 1, max: 8, step: 1,    u: 'px' },
+  { o: VIS, k: 'glow',   label: 'glow',       min: 0, max: 3, step: 0.05, u: '×' },
+];
+
+const DEFAULTS = KNOBS.filter(k => !Array.isArray(k)).map(k => [k, k.o[k.k]]);
+
+function buildPanel() {
+  const el = document.getElementById('panel');
+  el.innerHTML = '';
+  let firstGroup = true;
+
+  for (const k of KNOBS) {
+    if (Array.isArray(k)) {
+      const g = document.createElement('div');
+      g.className = 'grp' + (firstGroup ? ' first' : '');
+      g.textContent = k[0];
+      el.appendChild(g);
+      firstGroup = false;
+      continue;
+    }
+    const wrap = document.createElement('label');
+    wrap.className = 'knob';
+    wrap.innerHTML =
+      `<div class="row"><span>${k.label}</span><span class="v"></span></div>` +
+      `<input type="range" min="${k.min}" max="${k.max}" step="${k.step}">`;
+    const input = wrap.querySelector('input');
+    const val   = wrap.querySelector('.v');
+    const show  = () => { val.textContent = `${+k.o[k.k].toFixed(3)}${k.u}`; };
+    input.value = k.o[k.k];
+    show();
+    input.addEventListener('input', () => {
+      k.o[k.k] = parseFloat(input.value);
+      show();
+      if (k.refit) resize();
+      sendConfig();          // keep the guest's tuning identical to the host's
+    });
+    k._sync = () => { input.value = k.o[k.k]; show(); };
+    el.appendChild(wrap);
+  }
+
+  const reset = document.createElement('button');
+  reset.textContent = 'reset';
+  reset.addEventListener('click', () => {
+    for (const [k, v] of DEFAULTS) { k.o[k.k] = v; k._sync(); }
+    resize();
+  });
+  el.appendChild(reset);
+}
+
+document.getElementById('help').innerHTML =
+  '<b>mouse</b> move &nbsp; <b>wheel</b> / <b>A</b><b>D</b> rotate &nbsp; ' +
+  '<b>hold right-click</b> fine rotate &nbsp; <b>S</b> level<br>' +
+  '<b>space</b> freeze &nbsp; <b>.</b> step &nbsp; <b>V</b> vectors &nbsp; <b>G</b> ghost' +
+  ' &nbsp; <b>H</b> knobs &nbsp; <b>F</b> serve &nbsp; <b>R</b> reset score' +
+  ' &nbsp; <b>esc</b> menu';
+
+/* ---- loop -----------------------------------------------------------------
+   Physics runs at a fixed rate, decoupled from the display, and the renderer
+   interpolates between the last two poses. Variable-dt physics would make
+   spring behaviour depend on frame rate and bounces non-deterministic later. */
+const FIXED_DT = 1 / 240;
+const MAX_STEPS = 12;          // don't spiral after a tab stall
+
+let accumulator = 0;
+let last = performance.now() / 1000;
+let stepsLastFrame = 0;
+let statusAcc = 0;
+let frozen = false, stepOnce = false;
+let fps = 60, fpsAcc = 0, fpsN = 0;
+
+/* One tick. Reads nothing but the world and the inputs handed to it, so
+   running it twice on the same arguments gives the same answer — which is
+   what replay, and therefore rollback, requires. */
+function stepWorld(w, inp, dt) {
+  w.tick++;
+  stepPaddle(w.p['-1'], inp['-1'], dt);
+  stepPaddle(w.p['1'],  inp['1'],  dt);
+
+  if (w.phase === PHASE.PLAY) {
+    stepBall(w, dt, true);
+    checkGoal(w);
+
+  } else if (w.phase === PHASE.EXIT) {
+    stepBall(w, dt, true);            // still solid; the back is simply open
+    w.phaseT -= dt;
+    const out = A.goalDepth + PHYS.ballR * 2;
+    const b = w.ball;
+    if (b.x < -out || b.x > A.width + out || b.y < -out || w.phaseT <= 0) {
+      w.ballHidden = true;
+      w.phase = PHASE.ANNOUNCE;
+      w.phaseT = ANNOUNCE_T;
+    }
+
+  } else if (w.phase === PHASE.ANNOUNCE) {
+    w.phaseT -= dt;
+    if (w.phaseT <= 0) { w.phase = PHASE.COUNT; w.phaseT = COUNT_T; }
+
+  } else if (w.phase === PHASE.COUNT) {
+    w.phaseT -= dt;
+    if (w.phaseT <= 0) resetRound(w, false);
+  }
+}
+
+/* The loop does not exist until a mode is chosen, so the menu is never
+   sitting on top of a game that is already running. */
+let running = false;
+
+function startGame() {
+  if (running) return;
+  running = true;
+  document.body.classList.add('playing');
+  hideMenu();
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  resize();
+
+  /* Wire up server and client. A guest has only a client; anyone else also
+     runs the server, and reaches it over a delayed loopback so their path to
+     it looks like the guest's path — same code, same latency, no home
+     advantage. */
+  const fresh = makeWorld();
+  copyWorld(world, fresh);
+
+  const mine = me();
+  intent.tx = mine.x; intent.ty = mine.y; intent.ta = mine.a;
+  for (const k of ['-1', '1']) {
+    liveInput[k].tx = paddles[k].x;
+    liveInput[k].ty = paddles[k].y;
+    liveInput[k].ta = paddles[k].a;
+  }
+
+  if (net.role === 'guest') {
+    serverStop();
+    clientAttach(net.link);
+  } else {
+    serverStart(net.role === 'solo');
+    const pair = makeLoopbackPair();
+    serverAttach(pair[0], mySide);
+    clientAttach(pair[1]);
+    if (net.role === 'host' && net.link) serverAttach(net.link, -mySide);
+  }
+
+  last = performance.now() / 1000;   // no giant first dt
+  accumulator = 0;
+  requestAnimationFrame(frame);
+}
+
+function stopGame() {
+  running = false;
+  serverStop();
+  client.link = null;
+  document.body.classList.remove('playing');
+  showMenu();
+}
+
+// Tear everything down and go back to the menu. Destroying the peer also
+// releases the room code so it can be handed out again.
+function leaveGame() {
+  if (net.conn) { try { net.conn.close(); } catch (e) {} }
+  if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
+  net.conn = null;
+  net.peer = null;
+  net.up = false;
+  net.role = 'solo';
+  mySide = 1;
+  updateStatus();
+  stopGame();
+  setMsg('');
+}
+
+function frame(nowMs) {
+  if (!running) return;
+  const now = nowMs / 1000;
+  const dt = Math.min(now - last, 0.25);
+  last = now;
+
+  pumpProbe();
+
+  // The status chip carries live measurements now, so it has to be rewritten
+  // rather than being painted once on connect.
+  statusAcc += dt;
+  if (statusAcc > 0.25) { statusAcc = 0; updateStatus(); }
+
+  fpsAcc += dt; fpsN++;
+  if (fpsAcc > 0.25) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
+
+  let steps = 0;
+  if (!frozen) {
+    accumulator += dt;
+    while (accumulator >= FIXED_DT && steps < MAX_STEPS) {
+      pumpLinks();
+      serverStepOnce(FIXED_DT);
+      clientStepOnce(FIXED_DT);
+      accumulator -= FIXED_DT; steps++;
+    }
+    if (steps >= MAX_STEPS) accumulator = 0;
+  } else if (stepOnce) {
+    pumpLinks();
+    serverStepOnce(FIXED_DT);
+    clientStepOnce(FIXED_DT);
+    steps = 1; stepOnce = false; accumulator = 0;
+  }
+  stepsLastFrame = steps;
+
+  if (net.up) {
+    netAcc += dt;
+    if (netAcc >= 1 / NET_HZ) {
+      netAcc = 0;
+      if (net.role === 'host') {
+        sendSnapshot();
+        // The channel is unreliable by design (no head-of-line blocking on a
+        // dropped snapshot), so config is re-sent periodically rather than
+        // trusted to arrive once.
+        if (++cfgTick % 60 === 0) sendConfig();
+      } else {
+        sendInput();
+      }
+    }
+  }
+
+  renderAlpha = frozen ? 1 : accumulator / FIXED_DT;
+  render();
+  requestAnimationFrame(frame);
+}
+
+/* ==========================================================================
+   NETWORKING — host-authoritative, with both sides simulating.
+
+   The naive approach is to ship poses and apply them. That looks terrible:
+   at 30 packets a second the remote paddle sits still for 33 ms and then
+   teleports, while the screen refreshes four times as often.
+
+   So instead BOTH machines run the identical simulation every tick, and the
+   wire only carries what a simulation cannot guess — the other player's
+   TARGET. The paddle is then genuinely animating on both screens rather than
+   being repositioned. Snapshots still arrive, but they are used to correct
+   drift rather than to drive motion, and the correction is applied as a
+   fraction per packet so it is invisible unless something has gone badly
+   wrong, in which case it snaps.
+
+   The host stays authoritative: its ball is the real one, and its score and
+   world.phase are simply obeyed.
+
+   PeerJS's public broker only introduces the two browsers. Once connected the
+   traffic is direct and the broker is out of the loop.
+   ========================================================================== */
+// Bump on every deploy. Shown top-left on the menu and in game so both
+// players can confirm they are on the same build before blaming the netcode.
+const BUILD = 'v6-dev · step 3: server';
+
+/* ==========================================================================
+   SERVER
+   Owns the authoritative world. Free-running: it ticks on its own clock and
+   never waits for a packet, because waiting is lockstep and lockstep is
+   hostage to the slowest connection. When a player's input has not arrived,
+   the last one is assumed to still be held.
+
+   It reaches its clients only through transport ends, so it cannot tell which
+   one is the loopback on this very machine and which is a WebRTC channel on
+   the other side of the country. That is the whole point: the host gets no
+   privileged path to its own server.
+   ========================================================================== */
+const PHASES = ['play', 'exit', 'announce', 'count'];
+
+const server = {
+  active: false,
+  world: makeWorld(),
+  inputs: { '-1': { tx: 0, ty: 0, ta: 0, tick: -1 },
+            '1':  { tx: 0, ty: 0, ta: 0, tick: -1 } },
+  links: [],
+  sendTick: 0,
+};
+
+// 31 numbers. Named packing rather than JSON of the world so the wire format
+// is explicit and cheap to widen later.
+function packWorld(w) {
+  const a = [w.tick, PHASES.indexOf(w.phase), w.phaseT, w.lastScorer,
+             w.ballHidden ? 1 : 0, w.scores['-1'], w.scores['1'],
+             w.ball.x, w.ball.y, w.ball.a, w.ball.vx, w.ball.vy, w.ball.w];
+  for (const k of ['-1', '1']) {
+    const p = w.p[k];
+    a.push(p.x, p.y, p.a, p.vx, p.vy, p.w, p.tx, p.ty, p.ta);
+  }
+  return a;
+}
+
+function unpackWorld(w, a) {
+  let i = 0;
+  w.tick = a[i++];
+  w.phase = PHASES[a[i++]];
+  w.phaseT = a[i++];
+  w.lastScorer = a[i++];
+  w.ballHidden = !!a[i++];
+  w.scores['-1'] = a[i++];
+  w.scores['1'] = a[i++];
+  const b = w.ball;
+  b.x = a[i++]; b.y = a[i++]; b.a = a[i++];
+  b.vx = a[i++]; b.vy = a[i++]; b.w = a[i++];
+  b.px = b.x; b.py = b.y; b.pa = b.a;      // no render lerp across a snapshot
+  for (const k of ['-1', '1']) {
+    const p = w.p[k];
+    p.x = a[i++]; p.y = a[i++]; p.a = a[i++];
+    p.vx = a[i++]; p.vy = a[i++]; p.w = a[i++];
+    p.tx = a[i++]; p.ty = a[i++]; p.ta = a[i++];
+    p.px = p.x; p.py = p.y; p.pa = p.a;
+  }
+}
+
+function serverStart(soloish) {
+  const w = server.world;
+  copyWorld(w, makeWorld());
+  w.phase = PHASE.COUNT;
+  w.phaseT = soloish ? 3 : 5;
+  w.ballHidden = true;
+
+  for (const k of ['-1', '1']) {
+    const p = w.p[k];
+    server.inputs[k].tx = p.x;
+    server.inputs[k].ty = p.y;
+    server.inputs[k].ta = p.a;
+    server.inputs[k].tick = -1;
+  }
+  server.links.length = 0;
+  server.sendTick = 0;
+  server.active = true;
+}
+
+function serverStop() {
+  server.active = false;
+  server.links.length = 0;
+}
+
+// A client connected. `side` says which paddle it drives.
+function serverAttach(end, side) {
+  end.side = side;
+  // The channel also carries config and housekeeping, so anything that is not
+  // game input has to fall through to the general handler.
+  end.onMessage(m => (m && m.t === 'in') ? serverReceive(end, m) : onData(m));
+  server.links.push(end);
+}
+
+function serverReceive(end, m) {
+  if (!m || m.t !== 'in') return;
+  const inp = server.inputs[end.side];
+  if (m.k <= inp.tick) return;             // reordered; a newer one already landed
+  inp.tick = m.k;
+  inp.tx = m.x; inp.ty = m.y; inp.ta = m.a;
+
+  // Only the remote client's trip is worth measuring; the loopback's delay is
+  // whatever we told it to be.
+  if (m.e && end.kind === 'channel') {
+    net.rtt = performance.now() - m.e;
+    net.rttSmooth += (net.rtt - net.rttSmooth) * 0.05;
+  }
+}
+
+// One authoritative tick. Called on the fixed clock, unconditionally.
+function serverStepOnce(dt) {
+  if (!server.active) return;
+  stepWorld(server.world, server.inputs, dt);
+
+  // snapshots at NET_HZ, derived from the tick counter so the rate is exact
+  const every = Math.max(1, Math.round((1 / FIXED_DT) / NET_HZ));
+  if (++server.sendTick % every === 0) {
+    const snap = { t: 'snap', d: packWorld(server.world), ts: performance.now() };
+    for (const l of server.links) l.send(snap);
+  }
+}
+
+/* ==========================================================================
+   CLIENT
+   For now it does the naive thing: send input, display whatever the server
+   last said. That is deliberately laggy — your paddle does not move until a
+   snapshot comes back. Step 4 puts prediction on top of exactly this.
+   ========================================================================== */
+const client = { link: null, sendTick: 0, inputTick: 0, lastSnap: -1, snapTs: 0 };
+
+function clientAttach(end) {
+  client.link = end;
+  client.sendTick = 0;
+  client.lastSnap = -1;
+  end.onMessage(m => (m && m.t === 'snap') ? clientReceive(m) : onData(m));
+}
+
+function clientReceive(m) {
+  if (!m || m.t !== 'snap') return;
+  if (m.d[0] <= client.lastSnap) return;   // stale snapshot
+  client.lastSnap = m.d[0];
+  unpackWorld(world, m.d);
+  if (m.ts) client.snapTs = m.ts;
+}
+
+function clientStepOnce(dt) {
+  captureInto(liveInput[mySide], dt);
+  if (!client.link) return;
+  const every = Math.max(1, Math.round((1 / FIXED_DT) / NET_HZ));
+  if (++client.sendTick % every === 0) {
+    const i = liveInput[mySide];
+    client.link.send({ t: 'in', k: ++client.inputTick,
+                       x: i.tx, y: i.ty, a: i.ta, e: client.snapTs });
+  }
+}
+
+// Every wire this machine holds, pumped on the physics clock rather than the
+// render clock — a frame of quantisation is latency we would be adding for
+// nothing on a design whose whole purpose is controlling latency.
+function pumpLinks() {
+  if (client.link) client.link.pump();
+  for (const l of server.links) l.pump();
+}
+
+/* ==========================================================================
+   TRANSPORT
+   A link has two ends. Each end has send / onMessage / pump / close, and
+   nothing above this layer is allowed to know which kind it holds.
+
+   Two implementations:
+     channel   the real WebRTC data channel to the other machine
+     loopback  an in-process queue that holds messages for a set delay
+
+   The loopback is what lets the host's own client talk to the host's server
+   over a simulated wire. Give it half the guest's round trip and the host
+   plays under the same latency the guest does — which is the only way to make
+   a listen server fair, since we can lift the host's delay but can never
+   lower the guest's.
+   ========================================================================== */
+// Messages are cloned on send. The real channel serialises, so the receiver
+// can never share an object with the sender; the loopback must behave the same
+// or we would get aliasing bugs that only appear on the host.
+const cloneMsg = m => JSON.parse(JSON.stringify(m));
+
+function makeEnd() {
+  return {
+    kind: 'loopback',
+    other: null,
+    inbox: [],
+    handler: null,
+    onMessage(fn) { this.handler = fn; },
+    send(m) {
+      if (!this.other) return;
+      this.other.inbox.push({ due: performance.now() + linkDelayMs(), m: cloneMsg(m) });
+    },
+    pump() {
+      const now = performance.now();
+      while (this.inbox.length && this.inbox[0].due <= now) {
+        const item = this.inbox.shift();
+        if (this.handler) this.handler(item.m);
+      }
+    },
+    close() { this.inbox.length = 0; this.handler = null; this.other = null; },
+  };
+}
+
+function makeLoopbackPair() {
+  const a = makeEnd(), b = makeEnd();
+  a.other = b; b.other = a;
+  return [a, b];
+}
+
+// One-way delay applied to the host's own link. Half the round trip, because
+// the guest's packets traverse the wire once in each direction.
+function linkDelayMs() {
+  if (!NET.autoDelay) return Math.max(0, NET.hostDelay);
+  const half = net.up ? net.rttSmooth / 2 : 0;
+  return Math.max(NET.floor, half);
+}
+
+function makeChannelEnd(conn) {
+  const end = {
+    kind: 'channel',
+    handler: null,
+    onMessage(fn) { end.handler = fn; },
+    send(m) { try { conn.send(m); } catch (e) {} },
+    pump() {},                      // the channel delivers on its own
+    close() { try { conn.close(); } catch (e) {} end.handler = null; },
+  };
+  conn.on('data', d => { if (end.handler) end.handler(d); });
+  return end;
+}
+
+/* ---- loopback self-test ---------------------------------------------------
+   Bounces a ping through the local pair once a second and measures how long it
+   actually took. It should read twice linkDelayMs(), and it is the only way to
+   confirm the simulated wire behaves before anything depends on it. */
+const probe = { a: null, b: null, sent: 0, rtt: 0, seq: 0 };
+
+function initProbe() {
+  const [a, b] = makeLoopbackPair();
+  probe.a = a; probe.b = b;
+  b.onMessage(m => b.send({ pong: m.seq }));       // far end echoes
+  a.onMessage(m => { if (m.pong === probe.seq) probe.rtt = performance.now() - probe.sent; });
+}
+
+function pumpProbe() {
+  if (!probe.a) return;
+  probe.a.pump();
+  probe.b.pump();
+  const now = performance.now();
+  if (now - probe.sent > 1000) {
+    probe.sent = now;
+    probe.seq++;
+    probe.a.send({ seq: probe.seq });
+  }
+}
+
+const NET_HZ = 60;                 // packets/sec each way; they are tiny
+const PEER_PREFIX = 'rallyxz-';
+const CODE_CHARS = 'ACDEFGHJKLMNPQRTUVWXY34679';   // no look-alike characters
+
+const net = { role: 'solo', peer: null, conn: null, link: null,
+              up: false, code: '', rtt: 0, rttSmooth: 40, synced: false };
+let netAcc = 0;
+let cfgTick = 0;
+let lastStamp = 0;                 // most recent host timestamp seen by the guest
+
+/* The data channel is unordered as well as unreliable — that is the right
+   trade for realtime traffic, but it means a packet can arrive after a newer
+   one. Applying a stale target yanks the paddle backwards for a frame, so
+   anything older than what we have already seen is dropped. */
+let outSeq = 0;
+let inSeq = -1;
+
+const $ = id => document.getElementById(id);
+const randomCode = () => Array.from({ length: 4 },
+  () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+
+function setMsg(html) { $('netMsg').innerHTML = html; }
+function hideMenu() { $('menu').classList.add('hidden'); }
+function showMenu() { $('menu').classList.remove('hidden'); }
+
+function updateStatus() {
+  const el = $('status');
+  if (net.role === 'solo') {
+    el.innerHTML = 'PRACTICE<br>link ' + Math.round(linkDelayMs()) +
+                   'ms &nbsp; loop ' + probe.rtt.toFixed(1) + 'ms';
+    return;
+  }
+  el.innerHTML = net.role.toUpperCase() + ' &nbsp; <b>' + net.code + '</b><br>' +
+                 'link ' + Math.round(linkDelayMs()) + 'ms &nbsp; loop ' + probe.rtt.toFixed(1) + 'ms<br>' +
+    'you are ' + teamName(mySide) +
+                 (net.up ? ' &nbsp; ' + Math.round(net.rtt) + 'ms' : ' &nbsp;(waiting)');
+}
+
+function peerAvailable() {
+  if (typeof Peer !== 'undefined') return true;
+  setMsg('Could not load the networking library.<br>Check your connection and reload.');
+  return false;
+}
+
+function wireConn(conn) {
+  net.conn = conn;
+  conn.on('open', function () {
+    net.link = makeChannelEnd(conn);
+    net.link.onMessage(onData);   // replaced by serverAttach/clientAttach on start
+    net.up = true;
+    updateStatus();
+    startGame();
+    if (net.role === 'host') sendConfig();
+  });
+  conn.on('close', function () { dropped('Opponent disconnected.'); });
+  conn.on('error', function () { dropped('Connection error.'); });
+}
+
+function dropped(why) {
+  net.up = false;
+  if (net.link) { net.link.close(); net.link = null; }
+  net.conn = null;
+  net.role = 'solo';
+  net.synced = false;
+  outSeq = 0; inSeq = -1;
+  mySide = 1;
+  updateStatus();
+  stopGame();
+  setMsg(why + '<br>Start a new game when you are ready.');
+}
+
+function hostGame() {
+  if (!peerAvailable()) return;
+  net.role = 'host';
+  mySide = 1;
+  net.code = randomCode();
+  setMsg('Opening room&hellip;');
+  net.peer = new Peer(PEER_PREFIX + net.code);
+  net.peer.on('open', function () {
+    setMsg('Give your opponent this code:<span class="code">' + net.code + '</span>');
+    updateStatus();
+  });
+  net.peer.on('connection', wireConn);
+  net.peer.on('error', function (e) {
+    // an ID collision just means someone else is holding that code right now
+    setMsg('Could not open a room (' + e.type + '). Try again.');
+    net.role = 'solo';
+    updateStatus();
+  });
+  updateStatus();
+}
+
+function joinGame() {
+  if (!peerAvailable()) return;
+  const code = ($('codeIn').value || '').trim().toUpperCase();
+  if (code.length !== 4) { setMsg('Enter the four-character room code.'); return; }
+  net.role = 'guest';
+  mySide = -1;
+  net.code = code;
+  setMsg('Connecting to ' + code + '&hellip;');
+  net.peer = new Peer();
+  net.peer.on('open', function () {
+    wireConn(net.peer.connect(PEER_PREFIX + code, { reliable: false }));
+  });
+  net.peer.on('error', function (e) {
+    setMsg(e.type === 'peer-unavailable'
+      ? 'No room with that code. Check it and try again.'
+      : 'Connection failed (' + e.type + ').');
+    net.role = 'solo';
+    mySide = 1;
+    updateStatus();
+  });
+  updateStatus();
+}
+
+function send(obj) {
+  if (!net.up || !net.link) return;
+  obj.n = ++outSeq;
+  net.link.send(obj);
+}
+
+/* The host owns the tuning. Both sides must run identical numbers or their
+   simulations drift apart and the corrections become visible. */
+function sendConfig() {
+  if (net.role !== 'host') return;
+  send({ t: 'c', A: A, FEEL: FEEL, PHYS: PHYS });
+}
+
+function sendSnapshot() {
+  const b = ball, h = paddles['1'];
+  send({ t: 's',
+         ts: performance.now(),
+         b: [b.x, b.y, b.a, b.vx, b.vy, b.w],
+         // pose AND target: the target drives the guest's local simulation,
+         // the pose is only there to correct where it has drifted to
+         h: [h.x, h.y, h.a, h.vx, h.vy, h.w, h.tx, h.ty, h.ta],
+         sc: [scores['-1'], scores['1']],
+         ph: world.phase, pt: world.phaseT, hd: world.ballHidden });
+}
+
+function sendInput() {
+  const p = me();
+  send({ t: 'i', x: p.tx, y: p.ty, a: p.ta, k: lastStamp });
+}
+
+// Absorb part of an error now and the rest over the next few packets, unless
+// the gap is so wide that something desynced, in which case just jump.
+/* Step 1 of the netcode rebuild: the simulation is now replayable, but the
+   client/server split does not exist yet. Connection, room codes and config
+   sync still work; nothing yet drives the simulation from the wire. Restored
+   in step 3, on top of prediction and reconciliation rather than the blending
+   that made the paddle oscillate. */
+function onData(d) {
+  if (!d || !d.t) return;
+  if (d.n !== undefined) {
+    if (d.n <= inSeq) return;      // stale, a newer one already landed
+    inSeq = d.n;
+  }
+
+  if (d.t === 'c' && net.role === 'guest') {
+    Object.assign(A, d.A);
+    Object.assign(FEEL, d.FEEL);
+    Object.assign(PHYS, d.PHYS);
+    _feat = null;
+    _featKey.length = 0;
+    buildPanel();
+    resize();
+  }
+}
+
+$('build').textContent = BUILD;
+initProbe();
+
+$('btnSolo').addEventListener('click', function () {
+  net.role = 'solo'; mySide = 1; updateStatus(); startGame();
+});
+$('btnHost').addEventListener('click', hostGame);
+$('btnJoin').addEventListener('click', joinGame);
+$('codeIn').addEventListener('keydown', function (e) { if (e.key === 'Enter') joinGame(); });
+updateStatus();
+
+buildPanel();
+serve(world);
+resize();
+</script>
+</body>
+</html>
