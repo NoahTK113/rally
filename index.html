@@ -58,6 +58,10 @@
   #menu .msg{margin-top:14px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:30px}
   #menu .code{display:block;margin-top:6px;font-size:26px;letter-spacing:.42em;color:#22d3ee}
 
+  /* Above the menu's z-index on purpose: you want to check the build BEFORE
+     connecting, not after. */
+  #build{position:fixed;top:10px;left:14px;z-index:30;font-size:10px;letter-spacing:.14em;
+         color:#3f4d61;pointer-events:none;text-shadow:0 1px 3px #000}
   #status{position:fixed;top:10px;right:14px;z-index:9;font-size:10px;letter-spacing:.1em;
           color:#5b6c82;text-shadow:0 1px 3px #000;pointer-events:none;text-align:right}
   #status b{color:#c9d4e2;font-weight:600;letter-spacing:.24em}
@@ -68,6 +72,7 @@
 <div id="panel" class="hidden"></div>
 <div id="tag"></div>
 <div id="help"></div>
+<div id="build"></div>
 <div id="status"></div>
 <div id="menu">
   <div class="card">
@@ -1429,6 +1434,10 @@ function frame(nowMs) {
    PeerJS's public broker only introduces the two browsers. Once connected the
    traffic is direct and the broker is out of the loop.
    ========================================================================== */
+// Bump on every deploy. Shown top-left on the menu and in game so both
+// players can confirm they are on the same build before blaming the netcode.
+const BUILD = 'v4 · 2026-08-31';
+
 const NET_HZ = 60;                 // packets/sec each way; they are tiny
 const POS_BLEND = 0.30;            // fraction of positional error absorbed per packet
 const SNAP_DIST = 0.9;             // metres. beyond this, stop blending and snap
@@ -1612,6 +1621,8 @@ function onData(d) {
     phaseT = d.pt;
   }
 }
+
+$('build').textContent = BUILD;
 
 $('btnSolo').addEventListener('click', function () {
   net.role = 'solo'; mySide = 1; updateStatus(); startGame();
