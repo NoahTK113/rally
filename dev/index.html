@@ -1236,11 +1236,20 @@ function maxPaddleSpeed() {
   return w * Math.min(FEEL.maxError, FEEL.reach) / (2 * FEEL.posDamp);
 }
 
+/* The HUD carries fast-moving values; repainting it every frame makes them
+   unreadable. Built a few times a second and held in between. */
+let readoutAcc = 0;
+let readoutHold = '';
+
 function readout() {
+  document.getElementById('tag').innerHTML = readoutHold;
+}
+
+function buildReadout() {
   const p = me();
   const tip = tipVelocity(p, 1);
   const f = (n, d = 2) => n.toFixed(d).padStart(6);
-  document.getElementById('tag').innerHTML =
+  const out =
     `${fps.toFixed(0).padStart(3)} fps   ${String(stepsLastFrame).padStart(2)} steps/frame` +
     (frozen ? '   <b style="color:#fdba74">FROZEN</b>' : '') + '<br>' +
     `pos   ${f(p.x)}, ${f(p.y)} m<br>` +
@@ -1250,9 +1259,10 @@ function readout() {
     `tip   ${f(Math.hypot(tip.vx, tip.vy))} m/s<br>` +
     `ball  ${f(Math.hypot(ball.vx, ball.vy))} m/s   spin ${f(ball.w / DEG, 0)} °/s<br>` +
     `tick  srv ${server.active ? server.world.tick : '-'}   shown ${world.tick}<br>` +
-    `pred  cli ${client.tick}   from ${client.serverTick}   ` +
-    `lead ${client.tick - client.serverTick}/${client.ahead}   ` +
+    `pred  lead ${client.leadMin}-${client.leadMax} / want ${client.ahead}   ` +
     `drift ${client.drift}   buf ${client.filled}`;
+  client.leadMin = client.leadMax = 0;      // start a fresh window
+  return out;
 }
 
 // ---- input ----------------------------------------------------------------
@@ -1520,6 +1530,9 @@ function frame(nowMs) {
   statusAcc += dt;
   if (statusAcc > 0.25) { statusAcc = 0; updateStatus(); }
 
+  readoutAcc += dt;
+  if (readoutAcc > 0.18) { readoutAcc = 0; readoutHold = buildReadout(); }
+
   fpsAcc += dt; fpsN++;
   if (fpsAcc > 0.25) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
 
@@ -1587,7 +1600,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v6.6-dev';
+const BUILD = 'v6.7-dev';
 
 /* ==========================================================================
    SERVER
@@ -1761,6 +1774,9 @@ const client = {
   ahead: 0,             // how far in front of a snapshot we aim to run
   drift: 0,             // measured (our tick - target); zero means locked on
   pending: 0,           // a single-tick correction waiting to be applied
+  leadMin: 0, leadMax: 0,  // lead sampled per tick; it is a sawtooth, so the
+                           // readout shows its range rather than one frame's
+                           // arbitrary slice of it
 
   inputs: null,         // ring of {tx,ty,ta} by tick
   states: null,         // ring of Worlds by tick
@@ -1854,6 +1870,16 @@ function clientStepOnce(dt) {
   // target instead of hopping around it.
   client.tick += 1 + client.pending;
   client.pending = 0;
+
+  // Sample the lead every tick. It sweeps from `ahead` up to `ahead + 4` and
+  // back, sixty times a second, so a single sample read at render time is
+  // meaningless — the range is the honest summary.
+  const lead = client.tick - client.serverTick;
+  if (client.leadMax === 0 && client.leadMin === 0) { client.leadMin = client.leadMax = lead; }
+  else {
+    if (lead < client.leadMin) client.leadMin = lead;
+    if (lead > client.leadMax) client.leadMax = lead;
+  }
 
   const rec = client.inputs[slot(client.tick)];
   const src = liveInput[mySide];
