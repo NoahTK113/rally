@@ -11,8 +11,11 @@
      screen in its own right, not a scrim over a game already in progress. */
   canvas{display:none;width:100vw;height:100vh}
   body.playing canvas{display:block}
+  /* Diagnostics live behind H, together with the tuning panel: one key, one
+     view. Controls and connection state stay up, since a player needs those. */
   #tag,#help,#status{display:none}
-  body.playing #tag,body.playing #help,body.playing #status{display:block}
+  body.playing #help,body.playing #status{display:block}
+  body.playing.debug #tag{display:block}
   #tag{position:fixed;bottom:66px;left:16px;font-size:11px;line-height:1.65;color:#66788f;
        pointer-events:none;text-shadow:0 1px 3px #000}
   #help{position:fixed;bottom:14px;left:16px;font-size:10.5px;line-height:1.8;color:#4d5c72;
@@ -22,7 +25,7 @@
   #panel{position:fixed;top:0;left:0;right:0;z-index:10;display:none;flex-wrap:wrap;
          align-items:flex-end;gap:9px 13px;padding:9px 14px 10px;font-size:10px;
          background:rgba(8,12,19,.92);border-bottom:1px solid #1a2534;backdrop-filter:blur(8px)}
-  body.playing #panel:not(.hidden){display:flex}
+  body.playing.debug #panel{display:flex}
   #panel .grp{align-self:center;font-size:9px;letter-spacing:.15em;text-transform:uppercase;
               color:#3f4d61;padding-left:11px;border-left:1px solid #1c2838}
   #panel .grp.first{padding-left:0;border-left:0}
@@ -69,7 +72,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="panel" class="hidden"></div>
+<div id="panel"></div>
 <div id="tag"></div>
 <div id="help"></div>
 <div id="build"></div>
@@ -206,7 +209,7 @@ const COL = {
 const goalColour = side => side > 0 ? COL.blue : COL.red;
 const goalFill   = side => side > 0 ? COL.blueFill : COL.redFill;
 
-const opts = { showTarget: true, showVectors: true };
+const opts = { showTarget: false, showVectors: false };
 let renderAlpha = 1;
 
 // Outward glow: the same contour stroked a few times, widening and fading.
@@ -242,8 +245,7 @@ function resize() {
 
   // Keep the arena clear of the tuning panel rather than letting it overlap.
   const panelEl = document.getElementById('panel');
-  const panelDev = panelEl.classList.contains('hidden')
-    ? 0 : Math.round(panelEl.offsetHeight * dpr);
+  const panelDev = Math.round(panelEl.offsetHeight * dpr);
   const availDev = Math.max(1, chDev - panelDev);
 
   const b = bounds();
@@ -1304,7 +1306,7 @@ addEventListener('keydown', e => {
   if (k === 'r') { if (server.active) resetRound(server.world, true); }
   if (k === 'v') opts.showVectors = !opts.showVectors;
   if (k === 'g') opts.showTarget = !opts.showTarget;
-  if (k === 'h') { document.getElementById('panel').classList.toggle('hidden'); resize(); }
+  if (k === 'h') { document.body.classList.toggle('debug'); resize(); }
 });
 addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 addEventListener('resize', resize);
@@ -1401,10 +1403,9 @@ function buildPanel() {
 }
 
 document.getElementById('help').innerHTML =
-  '<b>mouse</b> move &nbsp; <b>wheel</b> / <b>A</b><b>D</b> rotate &nbsp; ' +
+  '<b>mouse</b> move &nbsp; <b>wheel</b> rotate &nbsp; ' +
   '<b>hold right-click</b> fine rotate &nbsp; <b>S</b> level<br>' +
-  '<b>space</b> freeze &nbsp; <b>.</b> step &nbsp; <b>V</b> vectors &nbsp; <b>G</b> ghost' +
-  ' &nbsp; <b>H</b> knobs &nbsp; <b>F</b> serve &nbsp; <b>R</b> reset score' +
+  '<b>F</b> serve &nbsp; <b>R</b> reset score &nbsp; <b>H</b> settings' +
   ' &nbsp; <b>esc</b> menu';
 
 /* ---- loop -----------------------------------------------------------------
@@ -1602,7 +1603,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v6.8r-dev';
+const BUILD = 'v7';
 
 /* ==========================================================================
    SERVER
