@@ -191,14 +191,14 @@ const A = {
   width: 12, height: 7,     // inner playing area
   netHeight: 2.25, netT: 0.10,
   goalLip: 0.50,            // gap between the floor and the bottom of the opening
-  goalHeight: 3.00,         // size of the opening
+  goalHeight: 2.50,         // size of the opening
   goalDepth: 0.70,          // how far the box extends outside the field
   cornerR: 0.11,            // rounding on the arena contour. WORLD units, not
                             // derived from the hairline, so collision geometry
                             // never changes when the window resizes.
-  crossFrac: 0.20,         // how far the OFFENCE paddle may reach into the far
+  crossFrac: 0.40,         // how far the OFFENCE paddle may reach into the far
                             // half, as a fraction of that half's width
-  defFrac: 0.50,            // share of a player's own half reserved for defence
+  defFrac: 0.60,            // share of a player's own half reserved for defence
   paddleLength: 0.90,
   paddleT: 0.10,
   margin: 0.9,
@@ -272,9 +272,9 @@ const NET = {
 };
 
 const PHYS = {
-  gravity      : 5.50,   // m/s^2
+  gravity      : 6.80,   // m/s^2
   ballR        : 0.15,   // m
-  restitution  : 0.65,   // bounciness against arena and net
+  restitution  : 0.72,   // bounciness against arena and net
   friction     : 0.35,   // tangential -> this is what generates spin
   paddleRest   : 0.30,   // paddles are livelier than walls
   paddleFriction: 0.60,  // and grippier, so slicing actually bites
@@ -1927,7 +1927,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v8.7-dev';
+const BUILD = 'v8.8-dev';
 
 /* ==========================================================================
    SERVER
