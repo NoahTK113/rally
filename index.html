@@ -68,6 +68,13 @@
              border:1px solid #263449}
   #setup .go:hover:not(:disabled){border-color:#22d3ee;color:#e6edf6}
   #setup .go:disabled{opacity:.45;cursor:default}
+  .seg{display:flex;gap:8px;margin-bottom:12px}
+  .seg button{flex:1;padding:11px 0;font:inherit;font-size:13px;letter-spacing:.14em;
+              border-radius:9px;cursor:pointer;background:#151d2b;color:#66788f;
+              border:1px solid #263449}
+  .seg button:hover:not(:disabled){color:#c9d4e2}
+  .seg button.on{border-color:#22d3ee;color:#e6edf6;background:#16222f}
+
   .sens{display:flex;align-items:center;gap:12px;margin-top:20px;padding-top:18px;
         border-top:1px solid #1c2838;font-size:19px;letter-spacing:.12em;color:#4d5c72}
   .sens input{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:2px;
@@ -136,6 +143,11 @@
   <div class="card">
     <div id="setupOwner">
       <h1>SETUP</h1>
+      <div class="lab">PADDLES PER PLAYER</div>
+      <div class="seg">
+        <button id="pd1">1</button>
+        <button id="pd2">2</button>
+      </div>
       <div class="lab">POINTS TO WIN</div>
       <div class="stepper">
         <button id="ptMinus">&minus;</button>
@@ -248,7 +260,7 @@ const contourW = () => (VIS.linePx * 2) / view.sDev;
 
 /* Match rules. Synced with the rest of the config, because both simulations
    must agree on when a match ends or they would disagree about the result. */
-const MATCH = { target: 7 };          // 0 = endless
+const MATCH = { target: 7, paddles: 2 };   // target 0 = endless
 
 /* Latency injected into the HOST's own link to its own server. The whole
    point of a listen server is that we can raise the host's delay but can never
@@ -580,8 +592,11 @@ function paddleBoxes(p) {
   const split = wall - p.side * (A.width / 2) * A.defFrac;
   const reachAcross = mid - p.side * cross;
 
-  const lo = p.index === 0 ? reachAcross : split;
-  const hi = p.index === 0 ? split : wall;
+  // With a single paddle there are no zones to divide: it owns the whole half
+  // plus the slice across the net, exactly as it did before the second one.
+  const solo = MATCH.paddles === 1;
+  const lo = solo ? reachAcross : (p.index === 0 ? reachAcross : split);
+  const hi = solo ? wall        : (p.index === 0 ? split : wall);
   const fx0 = Math.min(lo, hi) + hx;
   const fx1 = Math.max(lo, hi) - hx;
 
@@ -589,7 +604,7 @@ function paddleBoxes(p) {
 
   // own goal pocket — defence only, and only if it fits through the mouth
   const gy0 = goalY0() + hy, gy1 = goalY1() - hy;
-  if (p.index === 1 && gy1 >= gy0) {
+  if ((MATCH.paddles === 1 || p.index === 1) && gy1 >= gy0) {
     boxes.push(p.side > 0
       ? { x0: fx0, x1: A.width + A.goalDepth - hx, y0: gy0, y1: gy1 }
       : { x0: -A.goalDepth + hx, x1: fx1,          y0: gy0, y1: gy1 });
@@ -1068,7 +1083,11 @@ function stepBall(w, dt, collide = true) {
     b.y  += b.vy * h;
     b.a  += b.w * h;
     if (collide) {
-      for (let i = 0; i < PIDS.length; i++) collidePaddle(b, w.p[PIDS[i]]);
+      for (let i = 0; i < PIDS.length; i++) {
+        const pd = w.p[PIDS[i]];
+        if (MATCH.paddles === 1 && pd.index === 1) continue;
+        collidePaddle(b, pd);
+      }
       collideNet(b);
       collideArena(b);      // last, so the ball can never be left inside a wall
       // Only while the ball is meant to be on the court: during a goal it is
@@ -1184,6 +1203,7 @@ function drawReachLines() {
     ctx.stroke();
 
     // and where its own half hands over from offence to defence
+    if (MATCH.paddles === 1) continue;
     const wall = side < 0 ? 0 : A.width;
     const split = wall - side * (A.width / 2) * A.defFrac;
     ctx.globalAlpha = 0.13;
@@ -1314,6 +1334,7 @@ function drawActors() {
   // your hand. Without that the board reads as four equal objects.
   for (const id of PIDS) {
     const p = paddles[id];
+    if (MATCH.paddles === 1 && p.index === 1) continue;
     const held = world.sel[String(p.side)] === p.index;
     ctx.globalAlpha = held ? 1 : 0.42;
     drawPaddle(lerp(p.px, p.x, renderAlpha),
@@ -1558,7 +1579,7 @@ addEventListener('keydown', e => {
   keys.add(k);
   if (k === 'p') frozen = !frozen;      // space now switches paddles
   if (k === '.') { stepOnce = true; frozen = true; }
-  if (k === ' ') {
+  if (k === ' ' && MATCH.paddles > 1) {
     /* Take hold of the other paddle. The cursor moves to it rather than the
        paddle flying to the cursor — you pick up the handle where it is, which
        is what makes parking one somewhere useful rather than a liability. */
@@ -1703,10 +1724,10 @@ function stepWorld(w, inp, dt) {
   w.tick++;
   for (const side of [-1, 1]) {
     const k = String(side);
-    const sel = (inp[k].sel | 0) & 1;
+    const sel = MATCH.paddles === 1 ? 0 : ((inp[k].sel | 0) & 1);
     w.sel[k] = sel;
     stepPaddle(w.p[idOf(side, 0)], sel === 0 ? inp[k] : null, dt);
-    stepPaddle(w.p[idOf(side, 1)], sel === 1 ? inp[k] : null, dt);
+    if (MATCH.paddles > 1) stepPaddle(w.p[idOf(side, 1)], sel === 1 ? inp[k] : null, dt);
   }
 
   if (w.phase === PHASE.PLAY) {
@@ -1906,7 +1927,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v8.6-dev';
+const BUILD = 'v8.7-dev';
 
 /* ==========================================================================
    SERVER
@@ -2480,7 +2501,7 @@ function showSetup() {
   $('setupOwner').classList.toggle('hidden', !owner);
   $('setupWait').classList.toggle('hidden', owner);
   $('setupMsg').innerHTML = '';
-  if (owner) paintTarget();
+  if (owner) { paintTarget(); paintPaddles(); }
 }
 
 function paintSens() {
@@ -2495,6 +2516,17 @@ function setSens(v) {
   MOUSE.sens = Math.max(0.2, Math.min(3, Math.round(v * 100) / 100));
   try { localStorage.setItem('flickball.sens', MOUSE.sens); } catch (e) {}
   paintSens();
+}
+
+function paintPaddles() {
+  $('pd1').classList.toggle('on', MATCH.paddles === 1);
+  $('pd2').classList.toggle('on', MATCH.paddles === 2);
+}
+
+function setPaddles(n) {
+  MATCH.paddles = n === 1 ? 1 : 2;
+  try { localStorage.setItem('flickball.paddles', MATCH.paddles); } catch (e) {}
+  paintPaddles();
 }
 
 function paintTarget() {
@@ -2513,7 +2545,7 @@ function setTarget(v) {
 
 function beginMatch() {
   if (net.role === 'guest') return;             // only the host may start
-  if (net.role === 'host') send({ t: 'start', target: MATCH.target });
+  if (net.role === 'host') send({ t: 'start', m: MATCH });
   hideSetup();
   startGame();
 }
@@ -2645,7 +2677,7 @@ function onData(d) {
   }
 
   if (d.t === 'start' && net.role === 'guest') {
-    if (typeof d.target === 'number') { MATCH.target = d.target; paintTarget(); }
+    if (d.m) { Object.assign(MATCH, d.m); paintTarget(); paintPaddles(); }
     hideSetup();
     startGame();
     return;
@@ -2655,7 +2687,7 @@ function onData(d) {
     Object.assign(A, d.A);
     Object.assign(FEEL, d.FEEL);
     Object.assign(PHYS, d.PHYS);
-    if (d.M) { Object.assign(MATCH, d.M); paintTarget(); }
+    if (d.M) { Object.assign(MATCH, d.M); paintTarget(); paintPaddles(); }
     _feat = null;
     _featKey.length = 0;
     buildPanel();
@@ -2669,6 +2701,8 @@ $('btnSolo').addEventListener('click', function () {
   net.role = 'solo'; mySide = 1; updateStatus(); showSetup();
 });
 $('btnStart').addEventListener('click', beginMatch);
+$('pd1').addEventListener('click', () => setPaddles(1));
+$('pd2').addEventListener('click', () => setPaddles(2));
 $('ptMinus').addEventListener('click', () => setTarget(MATCH.target - 1));
 $('ptPlus').addEventListener('click', () => setTarget(MATCH.target + 1));
 $('ptRange').addEventListener('input', e => setTarget(parseInt(e.target.value, 10)));
@@ -2680,8 +2714,11 @@ try {
   if (!isNaN(saved)) MATCH.target = Math.max(0, Math.min(100, saved));
   const ms = parseFloat(localStorage.getItem('flickball.sens'));
   if (!isNaN(ms)) MOUSE.sens = Math.max(0.2, Math.min(3, ms));
+  const pc = parseInt(localStorage.getItem('flickball.paddles'), 10);
+  if (pc === 1 || pc === 2) MATCH.paddles = pc;
 } catch (e) {}
 paintTarget();
+paintPaddles();
 paintSens();
 $('btnHost').addEventListener('click', hostGame);
 $('btnJoin').addEventListener('click', joinGame);
