@@ -68,6 +68,30 @@
              border:1px solid #263449}
   #setup .go:hover:not(:disabled){border-color:#22d3ee;color:#e6edf6}
   #setup .go:disabled{opacity:.45;cursor:default}
+  .sens{display:flex;align-items:center;gap:12px;margin-top:20px;padding-top:18px;
+        border-top:1px solid #1c2838;font-size:19px;letter-spacing:.12em;color:#4d5c72}
+  .sens input{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:2px;
+              background:#22303f;outline:none;cursor:pointer}
+  .sens input::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;
+              border-radius:50%;background:#22d3ee;cursor:pointer}
+  .sens .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:64px;text-align:right}
+
+  #sensBar{position:fixed;bottom:14px;right:16px;z-index:9;display:none;align-items:center;
+           gap:12px;font-size:19px;letter-spacing:.1em;color:#5b6c82;
+           text-shadow:0 1px 3px #000}
+  body.playing #sensBar{display:flex}
+  #sensBar input{-webkit-appearance:none;appearance:none;width:170px;height:4px;
+                 border-radius:2px;background:#22303f;outline:none;cursor:pointer}
+  #sensBar input::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;
+                 border-radius:50%;background:#22d3ee;cursor:pointer}
+  #sensBar .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:58px}
+
+  #lockHint{position:fixed;bottom:72px;left:50%;transform:translateX(-50%);z-index:9;
+            display:none;padding:12px 26px;border-radius:28px;font-size:20px;
+            letter-spacing:.1em;color:#c9d4e2;background:rgba(12,17,26,.88);
+            border:1px solid #2b3d57;pointer-events:none}
+  body.playing:not(.locked) #lockHint{display:block}
+
   #setup .msg{margin-top:13px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:16px}
   #menu .card{width:340px;padding:26px 26px 22px;border:1px solid #1d2939;border-radius:14px;
               background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.6);text-align:center}
@@ -102,6 +126,12 @@
 <div id="help"></div>
 <div id="build"></div>
 <div id="status"></div>
+<div id="sensBar">
+  <span>MOUSE</span>
+  <input id="sensPlay" type="range" min="0.2" max="3" step="0.05" value="1">
+  <span class="v" id="sensPlayVal">1.00</span>
+</div>
+<div id="lockHint">click to capture the mouse</div>
 <div id="setup" class="hidden">
   <div class="card">
     <div id="setupOwner">
@@ -119,6 +149,11 @@
     <div id="setupWait" class="hidden">
       <h1>WAITING FOR HOST</h1>
       <div class="hint">The host is choosing the settings.</div>
+    </div>
+    <div class="sens">
+      <span>MOUSE</span>
+      <input id="sensSetup" type="range" min="0.2" max="3" step="0.05" value="1">
+      <span class="v" id="sensSetupVal">1.00</span>
     </div>
     <div class="msg" id="setupMsg"></div>
   </div>
@@ -445,11 +480,12 @@ function makePaddle(side) {
    overshooting stops accumulating dead travel you would have to drag back. */
 const cursor = { x: 0, y: 0 };
 
-/* Mouse capture is off while we find out whether the drawn cursor alone is
-   enough. Note the clamp only does half its job without it: absolute mapping
-   means overshooting the field still banks travel you have to drag back, and
-   only integrating raw movement removes that. */
-const USE_POINTER_LOCK = false;
+/* Capture integrates raw mouse movement instead of mapping absolute position,
+   which is what makes both the clamp and a sensitivity setting possible: an
+   absolute mapping has no scale factor to adjust. Sensitivity is a LOCAL
+   preference — it depends on the desk, not the match — so it is never sent. */
+const USE_POINTER_LOCK = true;
+const MOUSE = { sens: 1 };
 let pointerLocked = false;
 
 const intent = { tx: 0, ty: 0, ta: 0 };          // what the player wants, live
@@ -1395,7 +1431,8 @@ function buildReadout() {
     `pred  lead ${client.leadMin}-${client.leadMax} / want ${client.ahead}   ` +
     `drift ${client.drift}   replay ${client.replayed}<br>` +
     `err   ball ${(client.errBall * 1000).toFixed(0)}mm   ` +
-    `mine ${(client.errMine * 1000).toFixed(0)}mm`;
+    `mine ${(client.errMine * 1000).toFixed(0)}mm   ` +
+    `missed ${server.active ? server.missed : '-'}`;
   client.leadMin = client.leadMax = 0;      // start a fresh window
   return out;
 }
@@ -1405,8 +1442,9 @@ function buildReadout() {
    used, so the feel is unchanged — only the escape route is removed. */
 canvas.addEventListener('mousemove', e => {
   if (pointerLocked) {
-    cursor.x += (e.movementX || 0) / view.scale;
-    cursor.y -= (e.movementY || 0) / view.scale;
+    const k = MOUSE.sens / view.scale;
+    cursor.x += (e.movementX || 0) * k;
+    cursor.y -= (e.movementY || 0) * k;
   } else {
     const r = canvas.getBoundingClientRect();
     const w = toWorld(e.clientX - r.left, e.clientY - r.top);
@@ -1423,6 +1461,7 @@ canvas.addEventListener('mousedown', e => {
 });
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === canvas;
+  document.body.classList.toggle('locked', pointerLocked);
 });
 document.addEventListener('pointerlockerror', () => { pointerLocked = false; });
 let fineRotate = false;   // right mouse button held
@@ -1450,6 +1489,8 @@ addEventListener('keydown', e => {
   if (k === ' ') frozen = !frozen;
   if (k === '.') { stepOnce = true; frozen = true; }
   if (k === 's') intent.ta = 0;
+  if (k === '[') setSens(MOUSE.sens - 0.05);   // capture blocks the slider,
+  if (k === ']') setSens(MOUSE.sens + 0.05);   // so keys work mid-match too
   if (k === 'escape') { leaveGame(); return; }
   if (k === 'f') { if (server.active) resetRound(server.world, false); }
   if (k === 'r') { if (server.active) resetRound(server.world, true); }
@@ -1554,8 +1595,9 @@ function buildPanel() {
 document.getElementById('help').innerHTML =
   '<b>mouse</b> move &nbsp; <b>wheel</b> rotate &nbsp; ' +
   '<b>hold right-click</b> fine rotate &nbsp; <b>S</b> level<br>' +
-  '<b>F</b> serve &nbsp; <b>R</b> reset score &nbsp; <b>H</b> settings' +
-  ' &nbsp; <b>esc</b> menu';
+  '<b>click</b> capture mouse &nbsp; <b>[</b> <b>]</b> sensitivity &nbsp; ' +
+  '<b>F</b> serve &nbsp; <b>R</b> reset score<br>' +
+  '<b>H</b> settings &nbsp; <b>esc</b> release mouse, again for menu';
 
 /* ---- loop -----------------------------------------------------------------
    Physics runs at a fixed rate, decoupled from the display, and the renderer
@@ -1664,6 +1706,7 @@ function startGame() {
 function releaseMouse() {
   if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
   pointerLocked = false;
+  document.body.classList.remove('locked');
 }
 
 function endMatch() {
@@ -1783,7 +1826,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v7.5';
+const BUILD = 'v8';
 
 /* ==========================================================================
    SERVER
@@ -1799,13 +1842,25 @@ const BUILD = 'v7.5';
    ========================================================================== */
 const PHASES = ['play', 'exit', 'announce', 'count', 'win'];
 
+/* Inputs are filed by the tick they belong to and applied at THAT tick, not
+   whenever they happen to arrive. Otherwise the server runs a coarsened
+   version of the player's movement that the client cannot reproduce, and the
+   two disagree by about a tick of paddle travel — centimetres, on a flick. */
+function makeInputRing() {
+  const r = new Array(HIST);
+  for (let i = 0; i < HIST; i++) r[i] = { tick: -1, tx: 0, ty: 0, ta: 0 };
+  return r;
+}
+
 const server = {
   active: false,
   world: makeWorld(),
-  inputs: { '-1': { tx: 0, ty: 0, ta: 0, tick: -1 },
-            '1':  { tx: 0, ty: 0, ta: 0, tick: -1 } },
+  inputs: { '-1': { tx: 0, ty: 0, ta: 0 },      // what the current tick uses
+            '1':  { tx: 0, ty: 0, ta: 0 } },
+  buf: null,                                     // filed by tick, per side
   links: [],
   sendTick: 0,
+  missed: 0,                                     // ticks with nothing on file
 };
 
 // 31 numbers. Named packing rather than JSON of the world so the wire format
@@ -1857,8 +1912,10 @@ function serverStart(soloish) {
     server.inputs[k].ta = p.a;
     server.inputs[k].tick = -1;
   }
+  server.buf = { '-1': makeInputRing(), '1': makeInputRing() };
   server.links.length = 0;
   server.sendTick = 0;
+  server.missed = 0;
   server.active = true;
 }
 
@@ -1898,11 +1955,17 @@ function serverReceive(end, m) {
     return;
   }
 
-  if (m.t !== 'in') return;
-  const inp = server.inputs[end.side];
-  if (m.k <= inp.tick) return;             // reordered; a newer one already landed
-  inp.tick = m.k;
-  inp.tx = m.x; inp.ty = m.y; inp.ta = m.a;
+  if (m.t !== 'in' || !m.b) return;
+
+  // A batch of ticks, overlapping the previous packet. Never let an older
+  // entry overwrite a newer one that shares a ring slot.
+  const buf = server.buf && server.buf[end.side];
+  if (!buf) return;
+  for (let i = 0; i < m.b.length; i++) {
+    const e = m.b[i], T = e[0];
+    const cell = buf[slot(T)];
+    if (T > cell.tick) { cell.tick = T; cell.tx = e[1]; cell.ty = e[2]; cell.ta = e[3]; }
+  }
 
   // Only the remote client's trip is worth measuring; the loopback's delay is
   // whatever we told it to be.
@@ -1915,6 +1978,18 @@ function serverReceive(end, m) {
 // One authoritative tick. Called on the fixed clock, unconditionally.
 function serverStepOnce(dt) {
   if (!server.active) return;
+
+  // Resolve each side's input for the tick about to run. Nothing on file means
+  // the packet has not arrived, so assume the last one is still held — never
+  // wait, because waiting is lockstep.
+  const T = server.world.tick + 1;
+  for (const k of ['-1', '1']) {
+    const cell = server.buf[k][slot(T)];
+    const dst = server.inputs[k];
+    if (cell.tick === T) { dst.tx = cell.tx; dst.ty = cell.ty; dst.ta = cell.ta; }
+    else if (net.up && k === String(-mySide)) server.missed++;
+  }
+
   stepWorld(server.world, server.inputs, dt);
 
   // ping every 48 ticks, about five times a second
@@ -1946,6 +2021,7 @@ function serverStepOnce(dt) {
    needs the states to know whether it was right, and the inputs to replay.
    Sized to comfortably cover a bad connection: 128 ticks is 533ms. */
 const HIST = 128;
+const INPUT_WINDOW = 8;   // ticks of input per packet: two send intervals
 
 const client = {
   link: null, sendTick: 0, inputTick: 0, lastSnap: -1,
@@ -1972,7 +2048,7 @@ function clientInitHistory() {
   client.inputs = new Array(HIST);
   client.states = new Array(HIST);
   for (let i = 0; i < HIST; i++) {
-    client.inputs[i] = { tx: 0, ty: 0, ta: 0 };
+    client.inputs[i] = { tick: -1, tx: 0, ty: 0, ta: 0 };
     client.states[i] = makeWorld();
   }
 }
@@ -2099,11 +2175,17 @@ function clientReconcile() {
   replayInput[other].ty = snapWorld.p[other].ty;
   replayInput[other].ta = snapWorld.p[other].ta;
 
+  // A slot whose tick does not match was never filed for this tick, so it
+  // still holds something from a previous lap of the ring. Hold the last good
+  // input rather than replaying a target from half a second ago.
+  let held = snapWorld.p[mineKey];
+
   for (let t = from + 1; t <= to; t++) {
     const rec = client.inputs[slot(t)];
-    replayInput[mineKey].tx = rec.tx;
-    replayInput[mineKey].ty = rec.ty;
-    replayInput[mineKey].ta = rec.ta;
+    if (rec.tick === t) held = rec;
+    replayInput[mineKey].tx = held.tx;
+    replayInput[mineKey].ty = held.ty;
+    replayInput[mineKey].ta = held.ta;
     stepWorld(world, replayInput, FIXED_DT);
     copyWorld(client.states[slot(t)], world);
   }
@@ -2114,18 +2196,46 @@ function clientStepOnce(dt) {
   captureInto(liveInput[mySide], dt);
   if (!client.link) return;
 
-  // Advance our own clock and file this tick's input under it. Nothing reads
-  // the history yet — this step exists to prove the bookkeeping before
-  // prediction depends on it.
-  // Apply at most one tick of correction per snapshot, so the clock walks onto
-  // target instead of hopping around it.
-  client.tick += 1 + client.pending;
-  client.pending = 0;
-  if (client.tick < 1) client.tick = 1;
+  if (client.sendTick % 48 === 0) client.link.send({ t: 'png', c: performance.now() });
 
-  // Sample the lead every tick. It sweeps from `ahead` up to `ahead + 4` and
-  // back, sixty times a second, so a single sample read at render time is
-  // meaningless — the range is the honest summary.
+  /* Quantise before using it locally, so what we simulate with is identical to
+     what goes on the wire. Stepping with an unrounded value and sending a
+     rounded one would guarantee a small permanent disagreement. */
+  const qi = liveInput[mySide];
+  qi.tx = Math.round(qi.tx * 1e4) / 1e4;
+  qi.ty = Math.round(qi.ty * 1e4) / 1e4;
+  qi.ta = Math.round(qi.ta * 1e5) / 1e5;
+
+  /* Advance by however many ticks the clock correction calls for, simulating
+     and filing input for EVERY one of them.
+
+     Landing on a tick without filing the ones jumped over leaves holes: the
+     server has nothing on file for them and repeats the last input, while
+     replay reads whatever occupied that ring slot 128 ticks ago. And an
+     advance of zero or less must skip the tick outright — a counter that
+     stalls is survivable, one that runs backwards corrupts the ring. */
+  let adv = 1 + client.pending;
+  client.pending = 0;
+  if (adv > 3) adv = 3;
+  if (adv < 0) adv = 0;
+
+  for (let i = 0; i < adv; i++) {
+    client.tick++;
+
+    const rec = client.inputs[slot(client.tick)];
+    rec.tick = client.tick;
+    rec.tx = qi.tx; rec.ty = qi.ty; rec.ta = qi.ta;
+    if (client.filled < HIST) client.filled++;
+
+    /* Simulate the present immediately from our own input, with no network in
+       the path. The opponent's side of `liveInput` holds their last known
+       target, refreshed by each snapshot. */
+    stepWorld(world, liveInput, FIXED_DT);
+    world.tick = client.tick;
+    copyWorld(client.states[slot(client.tick)], world);
+  }
+
+  // The lead is a sawtooth; the readout reports its range, not one slice.
   const lead = client.tick - client.serverTick;
   if (client.leadMax === 0 && client.leadMin === 0) { client.leadMin = client.leadMax = lead; }
   else {
@@ -2133,26 +2243,17 @@ function clientStepOnce(dt) {
     if (lead > client.leadMax) client.leadMax = lead;
   }
 
-  const rec = client.inputs[slot(client.tick)];
-  const src = liveInput[mySide];
-  rec.tx = src.tx; rec.ty = src.ty; rec.ta = src.ta;
-  if (client.filled < HIST) client.filled++;
-
-  /* Simulate the present immediately, from our own input, with no network in
-     the path. This is the whole point: the paddle answers the mouse on the
-     next tick regardless of latency. The opponent's side of `liveInput` holds
-     their last known target, refreshed by each snapshot. */
-  stepWorld(world, liveInput, FIXED_DT);
-  world.tick = client.tick;
-  copyWorld(client.states[slot(client.tick)], world);
-
-
-  if (client.sendTick % 48 === 0) client.link.send({ t: 'png', c: performance.now() });
   const every = Math.max(1, Math.round((1 / FIXED_DT) / NET_HZ));
   if (++client.sendTick % every === 0) {
-    const i = liveInput[mySide];
-    client.link.send({ t: 'in', k: ++client.inputTick, w: client.tick,
-                       x: i.tx, y: i.ty, a: i.ta });
+    // Overlapping batches: every tick rides in two consecutive packets, so a
+    // single dropped packet costs nothing.
+    const batch = [];
+    for (let t = client.tick - INPUT_WINDOW + 1; t <= client.tick; t++) {
+      if (t < 1) continue;
+      const r = client.inputs[slot(t)];
+      if (r.tick === t) batch.push([t, r.tx, r.ty, r.ta]);
+    }
+    if (batch.length) client.link.send({ t: 'in', k: ++client.inputTick, b: batch });
   }
 }
 
@@ -2285,6 +2386,20 @@ function showSetup() {
   $('setupWait').classList.toggle('hidden', owner);
   $('setupMsg').innerHTML = '';
   if (owner) paintTarget();
+}
+
+function paintSens() {
+  const v = MOUSE.sens.toFixed(2);
+  $('sensSetup').value = MOUSE.sens;
+  $('sensPlay').value = MOUSE.sens;
+  $('sensSetupVal').textContent = v;
+  $('sensPlayVal').textContent = v;
+}
+
+function setSens(v) {
+  MOUSE.sens = Math.max(0.2, Math.min(3, Math.round(v * 100) / 100));
+  try { localStorage.setItem('flickball.sens', MOUSE.sens); } catch (e) {}
+  paintSens();
 }
 
 function paintTarget() {
@@ -2477,12 +2592,17 @@ $('btnStart').addEventListener('click', beginMatch);
 $('ptMinus').addEventListener('click', () => setTarget(MATCH.target - 1));
 $('ptPlus').addEventListener('click', () => setTarget(MATCH.target + 1));
 $('ptRange').addEventListener('input', e => setTarget(parseInt(e.target.value, 10)));
+$('sensSetup').addEventListener('input', e => setSens(parseFloat(e.target.value)));
+$('sensPlay').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 
 try {
   const saved = parseInt(localStorage.getItem('flickball.target'), 10);
   if (!isNaN(saved)) MATCH.target = Math.max(0, Math.min(100, saved));
+  const ms = parseFloat(localStorage.getItem('flickball.sens'));
+  if (!isNaN(ms)) MOUSE.sens = Math.max(0.2, Math.min(3, ms));
 } catch (e) {}
 paintTarget();
+paintSens();
 $('btnHost').addEventListener('click', hostGame);
 $('btnJoin').addEventListener('click', joinGame);
 $('codeIn').addEventListener('keydown', function (e) { if (e.key === 'Enter') joinGame(); });
