@@ -196,9 +196,9 @@ const A = {
   cornerR: 0.11,            // rounding on the arena contour. WORLD units, not
                             // derived from the hairline, so collision geometry
                             // never changes when the window resizes.
-  crossFrac: 0.40,         // how far the OFFENCE paddle may reach into the far
+  crossFrac: 0.45,         // how far the OFFENCE paddle may reach into the far
                             // half, as a fraction of that half's width
-  defFrac: 0.60,            // share of a player's own half reserved for defence
+  defFrac: 0.55,            // share of a player's own half reserved for defence
   paddleLength: 0.90,
   paddleT: 0.10,
   margin: 0.9,
@@ -1927,7 +1927,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v8.8-dev';
+const BUILD = 'v8.9-dev';
 
 /* ==========================================================================
    SERVER
