@@ -93,10 +93,12 @@
                  border-radius:50%;background:#22d3ee;cursor:pointer}
   #sensBar .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:58px}
 
-  #lockHint{position:fixed;bottom:72px;left:50%;transform:translateX(-50%);z-index:9;
-            display:none;padding:12px 26px;border-radius:28px;font-size:20px;
-            letter-spacing:.1em;color:#c9d4e2;background:rgba(12,17,26,.88);
-            border:1px solid #2b3d57;pointer-events:none}
+  #lockHint{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9;
+            display:none;padding:22px 38px;border-radius:14px;font-size:30px;
+            letter-spacing:.08em;color:#e6edf6;background:rgba(10,14,22,.93);
+            border:1px solid #2b3d57;pointer-events:none;text-align:center}
+  #lockHint small{display:block;margin-top:12px;font-size:15px;letter-spacing:.1em;
+                  color:#66788f}
   body.playing:not(.locked) #lockHint{display:block}
 
   #setup .msg{margin-top:13px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:16px}
@@ -138,7 +140,7 @@
   <input id="sensPlay" type="range" min="0.2" max="3" step="0.05" value="1">
   <span class="v" id="sensPlayVal">1.00</span>
 </div>
-<div id="lockHint">click to capture the mouse</div>
+<div id="lockHint">CLICK TO CAPTURE THE MOUSE<small>controls are disabled until you do</small></div>
 <div id="setup" class="hidden">
   <div class="card">
     <div id="setupOwner">
@@ -539,6 +541,13 @@ const liveInput = { '-1': { sel: 0, tx: 0, ty: 0, ta: 0 },
    had just left, and the two would then chase each other. */
 const heldPaddle = () => paddles[idOf(mySide, intent.sel)];
 
+/* Until the mouse is captured, nothing responds. Driving the paddle from an
+   uncaptured pointer is what leaves the real cursor and the in-game one in
+   different places, and once a player loses track of which is which no amount
+   of explaining fixes it. Freezing everything makes the requirement obvious
+   rather than merely stated. */
+const controlsLive = () => !USE_POINTER_LOCK || pointerLocked;
+
 function clampCursor() {
   const boxes = paddleBoxes(heldPaddle());
   const t = nearestLegal(boxes, cursor.x, cursor.y);
@@ -548,12 +557,14 @@ function clampCursor() {
 }
 
 function captureInto(dst, dt) {
-  clampCursor();
-  intent.tx = cursor.x; intent.ty = cursor.y;
-  let rot = 0;
-  if (keys.has('a')) rot += 1;
-  if (keys.has('d')) rot -= 1;
-  if (rot) intent.ta += rot * FEEL.keyRate * (fineRotate ? 1 / FINE_DIV : 1) * DEG * dt;
+  if (controlsLive()) {
+    clampCursor();
+    intent.tx = cursor.x; intent.ty = cursor.y;
+    let rot = 0;
+    if (keys.has('a')) rot += 1;
+    if (keys.has('d')) rot -= 1;
+    if (rot) intent.ta += rot * FEEL.keyRate * (fineRotate ? 1 / FINE_DIV : 1) * DEG * dt;
+  }
   dst.sel = intent.sel;
   dst.tx = intent.tx; dst.ty = intent.ty; dst.ta = intent.ta;
 }
@@ -1530,6 +1541,14 @@ function buildReadout() {
 /* Locked, we integrate raw movement at exactly the scale the absolute mapping
    used, so the feel is unchanged — only the escape route is removed. */
 canvas.addEventListener('mousemove', e => {
+  if (!controlsLive()) {
+    // keep tracking the pointer so the offset maths stays valid if capture is
+    // ever switched off again
+    const r0 = canvas.getBoundingClientRect();
+    const w0 = toWorld(e.clientX - r0.left, e.clientY - r0.top);
+    rawMouse.x = w0.x; rawMouse.y = w0.y; rawMouse.seen = true;
+    return;
+  }
   if (pointerLocked) {
     const k = MOUSE.sens / view.scale;
     cursor.x += (e.movementX || 0) * k;
@@ -1553,6 +1572,8 @@ canvas.addEventListener('mousedown', e => {
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === canvas;
   document.body.classList.toggle('locked', pointerLocked);
+  // Take hold starting from the paddle, so control can never begin adrift.
+  if (pointerLocked && running) { const np = heldPaddle(); placeCursor(np.x, np.y); }
 });
 document.addEventListener('pointerlockerror', () => { pointerLocked = false; });
 let fineRotate = false;   // right mouse button held
@@ -1564,6 +1585,7 @@ addEventListener('blur',           () => { fineRotate = false; });
 
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
+  if (!controlsLive()) return;
   // Snap to the active grid first, then advance exactly one notch, so the
   // target is always a clean multiple however it was last nudged.
   const step = fineRotate ? STEP_FINE : STEP_COARSE;
@@ -1583,6 +1605,8 @@ addEventListener('keydown', e => {
      through transport ends and each end is tagged with the side it drives, so
      switching means retagging our end — the simulation needs no notion of a
      player changing seats. */
+  if (!controlsLive() && (k === ' ' || k === 's' || k === 'tab')) return;
+
   if (k === 'tab' && net.role === 'solo') {
     mySide = -mySide;
     for (const l of server.links) if (l.kind === 'loopback') l.side = mySide;
@@ -1947,7 +1971,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v9.1-dev';
+const BUILD = 'v9.2-dev';
 
 /* ==========================================================================
    SERVER
