@@ -1350,6 +1350,7 @@ const MAX_STEPS = 12;          // don't spiral after a tab stall
 let accumulator = 0;
 let last = performance.now() / 1000;
 let stepsLastFrame = 0;
+let statusAcc = 0;
 let frozen = false, stepOnce = false;
 let fps = 60, fpsAcc = 0, fpsN = 0;
 
@@ -1450,6 +1451,11 @@ function frame(nowMs) {
 
   if (net.link) net.link.pump();
   pumpProbe();
+
+  // The status chip carries live measurements now, so it has to be rewritten
+  // rather than being painted once on connect.
+  statusAcc += dt;
+  if (statusAcc > 0.25) { statusAcc = 0; updateStatus(); }
 
   fpsAcc += dt; fpsN++;
   if (fpsAcc > 0.25) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
