@@ -184,8 +184,9 @@ const A = {
   cornerR: 0.11,            // rounding on the arena contour. WORLD units, not
                             // derived from the hairline, so collision geometry
                             // never changes when the window resizes.
-  crossFrac: 0.20,         // how far a paddle may reach into the far half,
-                            // as a fraction of that half's width
+  crossFrac: 0.20,         // how far the OFFENCE paddle may reach into the far
+                            // half, as a fraction of that half's width
+  defFrac: 0.50,            // share of a player's own half reserved for defence
   paddleLength: 0.90,
   paddleT: 0.10,
   margin: 0.9,
@@ -466,11 +467,15 @@ const PIDS = ['L0', 'L1', 'R0', 'R1'];
 const idOf = (side, i) => (side < 0 ? 'L' : 'R') + i;
 const activeId = (w, side) => idOf(side, w.sel[String(side)] || 0);
 
+/* index 0 is OFFENCE: it lives in the front of the player's half and is the
+   only one that may reach across the net. index 1 is DEFENCE: it lives in the
+   back and is the only one allowed inside the goal box. Each starts well
+   inside its own zone. */
 function makePaddle(side, index) {
-  // one forward and low, one back and high, so a switch is a real repositioning
-  const fx = index === 0 ? 0.24 : 0.10;
-  const x = side < 0 ? A.width * fx : A.width * (1 - fx);
-  const y = A.height * (index === 0 ? 0.32 : 0.58);
+  const mid = A.width / 2, wall = side < 0 ? 0 : A.width;
+  const x = index === 0 ? mid + side * A.width * 0.14
+                        : wall - side * A.width * 0.12;
+  const y = A.height * 0.30;
   return {
     side, index,                 // side: -1 left, +1 right
     x, y, a: 0,                  // pose
@@ -559,16 +564,25 @@ function paddleBoxes(p) {
   const L = A.paddleLength / 2, T = A.paddleT / 2;
   const hx = L * c + T * s, hy = L * s + T * c;
 
+  /* Zones. A player's half is split: the back share belongs to defence and the
+     front to offence, and only offence may cross the net. Without this both
+     paddles could be stacked in the goal mouth, or side by side on the net.
+     Limits apply to the paddle BODY, so hx keeps the rotated box inside. */
   const mid = A.width / 2, cross = mid * A.crossFrac;
-  let fx0, fx1;
-  if (p.side < 0) { fx0 = hx;               fx1 = mid + cross - hx; }
-  else            { fx0 = mid - cross + hx; fx1 = A.width - hx; }
+  const wall = p.side < 0 ? 0 : A.width;
+  const split = wall - p.side * (A.width / 2) * A.defFrac;
+  const reachAcross = mid - p.side * cross;
+
+  const lo = p.index === 0 ? reachAcross : split;
+  const hi = p.index === 0 ? split : wall;
+  const fx0 = Math.min(lo, hi) + hx;
+  const fx1 = Math.max(lo, hi) - hx;
 
   const boxes = [{ x0: fx0, x1: fx1, y0: hy, y1: A.height - hy }];
 
-  // own goal pocket, only if the paddle actually fits through the mouth
+  // own goal pocket — defence only, and only if it fits through the mouth
   const gy0 = goalY0() + hy, gy1 = goalY1() - hy;
-  if (gy1 >= gy0) {
+  if (p.index === 1 && gy1 >= gy0) {
     boxes.push(p.side > 0
       ? { x0: fx0, x1: A.width + A.goalDepth - hx, y0: gy0, y1: gy1 }
       : { x0: -A.goalDepth + hx, x1: fx1,          y0: gy0, y1: gy1 });
@@ -1154,10 +1168,21 @@ function drawReachLines() {
   ctx.setLineDash([0.14, 0.16]);
   for (const side of [-1, 1]) {
     ctx.strokeStyle = goalColour(side);
+
+    // how far this side's offence may reach
     ctx.globalAlpha = 0.28;
     ctx.beginPath();
     ctx.moveTo(mid - side * cross, 0);
     ctx.lineTo(mid - side * cross, A.height);
+    ctx.stroke();
+
+    // and where its own half hands over from offence to defence
+    const wall = side < 0 ? 0 : A.width;
+    const split = wall - side * (A.width / 2) * A.defFrac;
+    ctx.globalAlpha = 0.13;
+    ctx.beginPath();
+    ctx.moveTo(split, 0);
+    ctx.lineTo(split, A.height);
     ctx.stroke();
   }
   ctx.setLineDash([]);
@@ -1574,6 +1599,7 @@ const KNOBS = [
   { o: A, k: 'goalDepth',  label: 'goal depth',min: 0.2,max: 2,  step: 0.05, u: 'm', refit: 1 },
   { o: A, k: 'cornerR',    label: 'corner r', min: 0,   max: 0.4,step: 0.01, u: 'm' },
   { o: A, k: 'crossFrac',  label: 'reach across',min: 0, max: 0.9,step: 0.05, u: '' },
+  { o: A, k: 'defFrac',    label: 'defence zone',min: 0.1,max:0.9,step: 0.05, u: '' },
   { o: A, k: 'margin',     label: 'margin',   min: 0,   max: 3,  step: 0.1,  u: 'm', refit: 1 },
 
   ['PHYSICS'],
@@ -1871,7 +1897,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v8.3-dev';
+const BUILD = 'v8.4-dev';
 
 /* ==========================================================================
    SERVER
