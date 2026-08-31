@@ -1254,13 +1254,15 @@ function drawCursor() {
   ctx.strokeStyle = col;
   ctx.lineWidth = lineW();
 
-  ctx.globalAlpha = 0.22;
+  ctx.globalAlpha = 0.5;
+  ctx.lineWidth = lineW() * 2.2;
   ctx.beginPath();
   ctx.moveTo(cursor.x, cursor.y);
   ctx.lineTo(lerp(p.px, p.x, renderAlpha), lerp(p.py, p.y, renderAlpha));
   ctx.stroke();
 
-  ctx.globalAlpha = 0.8;
+  ctx.lineWidth = lineW();
+  ctx.globalAlpha = 0.85;
   ctx.beginPath();
   ctx.arc(cursor.x, cursor.y, R, 0, Math.PI * 2);
   ctx.stroke();
@@ -1781,7 +1783,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v7.4';
+const BUILD = 'v7.5';
 
 /* ==========================================================================
    SERVER
