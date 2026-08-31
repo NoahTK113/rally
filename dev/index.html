@@ -1460,7 +1460,6 @@ function frame(nowMs) {
   const dt = Math.min(now - last, 0.25);
   last = now;
 
-  pumpProbe();
 
   // The status chip carries live measurements now, so it has to be rewritten
   // rather than being painted once on connect.
@@ -1474,6 +1473,7 @@ function frame(nowMs) {
   if (!frozen) {
     accumulator += dt;
     while (accumulator >= FIXED_DT && steps < MAX_STEPS) {
+      simClock++;
       pumpLinks();
       serverStepOnce(FIXED_DT);
       clientStepOnce(FIXED_DT);
@@ -1481,6 +1481,7 @@ function frame(nowMs) {
     }
     if (steps >= MAX_STEPS) accumulator = 0;
   } else if (stepOnce) {
+    simClock++;
     pumpLinks();
     serverStepOnce(FIXED_DT);
     clientStepOnce(FIXED_DT);
@@ -1532,7 +1533,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v6.2-dev';
+const BUILD = 'v6.3-dev';
 
 /* ==========================================================================
    SERVER
@@ -1752,6 +1753,14 @@ function pumpLinks() {
    a listen server fair, since we can lift the host's delay but can never
    lower the guest's.
    ========================================================================== */
+/* Ticks since boot. The loopback schedules in TICKS, not milliseconds: the
+   fixed-step loop runs several ticks back to back inside a single frame, so
+   wall-clock time barely moves across the burst. A message due in 2ms could
+   not be delivered by any remaining tick in that frame and had to wait for the
+   next one — the simulated wire was quietly charging a frame per hop, while
+   the real data channel, which delivers on arrival, charged nothing. */
+let simClock = 0;
+
 // Messages are cloned on send. The real channel serialises, so the receiver
 // can never share an object with the sender; the loopback must behave the same
 // or we would get aliasing bugs that only appear on the host.
@@ -1766,11 +1775,11 @@ function makeEnd() {
     onMessage(fn) { this.handler = fn; },
     send(m) {
       if (!this.other) return;
-      this.other.inbox.push({ due: performance.now() + linkDelayMs(), m: cloneMsg(m) });
+      const ticks = Math.max(1, Math.round(linkDelayMs() / (FIXED_DT * 1000)));
+      this.other.inbox.push({ due: simClock + ticks, m: cloneMsg(m) });
     },
     pump() {
-      const now = performance.now();
-      while (this.inbox.length && this.inbox[0].due <= now) {
+      while (this.inbox.length && this.inbox[0].due <= simClock) {
         const item = this.inbox.shift();
         if (this.handler) this.handler(item.m);
       }
@@ -1808,31 +1817,6 @@ function makeChannelEnd(conn) {
   };
   conn.on('data', d => { if (end.handler) end.handler(d); });
   return end;
-}
-
-/* ---- loopback self-test ---------------------------------------------------
-   Bounces a ping through the local pair once a second and measures how long it
-   actually took. It should read twice linkDelayMs(), and it is the only way to
-   confirm the simulated wire behaves before anything depends on it. */
-const probe = { a: null, b: null, sent: 0, rtt: 0, seq: 0 };
-
-function initProbe() {
-  const [a, b] = makeLoopbackPair();
-  probe.a = a; probe.b = b;
-  b.onMessage(m => b.send({ pong: m.seq }));       // far end echoes
-  a.onMessage(m => { if (m.pong === probe.seq) probe.rtt = performance.now() - probe.sent; });
-}
-
-function pumpProbe() {
-  if (!probe.a) return;
-  probe.a.pump();
-  probe.b.pump();
-  const now = performance.now();
-  if (now - probe.sent > 1000) {
-    probe.sent = now;
-    probe.seq++;
-    probe.a.send({ seq: probe.seq });
-  }
 }
 
 const NET_HZ = 60;                 // packets/sec each way; they are tiny
@@ -2009,7 +1993,6 @@ function onData(d) {
 }
 
 $('build').textContent = BUILD;
-initProbe();
 
 $('btnSolo').addEventListener('click', function () {
   net.role = 'solo'; mySide = 1; updateStatus(); startGame();
