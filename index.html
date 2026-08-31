@@ -242,7 +242,7 @@ function resize() {
 
   // Quantise to a whole number of DEVICE pixels per metre. The court is a
   // whole number of metres across, so this lands x=0, x=W, y=0 and y=H on the
-  // same pixel phase and vertical walls rasterise identically to horizontal
+  // same pixel world.phase and vertical walls rasterise identically to horizontal
   // ones. Without it the two axes sit at unrelated sub-pixel offsets and the
   // antialiaser spreads their ink differently, which reads as a colour shift.
   const sDev = view.sDev = Math.max(1, Math.floor(Math.min(cwDev / w, availDev / h)));
@@ -376,10 +376,22 @@ function makePaddle(side) {
   };
 }
 
-const paddles = { '-1': makePaddle(-1), '1': makePaddle(1) };
-const me   = () => paddles[mySide];
-const them = () => paddles[-mySide];
-for (const k in paddles) paddles[k].ta = paddles[k].a = 0;
+/* INPUT is captured once per tick and stored, never read from inside the
+   simulation. That is the whole point: re-running tick 400 must use tick 400's
+   input, not whatever the mouse is doing now. Without this, replay — and
+   therefore rollback — is impossible by construction. */
+const intent = { tx: 0, ty: 0, ta: 0 };          // what the player wants, live
+const liveInput = { '-1': { tx: 0, ty: 0, ta: 0 },
+                    '1':  { tx: 0, ty: 0, ta: 0 } };
+
+function captureInto(dst, dt) {
+  if (mouseInside) { intent.tx = mouse.x; intent.ty = mouse.y; }
+  let rot = 0;
+  if (keys.has('a')) rot += 1;
+  if (keys.has('d')) rot -= 1;
+  if (rot) intent.ta += rot * FEEL.keyRate * (fineRotate ? 1 / FINE_DIV : 1) * DEG * dt;
+  dst.tx = intent.tx; dst.ty = intent.ty; dst.ta = intent.ta;
+}
 
 const keys = new Set();
 let mouse = { x: A.width / 2, y: A.height / 2 }, mouseInside = false;
@@ -438,16 +450,10 @@ function nearestLegal(boxes, x, y) {
   return best;
 }
 
-function stepPaddle(p, dt) {
+// Pure: the paddle's target comes from the input record, never from a global.
+function stepPaddle(p, inp, dt) {
   p.px = p.x; p.py = p.y; p.pa = p.a;
-
-  if (p === me()) {
-    if (mouseInside) { p.tx = mouse.x; p.ty = mouse.y; }
-    let rot = 0;
-    if (keys.has('a')) rot += 1;
-    if (keys.has('d')) rot -= 1;
-    if (rot) p.ta += rot * FEEL.keyRate * (fineRotate ? 1 / FINE_DIV : 1) * DEG * dt;
-  }
+  p.tx = inp.tx; p.ty = inp.ty; p.ta = inp.ta;
   /* The POSE is constrained, not the target. Clamping the target would make
      the spring error — and therefore the force — collapse to zero as the
      paddle neared a wall, so it would creep in instead of driving in. Here the
@@ -508,11 +514,13 @@ function tipVelocity(p, endSign) {
    the start even though nothing reads it yet — retrofitting angular state into
    a collision solver later is far more painful than carrying it now.
    ========================================================================== */
-const ball = {
-  x: 0, y: 0, a: 0,          // pose (a = orientation, for the spin marker)
-  vx: 0, vy: 0, w: 0,        // velocity, angular velocity (rad/s)
-  px: 0, py: 0, pa: 0,       // previous pose, for render interpolation
-};
+function makeBall() {
+  return {
+    x: 0, y: 0, a: 0,        // pose (a = orientation, for the spin marker)
+    vx: 0, vy: 0, w: 0,      // velocity, angular velocity (rad/s)
+    px: 0, py: 0, pa: 0,     // previous pose, for render interpolation
+  };
+}
 
 /* A goal is scored when the ball's CENTRE crosses a goal line, inside the
    mouth. The line is a scoring plane only — it never blocks anything.
@@ -528,42 +536,87 @@ const ANNOUNCE_T = 2.0;
 const COUNT_T    = 3.0;
 const EXIT_MAX_T = 1.5;          // fallback if the ball never clears the back
 
-const scores = { '-1': 0, '1': 0 };
-let phase = PHASE.PLAY;
-let phaseT = 0;
-let lastScorer = 0;
-let ballHidden = false;
+/* ==========================================================================
+   THE WORLD
+   Every value the simulation reads or writes lives here, in one object that
+   can be copied wholesale. That is what makes save, compare and restore
+   possible — the three things rollback is built out of. Tuning constants
+   (A, FEEL, PHYS) stay outside: they are settings, not state.
+   ========================================================================== */
+function makeWorld() {
+  return {
+    tick: 0,
+    p: { '-1': makePaddle(-1), '1': makePaddle(1) },
+    ball: makeBall(),
+    scores: { '-1': 0, '1': 0 },
+    phase: PHASE.PLAY,
+    phaseT: 0,
+    lastScorer: 0,
+    ballHidden: false,
+  };
+}
+
+const PADDLE_F = ['x', 'y', 'a', 'vx', 'vy', 'w', 'tx', 'ty', 'ta', 'px', 'py', 'pa'];
+const BALL_F   = ['x', 'y', 'a', 'vx', 'vy', 'w', 'px', 'py', 'pa'];
+
+// Copies INTO an existing world rather than returning a new one, so the
+// aliases below stay valid forever and rollback allocates nothing.
+function copyWorld(dst, src) {
+  dst.tick = src.tick;
+  for (const k of ['-1', '1']) {
+    for (const f of PADDLE_F) dst.p[k][f] = src.p[k][f];
+    dst.scores[k] = src.scores[k];
+  }
+  for (const f of BALL_F) dst.ball[f] = src.ball[f];
+  dst.phase = src.phase;
+  dst.phaseT = src.phaseT;
+  dst.lastScorer = src.lastScorer;
+  dst.ballHidden = src.ballHidden;
+}
+
+const world = makeWorld();
+
+// Stable references into the live world. Safe because copyWorld never
+// replaces these objects, it only overwrites their fields.
+const paddles = world.p;
+const ball = world.ball;
+const scores = world.scores;
+
+const me   = () => paddles[mySide];
+const them = () => paddles[-mySide];
 
 const teamName = side => side > 0 ? 'BLUE' : 'RED';
 
-function checkGoal(b) {
+function checkGoal(w) {
+  const b = w.ball;
   if (b.y < goalY0() || b.y > goalY1()) return;
-  if (b.x <= 0)            award(+1);        // left goal conceded
-  else if (b.x >= A.width) award(-1);
+  if (b.x <= 0)            award(w, +1);     // left goal conceded
+  else if (b.x >= A.width) award(w, -1);
 }
 
-function award(side) {
-  scores[side]++;
-  lastScorer = side;
-  phase = PHASE.EXIT;
-  phaseT = EXIT_MAX_T;
+function award(w, side) {
+  w.scores[side]++;
+  w.lastScorer = side;
+  w.phase = PHASE.EXIT;
+  w.phaseT = EXIT_MAX_T;
 }
 
-function resetRound(clearScore) {
-  if (clearScore) { scores['-1'] = scores['1'] = 0; lastScorer = 0; }
-  phase = PHASE.PLAY;
-  phaseT = 0;
-  ballHidden = false;
-  serve();
+function resetRound(w, clearScore) {
+  if (clearScore) { w.scores['-1'] = w.scores['1'] = 0; w.lastScorer = 0; }
+  w.phase = PHASE.PLAY;
+  w.phaseT = 0;
+  w.ballHidden = false;
+  serve(w);
 }
 
 // Tip-off: dropped dead centre from the ceiling with no velocity.
-function serve() {
-  ball.x = A.width / 2;
-  ball.y = A.height - PHYS.ballR;
-  ball.vx = 0; ball.vy = 0;
-  ball.a = 0;  ball.w = 0;
-  ball.px = ball.x; ball.py = ball.y; ball.pa = 0;
+function serve(w) {
+  const b = w.ball;
+  b.x = A.width / 2;
+  b.y = A.height - PHYS.ballR;
+  b.vx = 0; b.vy = 0;
+  b.a = 0;  b.w = 0;
+  b.px = b.x; b.py = b.y; b.pa = 0;
 }
 
 /* One contact against an immovable surface. `n` points OUT of the surface,
@@ -764,7 +817,8 @@ function collidePaddle(b, p) {
   resolveContact(b, wnx, wny, sum - d, PHYS.paddleRest, PHYS.paddleFriction, svx, svy);
 }
 
-function stepBall(b, dt, collide = true) {
+function stepBall(w, dt, collide = true) {
+  const b = w.ball;
   b.px = b.x; b.py = b.y; b.pa = b.a;
 
   // A fast ball against a fast-swinging paddle can close more than the contact
@@ -788,8 +842,8 @@ function stepBall(b, dt, collide = true) {
     b.y  += b.vy * h;
     b.a  += b.w * h;
     if (collide) {
-      collidePaddle(b, paddles['-1']);
-      collidePaddle(b, paddles['1']);
+      collidePaddle(b, w.p['-1']);
+      collidePaddle(b, w.p['1']);
       collideNet(b);
       collideArena(b);      // last, so the ball can never be left inside a wall
     }
@@ -961,7 +1015,7 @@ function drawPaddle(x, y, a, colour, ghost) {
 }
 
 function drawBall() {
-  if (ballHidden) return;
+  if (world.ballHidden) return;
   // Clipped to the arena silhouette, so crossing the open back of a goal box
   // cuts the ball off against the line — it slides behind it and is gone.
   ctx.save();
@@ -1070,15 +1124,15 @@ function drawHud() {
 
   ctx.font = `600 ${size}px ui-monospace, Consolas, monospace`;
   ctx.textBaseline = 'middle';
-  const flash = phase !== PHASE.PLAY;
+  const flash = world.phase !== PHASE.PLAY;
   ctx.globalAlpha = flash ? 1 : 0.75;
 
   ctx.textAlign = 'right';
-  ctx.fillStyle = lastScorer === -1 && flash ? '#ffffff' : goalColour(-1);
+  ctx.fillStyle = world.lastScorer === -1 && flash ? '#ffffff' : goalColour(-1);
   ctx.fillText(String(scores['-1']), sx - gap, sy);
 
   ctx.textAlign = 'left';
-  ctx.fillStyle = lastScorer === 1 && flash ? '#ffffff' : goalColour(1);
+  ctx.fillStyle = world.lastScorer === 1 && flash ? '#ffffff' : goalColour(1);
   ctx.fillText(String(scores['1']), sx + gap, sy);
 
   ctx.textAlign = 'center';
@@ -1090,23 +1144,23 @@ function drawHud() {
 }
 
 function drawAnnouncement() {
-  if (phase !== PHASE.ANNOUNCE && phase !== PHASE.COUNT) return;
+  if (world.phase !== PHASE.ANNOUNCE && world.phase !== PHASE.COUNT) return;
 
   const cx = view.ox + (A.width / 2) * view.scale;
   const cy = view.oy - (A.height * 0.52) * view.scale;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  if (phase === PHASE.ANNOUNCE) {
+  if (world.phase === PHASE.ANNOUNCE) {
     const size = Math.max(16, Math.round(view.scale * 0.55));
     ctx.font = `700 ${size}px ui-monospace, Consolas, monospace`;
-    ctx.fillStyle = goalColour(lastScorer);
+    ctx.fillStyle = goalColour(world.lastScorer);
     // brief fade-in so it does not just snap on
-    ctx.globalAlpha = Math.min(1, (ANNOUNCE_T - phaseT) / 0.18);
-    ctx.fillText(`${teamName(lastScorer)} TEAM SCORED`, cx, cy);
+    ctx.globalAlpha = Math.min(1, (ANNOUNCE_T - world.phaseT) / 0.18);
+    ctx.fillText(`${teamName(world.lastScorer)} TEAM SCORED`, cx, cy);
   } else {
-    const n = Math.max(1, Math.ceil(phaseT));
-    const frac = phaseT - Math.floor(phaseT);      // 1 -> 0 within each second
+    const n = Math.max(1, Math.ceil(world.phaseT));
+    const frac = world.phaseT - Math.floor(world.phaseT);      // 1 -> 0 within each second
     const size = Math.max(22, Math.round(view.scale * 1.25));
     ctx.font = `700 ${size}px ui-monospace, Consolas, monospace`;
     ctx.fillStyle = '#c9d4e2';
@@ -1157,7 +1211,7 @@ canvas.addEventListener('wheel', e => {
   // target is always a clean multiple however it was last nudged.
   const step = fineRotate ? STEP_FINE : STEP_COARSE;
   const dir  = -Math.sign(e.deltaY);
-  me().ta = (Math.round(me().ta / step) + dir) * step;
+  intent.ta = (Math.round(intent.ta / step) + dir) * step;
 }, { passive: false });
 
 addEventListener('keydown', e => {
@@ -1168,10 +1222,10 @@ addEventListener('keydown', e => {
   keys.add(k);
   if (k === ' ') frozen = !frozen;
   if (k === '.') { stepOnce = true; frozen = true; }
-  if (k === 's') me().ta = 0;
+  if (k === 's') intent.ta = 0;
   if (k === 'escape') { leaveGame(); return; }
-  if (k === 'f') resetRound(false);
-  if (k === 'r') resetRound(true);
+  if (k === 'f') resetRound(world, false);
+  if (k === 'r') resetRound(world, true);
   if (k === 'v') opts.showVectors = !opts.showVectors;
   if (k === 'g') opts.showTarget = !opts.showTarget;
   if (k === 'h') { document.getElementById('panel').classList.toggle('hidden'); resize(); }
@@ -1286,42 +1340,36 @@ let stepsLastFrame = 0;
 let frozen = false, stepOnce = false;
 let fps = 60, fpsAcc = 0, fpsN = 0;
 
-function stepAll(dt) {
-  if (net.role === 'guest') {
-    /* Same simulation as the host, every tick: both paddles from their
-       targets, and the ball with full collisions. That is what makes motion
-       smooth between packets. Snapshots only nudge it back into line, and the
-       host stays the authority on score and phase. */
-    stepPaddle(paddles['-1'], dt);
-    stepPaddle(paddles['1'], dt);
-    if (phase === PHASE.PLAY) stepBall(ball, dt, true);
-    if (phaseT > 0) phaseT -= dt;
-    return;
-  }
+/* One tick. Reads nothing but the world and the inputs handed to it, so
+   running it twice on the same arguments gives the same answer — which is
+   what replay, and therefore rollback, requires. */
+function stepWorld(w, inp, dt) {
+  w.tick++;
+  stepPaddle(w.p['-1'], inp['-1'], dt);
+  stepPaddle(w.p['1'],  inp['1'],  dt);
 
-  stepPaddle(paddles['-1'], dt);
-  stepPaddle(paddles['1'], dt);
-  if (phase === PHASE.PLAY) {
-    stepBall(ball, dt, true);
-    checkGoal(ball);
+  if (w.phase === PHASE.PLAY) {
+    stepBall(w, dt, true);
+    checkGoal(w);
 
-  } else if (phase === PHASE.EXIT) {
-    stepBall(ball, dt, true);           // still solid; the back is simply open
-    phaseT -= dt;
+  } else if (w.phase === PHASE.EXIT) {
+    stepBall(w, dt, true);            // still solid; the back is simply open
+    w.phaseT -= dt;
     const out = A.goalDepth + PHYS.ballR * 2;
-    if (ball.x < -out || ball.x > A.width + out || ball.y < -out || phaseT <= 0) {
-      ballHidden = true;
-      phase = PHASE.ANNOUNCE;
-      phaseT = ANNOUNCE_T;
+    const b = w.ball;
+    if (b.x < -out || b.x > A.width + out || b.y < -out || w.phaseT <= 0) {
+      w.ballHidden = true;
+      w.phase = PHASE.ANNOUNCE;
+      w.phaseT = ANNOUNCE_T;
     }
 
-  } else if (phase === PHASE.ANNOUNCE) {
-    phaseT -= dt;
-    if (phaseT <= 0) { phase = PHASE.COUNT; phaseT = COUNT_T; }
+  } else if (w.phase === PHASE.ANNOUNCE) {
+    w.phaseT -= dt;
+    if (w.phaseT <= 0) { w.phase = PHASE.COUNT; w.phaseT = COUNT_T; }
 
-  } else if (phase === PHASE.COUNT) {
-    phaseT -= dt;
-    if (phaseT <= 0) resetRound(false);
+  } else if (w.phase === PHASE.COUNT) {
+    w.phaseT -= dt;
+    if (w.phaseT <= 0) resetRound(w, false);
   }
 }
 
@@ -1339,11 +1387,21 @@ function startGame() {
 
   // Both players get a countdown before the tip-off rather than the ball
   // simply appearing — longer online, so the guest can settle after connecting.
-  scores['-1'] = 0; scores['1'] = 0;
-  lastScorer = 0;
-  ballHidden = true;
-  phase = PHASE.COUNT;
-  phaseT = net.role === 'solo' ? 3 : 5;
+  world.scores['-1'] = 0; world.scores['1'] = 0;
+  world.lastScorer = 0;
+  world.ballHidden = true;
+  world.phase = PHASE.COUNT;
+  world.phaseT = net.role === 'solo' ? 3 : 5;
+
+  // Seed the control target from where the paddle actually is, so it does not
+  // lurch toward a stale intent left over from a previous session.
+  const mine = me();
+  intent.tx = mine.x; intent.ty = mine.y; intent.ta = mine.a;
+  for (const k of ['-1', '1']) {
+    liveInput[k].tx = paddles[k].x;
+    liveInput[k].ty = paddles[k].y;
+    liveInput[k].ta = paddles[k].a;
+  }
 
   last = performance.now() / 1000;   // no giant first dt
   accumulator = 0;
@@ -1384,11 +1442,15 @@ function frame(nowMs) {
   if (!frozen) {
     accumulator += dt;
     while (accumulator >= FIXED_DT && steps < MAX_STEPS) {
-      stepAll(FIXED_DT); accumulator -= FIXED_DT; steps++;
+      captureInto(liveInput[mySide], FIXED_DT);
+      stepWorld(world, liveInput, FIXED_DT);
+      accumulator -= FIXED_DT; steps++;
     }
     if (steps >= MAX_STEPS) accumulator = 0;
   } else if (stepOnce) {
-    stepAll(FIXED_DT); steps = 1; stepOnce = false; accumulator = 0;
+    captureInto(liveInput[mySide], FIXED_DT);
+    stepWorld(world, liveInput, FIXED_DT);
+    steps = 1; stepOnce = false; accumulator = 0;
   }
   stepsLastFrame = steps;
 
@@ -1429,19 +1491,16 @@ function frame(nowMs) {
    wrong, in which case it snaps.
 
    The host stays authoritative: its ball is the real one, and its score and
-   phase are simply obeyed.
+   world.phase are simply obeyed.
 
    PeerJS's public broker only introduces the two browsers. Once connected the
    traffic is direct and the broker is out of the loop.
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v5 · 2026-08-31';
+const BUILD = 'v6-dev · step 1: replayable sim';
 
 const NET_HZ = 60;                 // packets/sec each way; they are tiny
-const POS_BLEND = 0.30;            // fraction of positional error absorbed per packet
-const SNAP_DIST = 0.9;             // metres. beyond this, stop blending and snap
-const SNAP_ANGLE = 1.0;            // radians. same idea for orientation
 const PEER_PREFIX = 'rallyxz-';
 const CODE_CHARS = 'ACDEFGHJKLMNPQRTUVWXY34679';   // no look-alike characters
 
@@ -1570,7 +1629,7 @@ function sendSnapshot() {
          // the pose is only there to correct where it has drifted to
          h: [h.x, h.y, h.a, h.vx, h.vy, h.w, h.tx, h.ty, h.ta],
          sc: [scores['-1'], scores['1']],
-         ph: phase, pt: phaseT, hd: ballHidden });
+         ph: world.phase, pt: world.phaseT, hd: world.ballHidden });
 }
 
 function sendInput() {
@@ -1580,30 +1639,20 @@ function sendInput() {
 
 // Absorb part of an error now and the rest over the next few packets, unless
 // the gap is so wide that something desynced, in which case just jump.
-function correct(o, x, y, a) {
-  const ex = x - o.x, ey = y - o.y;
-  if (Math.hypot(ex, ey) > SNAP_DIST) { o.x = x; o.y = y; }
-  else { o.x += ex * POS_BLEND; o.y += ey * POS_BLEND; }
-
-  // Angle is handled separately: easing a large orientation error means
-  // visibly spinning the paddle to get there, which is worse than a jump.
-  const ea = a - o.a;
-  o.a = Math.abs(ea) > SNAP_ANGLE ? a : o.a + ea * POS_BLEND;
-}
-
+/* Step 1 of the netcode rebuild: the simulation is now replayable, but the
+   client/server split does not exist yet. Connection, room codes and config
+   sync still work; nothing yet drives the simulation from the wire. Restored
+   in step 3, on top of prediction and reconciliation rather than the blending
+   that made the paddle oscillate. */
 function onData(d) {
   if (!d || !d.t) return;
   if (d.n !== undefined) {
     if (d.n <= inSeq) return;      // stale, a newer one already landed
     inSeq = d.n;
   }
+  if (d.t === 'i' && d.k) net.rtt = performance.now() - d.k;
 
-  if (d.t === 'i' && net.role === 'host') {
-    const g = paddles['-1'];
-    g.tx = d.x; g.ty = d.y; g.ta = d.a;
-    if (d.k) net.rtt = performance.now() - d.k;
-
-  } else if (d.t === 'c' && net.role === 'guest') {
+  if (d.t === 'c' && net.role === 'guest') {
     Object.assign(A, d.A);
     Object.assign(FEEL, d.FEEL);
     Object.assign(PHYS, d.PHYS);
@@ -1611,38 +1660,6 @@ function onData(d) {
     _featKey.length = 0;
     buildPanel();
     resize();
-
-  } else if (d.t === 's' && net.role === 'guest') {
-    lastStamp = d.ts;
-
-    // the host's paddle: adopt its target, nudge its pose
-    const h = paddles['1'];
-    if (!net.synced) {            // first snapshot: take everything verbatim
-      net.synced = true;
-      h.x = d.h[0]; h.y = d.h[1]; h.a = d.h[2]; h.pa = h.a;
-      h.px = h.x; h.py = h.y;
-    }
-    h.tx = d.h[6]; h.ty = d.h[7]; h.ta = d.h[8];
-    correct(h, d.h[0], d.h[1], d.h[2]);
-    h.vx = d.h[3]; h.vy = d.h[4]; h.w = d.h[5];
-
-    // the ball: velocity is authoritative, position is eased
-    const wasPlaying = phase === PHASE.PLAY;
-    correct(ball, d.b[0], d.b[1], d.b[2]);
-    ball.vx = d.b[3]; ball.vy = d.b[4]; ball.w = d.b[5];
-
-    scores['-1'] = d.sc[0];
-    scores['1'] = d.sc[1];
-    ballHidden = d.hd;
-
-    // a phase change means the ball was just teleported by a serve, so there
-    // is nothing worth easing toward — take it exactly
-    if (d.ph !== phase || !wasPlaying) {
-      ball.x = d.b[0]; ball.y = d.b[1];
-      ball.px = ball.x; ball.py = ball.y;
-    }
-    phase = d.ph;
-    phaseT = d.pt;
   }
 }
 
@@ -1657,7 +1674,7 @@ $('codeIn').addEventListener('keydown', function (e) { if (e.key === 'Enter') jo
 updateStatus();
 
 buildPanel();
-serve();
+serve(world);
 resize();
 </script>
 </body>
