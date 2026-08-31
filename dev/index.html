@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Rally</title>
+<title>Flick Ball</title>
 <style>
   html,body{margin:0;height:100%;background:#070910;overflow:hidden;
     font-family:ui-monospace,Consolas,monospace;color:#c9d4e2}
@@ -11,8 +11,12 @@
      screen in its own right, not a scrim over a game already in progress. */
   canvas{display:none;width:100vw;height:100vh}
   body.playing canvas{display:block}
+  body.playing canvas{cursor:none}
+  /* Diagnostics live behind H, together with the tuning panel: one key, one
+     view. Controls and connection state stay up, since a player needs those. */
   #tag,#help,#status{display:none}
-  body.playing #tag,body.playing #help,body.playing #status{display:block}
+  body.playing #help,body.playing #status{display:block}
+  body.playing.debug #tag{display:block}
   #tag{position:fixed;bottom:66px;left:16px;font-size:11px;line-height:1.65;color:#66788f;
        pointer-events:none;text-shadow:0 1px 3px #000}
   #help{position:fixed;bottom:14px;left:16px;font-size:10.5px;line-height:1.8;color:#4d5c72;
@@ -22,7 +26,7 @@
   #panel{position:fixed;top:0;left:0;right:0;z-index:10;display:none;flex-wrap:wrap;
          align-items:flex-end;gap:9px 13px;padding:9px 14px 10px;font-size:10px;
          background:rgba(8,12,19,.92);border-bottom:1px solid #1a2534;backdrop-filter:blur(8px)}
-  body.playing #panel:not(.hidden){display:flex}
+  body.playing.debug #panel{display:flex}
   #panel .grp{align-self:center;font-size:9px;letter-spacing:.15em;text-transform:uppercase;
               color:#3f4d61;padding-left:11px;border-left:1px solid #1c2838}
   #panel .grp.first{padding-left:0;border-left:0}
@@ -39,11 +43,35 @@
 
   #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
-  #menu.hidden{display:none}
+  #menu.hidden,#setup.hidden,#setupOwner.hidden,#setupWait.hidden{display:none}
+  #setup{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;
+         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
+  #setup .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
+               background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.5);text-align:center}
+  #setup h1{font-size:15px;letter-spacing:.3em;font-weight:600;color:#8fa3bd}
+  .lab{font-size:9.5px;letter-spacing:.2em;color:#4d5c72;margin-bottom:10px}
+  .stepper{display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:12px}
+  .stepper button{width:38px;height:38px;padding:0;font-size:18px;line-height:1;
+                  background:#151d2b;color:#c9d4e2;border:1px solid #263449;border-radius:9px;
+                  cursor:pointer}
+  .stepper button:hover:not(:disabled){border-color:#22d3ee}
+  .stepper button:disabled{opacity:.3;cursor:default}
+  #ptVal{min-width:74px;font-size:30px;font-weight:700;color:#e6edf6;font-variant-numeric:tabular-nums}
+  #ptRange{-webkit-appearance:none;appearance:none;width:100%;height:3px;border-radius:2px;
+           background:#22303f;outline:none;margin:0 0 10px;cursor:pointer}
+  #ptRange::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+           background:#22d3ee;cursor:pointer}
+  #ptRange:disabled::-webkit-slider-thumb{background:#3f4d61;cursor:default}
+  .hint{font-size:10px;color:#66788f;margin-bottom:22px}
+  #setup .go{width:100%;padding:12px;font:inherit;font-size:11px;letter-spacing:.14em;
+             border-radius:8px;cursor:pointer;background:#151d2b;color:#c9d4e2;
+             border:1px solid #263449}
+  #setup .go:hover:not(:disabled){border-color:#22d3ee;color:#e6edf6}
+  #setup .go:disabled{opacity:.45;cursor:default}
+  #setup .msg{margin-top:13px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:16px}
   #menu .card{width:340px;padding:26px 26px 22px;border:1px solid #1d2939;border-radius:14px;
               background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.6);text-align:center}
-  #menu h1{margin:0 0 4px;font-size:30px;letter-spacing:.32em;font-weight:700;color:#e6edf6}
-  #menu .sub{margin:0 0 22px;font-size:10px;letter-spacing:.2em;color:#4d5c72}
+  #menu h1,#setup h1{margin:0 0 20px;font-size:30px;letter-spacing:.32em;font-weight:700;color:#e6edf6}
   #menu button{width:100%;padding:11px;margin-bottom:9px;font:inherit;font-size:11px;
                letter-spacing:.13em;border-radius:8px;cursor:pointer;
                background:#151d2b;color:#c9d4e2;border:1px solid #263449}
@@ -69,15 +97,35 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="panel" class="hidden"></div>
+<div id="panel"></div>
 <div id="tag"></div>
 <div id="help"></div>
 <div id="build"></div>
 <div id="status"></div>
+<div id="setup" class="hidden">
+  <div class="card">
+    <div id="setupOwner">
+      <h1>SETUP</h1>
+      <div class="lab">POINTS TO WIN</div>
+      <div class="stepper">
+        <button id="ptMinus">&minus;</button>
+        <div id="ptVal">7</div>
+        <button id="ptPlus">+</button>
+      </div>
+      <input id="ptRange" type="range" min="0" max="100" step="1" value="7">
+      <div class="hint" id="ptHint">first to 7 goals</div>
+      <button class="go" id="btnStart">START MATCH</button>
+    </div>
+    <div id="setupWait" class="hidden">
+      <h1>WAITING FOR HOST</h1>
+      <div class="hint">The host is choosing the settings.</div>
+    </div>
+    <div class="msg" id="setupMsg"></div>
+  </div>
+</div>
 <div id="menu">
   <div class="card">
-    <h1>RALLY</h1>
-    <p class="sub">HIT IT OVER. PUT IT IN.</p>
+    <h1>FLICK BALL</h1>
     <button id="btnSolo">PRACTICE ALONE</button>
     <button id="btnHost">HOST A GAME</button>
     <div class="join">
@@ -162,6 +210,10 @@ const lineW = () => VIS.linePx / view.sDev;
 // looking the same weight as a marking.
 const contourW = () => (VIS.linePx * 2) / view.sDev;
 
+/* Match rules. Synced with the rest of the config, because both simulations
+   must agree on when a match ends or they would disagree about the result. */
+const MATCH = { target: 7 };          // 0 = endless
+
 /* Latency injected into the HOST's own link to its own server. The whole
    point of a listen server is that we can raise the host's delay but can never
    lower the guest's, so fairness means levelling the host down to match. */
@@ -206,7 +258,7 @@ const COL = {
 const goalColour = side => side > 0 ? COL.blue : COL.red;
 const goalFill   = side => side > 0 ? COL.blueFill : COL.redFill;
 
-const opts = { showTarget: true, showVectors: true };
+const opts = { showTarget: false, showVectors: false };
 let renderAlpha = 1;
 
 // Outward glow: the same contour stroked a few times, widening and fading.
@@ -242,8 +294,7 @@ function resize() {
 
   // Keep the arena clear of the tuning panel rather than letting it overlap.
   const panelEl = document.getElementById('panel');
-  const panelDev = panelEl.classList.contains('hidden')
-    ? 0 : Math.round(panelEl.offsetHeight * dpr);
+  const panelDev = Math.round(panelEl.offsetHeight * dpr);
   const availDev = Math.max(1, chDev - panelDev);
 
   const b = bounds();
@@ -389,12 +440,33 @@ function makePaddle(side) {
    simulation. That is the whole point: re-running tick 400 must use tick 400's
    input, not whatever the mouse is doing now. Without this, replay — and
    therefore rollback — is impossible by construction. */
+/* A VIRTUAL cursor in world units. Clamped to the same box the paddle target
+   is clamped to, which does two things: it can never leave the field, and
+   overshooting stops accumulating dead travel you would have to drag back. */
+const cursor = { x: 0, y: 0 };
+
+/* Mouse capture is off while we find out whether the drawn cursor alone is
+   enough. Note the clamp only does half its job without it: absolute mapping
+   means overshooting the field still banks travel you have to drag back, and
+   only integrating raw movement removes that. */
+const USE_POINTER_LOCK = false;
+let pointerLocked = false;
+
 const intent = { tx: 0, ty: 0, ta: 0 };          // what the player wants, live
 const liveInput = { '-1': { tx: 0, ty: 0, ta: 0 },
                     '1':  { tx: 0, ty: 0, ta: 0 } };
 
+function clampCursor() {
+  const boxes = paddleBoxes(me());
+  const t = nearestLegal(boxes, cursor.x, cursor.y);
+  const r = FEEL.reach;
+  cursor.x = cursor.x < t.x - r ? t.x - r : cursor.x > t.x + r ? t.x + r : cursor.x;
+  cursor.y = cursor.y < t.y - r ? t.y - r : cursor.y > t.y + r ? t.y + r : cursor.y;
+}
+
 function captureInto(dst, dt) {
-  if (mouseInside) { intent.tx = mouse.x; intent.ty = mouse.y; }
+  clampCursor();
+  intent.tx = cursor.x; intent.ty = cursor.y;
   let rot = 0;
   if (keys.has('a')) rot += 1;
   if (keys.has('d')) rot -= 1;
@@ -540,8 +612,10 @@ function makeBall() {
                through the back of the goal and off the board
      announce  "<TEAM> TEAM SCORED" for two seconds
      count     3 - 2 - 1, then the tip-off drops */
-const PHASE = { PLAY: 'play', EXIT: 'exit', ANNOUNCE: 'announce', COUNT: 'count' };
+const PHASE = { PLAY: 'play', EXIT: 'exit', ANNOUNCE: 'announce',
+                COUNT: 'count', WIN: 'win' };
 const ANNOUNCE_T = 2.0;
+const WIN_T      = 4.0;          // how long the result stands before the lobby
 const COUNT_T    = 3.0;
 const EXIT_MAX_T = 1.5;          // fallback if the ball never clears the back
 
@@ -595,6 +669,13 @@ const me   = () => paddles[mySide];
 const them = () => paddles[-mySide];
 
 const teamName = side => side > 0 ? 'BLUE' : 'RED';
+
+// Read from MATCH rather than the world: it is a rule, not state. Both peers
+// hold the same value because it is synced with the rest of the config.
+function matchOver(w) {
+  return MATCH.target > 0 &&
+         (w.scores['-1'] >= MATCH.target || w.scores['1'] >= MATCH.target);
+}
 
 function checkGoal(w) {
   const b = w.ball;
@@ -1161,7 +1242,41 @@ function arrow(ox, oy, vx, vy, colour) {
 
 const VEL_SCALE = 0.11;   // metres of arrow per m/s
 
+/* Our own cursor, because a thin OS arrow over a dark field is easy to lose.
+   The tether to the paddle makes the spring visible: the longer it is, the
+   harder the paddle is being pulled. */
+function drawCursor() {
+  if (!running) return;
+  const p = me();
+  const col = goalColour(mySide);
+  const R = 0.13;
+
+  ctx.strokeStyle = col;
+  ctx.lineWidth = lineW();
+
+  ctx.globalAlpha = 0.5;
+  ctx.lineWidth = lineW() * 2.2;
+  ctx.beginPath();
+  ctx.moveTo(cursor.x, cursor.y);
+  ctx.lineTo(lerp(p.px, p.x, renderAlpha), lerp(p.py, p.y, renderAlpha));
+  ctx.stroke();
+
+  ctx.lineWidth = lineW();
+  ctx.globalAlpha = 0.85;
+  ctx.beginPath();
+  ctx.arc(cursor.x, cursor.y, R, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cursor.x - R * 1.9, cursor.y); ctx.lineTo(cursor.x - R * 0.55, cursor.y);
+  ctx.moveTo(cursor.x + R * 0.55, cursor.y); ctx.lineTo(cursor.x + R * 1.9, cursor.y);
+  ctx.moveTo(cursor.x, cursor.y - R * 1.9); ctx.lineTo(cursor.x, cursor.y - R * 0.55);
+  ctx.moveTo(cursor.x, cursor.y + R * 0.55); ctx.lineTo(cursor.x, cursor.y + R * 1.9);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
 function drawEffects() {
+  drawCursor();
   if (!opts.showVectors) return;
   const p0 = me();
   arrow(p0.x, p0.y, p0.vx * VEL_SCALE, p0.vy * VEL_SCALE, 'rgba(125,211,252,.9)');
@@ -1200,16 +1315,34 @@ function drawHud() {
   ctx.fillText('–', sx, sy);
   ctx.globalAlpha = 1;
 
+  if (MATCH.target > 0) {
+    ctx.font = `600 ${Math.max(9, Math.round(size * 0.28))}px ui-monospace, Consolas, monospace`;
+    ctx.fillStyle = 'rgba(140,160,185,.4)';
+    ctx.fillText(MATCH.target + ' POINTS TO WIN', sx, sy + size * 0.72);
+  }
+
   drawAnnouncement();
 }
 
 function drawAnnouncement() {
-  if (world.phase !== PHASE.ANNOUNCE && world.phase !== PHASE.COUNT) return;
+  if (world.phase !== PHASE.ANNOUNCE && world.phase !== PHASE.COUNT &&
+      world.phase !== PHASE.WIN) return;
 
   const cx = view.ox + (A.width / 2) * view.scale;
   const cy = view.oy - (A.height * 0.52) * view.scale;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+
+  if (world.phase === PHASE.WIN) {
+    const side = world.lastScorer;
+    const size = Math.max(20, Math.round(view.scale * 0.72));
+    ctx.font = `700 ${size}px ui-monospace, Consolas, monospace`;
+    ctx.fillStyle = goalColour(side);
+    ctx.globalAlpha = Math.min(1, (WIN_T - world.phaseT) / 0.25);
+    ctx.fillText(`${teamName(side)} TEAM WON`, cx, cy);
+    ctx.globalAlpha = 1;
+    return;
+  }
 
   if (world.phase === PHASE.ANNOUNCE) {
     const size = Math.max(16, Math.round(view.scale * 0.55));
@@ -1268,12 +1401,30 @@ function buildReadout() {
 }
 
 // ---- input ----------------------------------------------------------------
+/* Locked, we integrate raw movement at exactly the scale the absolute mapping
+   used, so the feel is unchanged — only the escape route is removed. */
 canvas.addEventListener('mousemove', e => {
-  const r = canvas.getBoundingClientRect();
-  mouse = toWorld(e.clientX - r.left, e.clientY - r.top);
+  if (pointerLocked) {
+    cursor.x += (e.movementX || 0) / view.scale;
+    cursor.y -= (e.movementY || 0) / view.scale;
+  } else {
+    const r = canvas.getBoundingClientRect();
+    const w = toWorld(e.clientX - r.left, e.clientY - r.top);
+    cursor.x = w.x; cursor.y = w.y;
+  }
   mouseInside = true;
 });
-canvas.addEventListener('mouseleave', () => { mouseInside = false; });
+
+canvas.addEventListener('mousedown', e => {
+  if (USE_POINTER_LOCK && e.button === 0 && running && !pointerLocked &&
+      canvas.requestPointerLock) {
+    canvas.requestPointerLock();
+  }
+});
+document.addEventListener('pointerlockchange', () => {
+  pointerLocked = document.pointerLockElement === canvas;
+});
+document.addEventListener('pointerlockerror', () => { pointerLocked = false; });
 let fineRotate = false;   // right mouse button held
 
 canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -1304,7 +1455,7 @@ addEventListener('keydown', e => {
   if (k === 'r') { if (server.active) resetRound(server.world, true); }
   if (k === 'v') opts.showVectors = !opts.showVectors;
   if (k === 'g') opts.showTarget = !opts.showTarget;
-  if (k === 'h') { document.getElementById('panel').classList.toggle('hidden'); resize(); }
+  if (k === 'h') { document.body.classList.toggle('debug'); resize(); }
 });
 addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 addEventListener('resize', resize);
@@ -1401,10 +1552,9 @@ function buildPanel() {
 }
 
 document.getElementById('help').innerHTML =
-  '<b>mouse</b> move &nbsp; <b>wheel</b> / <b>A</b><b>D</b> rotate &nbsp; ' +
+  '<b>mouse</b> move &nbsp; <b>wheel</b> rotate &nbsp; ' +
   '<b>hold right-click</b> fine rotate &nbsp; <b>S</b> level<br>' +
-  '<b>space</b> freeze &nbsp; <b>.</b> step &nbsp; <b>V</b> vectors &nbsp; <b>G</b> ghost' +
-  ' &nbsp; <b>H</b> knobs &nbsp; <b>F</b> serve &nbsp; <b>R</b> reset score' +
+  '<b>F</b> serve &nbsp; <b>R</b> reset score &nbsp; <b>H</b> settings' +
   ' &nbsp; <b>esc</b> menu';
 
 /* ---- loop -----------------------------------------------------------------
@@ -1446,7 +1596,15 @@ function stepWorld(w, inp, dt) {
 
   } else if (w.phase === PHASE.ANNOUNCE) {
     w.phaseT -= dt;
-    if (w.phaseT <= 0) { w.phase = PHASE.COUNT; w.phaseT = COUNT_T; }
+    if (w.phaseT <= 0) {
+      // The goal that ends a match still gets its announcement; only what
+      // follows differs.
+      if (matchOver(w)) { w.phase = PHASE.WIN; w.phaseT = WIN_T; }
+      else              { w.phase = PHASE.COUNT; w.phaseT = COUNT_T; }
+    }
+
+  } else if (w.phase === PHASE.WIN) {
+    if (w.phaseT > 0) w.phaseT -= dt;      // then it simply waits to be noticed
 
   } else if (w.phase === PHASE.COUNT) {
     w.phaseT -= dt;
@@ -1463,6 +1621,7 @@ function startGame() {
   running = true;
   document.body.classList.add('playing');
   hideMenu();
+  hideSetup();
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   resize();
 
@@ -1474,6 +1633,7 @@ function startGame() {
   copyWorld(world, fresh);
 
   const mine = me();
+  cursor.x = mine.x; cursor.y = mine.y;
   intent.tx = mine.x; intent.ty = mine.y; intent.ta = mine.a;
   for (const k of ['-1', '1']) {
     liveInput[k].tx = paddles[k].x;
@@ -1497,7 +1657,26 @@ function startGame() {
   requestAnimationFrame(frame);
 }
 
+/* A finished match returns to the lobby rather than the main menu: the
+   connection is still up and the settings are still wanted. Both peers reach
+   this from the phase they are already being told about, so it needs no
+   message of its own. */
+function releaseMouse() {
+  if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
+  pointerLocked = false;
+}
+
+function endMatch() {
+  releaseMouse();
+  running = false;
+  document.body.classList.remove('playing');
+  serverStop();
+  client.link = null;
+  showSetup();
+}
+
 function stopGame() {
+  releaseMouse();
   running = false;
   serverStop();
   client.link = null;
@@ -1576,6 +1755,8 @@ function frame(nowMs) {
 
   renderAlpha = frozen ? 1 : accumulator / FIXED_DT;
   render();
+
+  if (world.phase === PHASE.WIN && world.phaseT <= 0) { endMatch(); return; }
   requestAnimationFrame(frame);
 }
 
@@ -1602,7 +1783,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v6.8r-dev';
+const BUILD = 'v7.5-dev';
 
 /* ==========================================================================
    SERVER
@@ -1616,7 +1797,7 @@ const BUILD = 'v6.8r-dev';
    the other side of the country. That is the whole point: the host gets no
    privileged path to its own server.
    ========================================================================== */
-const PHASES = ['play', 'exit', 'announce', 'count'];
+const PHASES = ['play', 'exit', 'announce', 'count', 'win'];
 
 const server = {
   active: false,
@@ -2087,7 +2268,45 @@ const randomCode = () => Array.from({ length: 4 },
 
 function setMsg(html) { $('netMsg').innerHTML = html; }
 function hideMenu() { $('menu').classList.add('hidden'); }
-function showMenu() { $('menu').classList.remove('hidden'); }
+function showMenu() { $('menu').classList.remove('hidden'); hideSetup(); }
+function hideSetup() { $('setup').classList.add('hidden'); }
+
+/* The lobby. Reached once there is someone to play against — or straight away
+   in practice — and returned to after a match. The host owns the settings and
+   the guest waits, which avoids having to resolve two people editing the same
+   number. */
+function showSetup() {
+  hideMenu();
+  $('setup').classList.remove('hidden');
+  // A guest cannot change anything here, and showing a stale copy of a number
+  // it neither controls nor reliably receives is worse than showing nothing.
+  const owner = net.role !== 'guest';
+  $('setupOwner').classList.toggle('hidden', !owner);
+  $('setupWait').classList.toggle('hidden', owner);
+  $('setupMsg').innerHTML = '';
+  if (owner) paintTarget();
+}
+
+function paintTarget() {
+  const t = MATCH.target;
+  $('ptVal').textContent = t === 0 ? '∞' : t;
+  $('ptRange').value = t;
+  $('ptHint').textContent = t === 0 ? 'endless — play until someone quits'
+                                    : 'first to ' + t + (t === 1 ? ' goal' : ' goals');
+}
+
+function setTarget(v) {
+  MATCH.target = Math.max(0, Math.min(100, Math.round(v) || 0));
+  try { localStorage.setItem('flickball.target', MATCH.target); } catch (e) {}
+  paintTarget();
+}
+
+function beginMatch() {
+  if (net.role === 'guest') return;             // only the host may start
+  if (net.role === 'host') send({ t: 'start', target: MATCH.target });
+  hideSetup();
+  startGame();
+}
 
 function updateStatus() {
   const el = $('status');
@@ -2122,8 +2341,8 @@ function wireConn(conn) {
     net.link.onMessage(onData);   // replaced by serverAttach/clientAttach on start
     net.up = true;
     updateStatus();
-    startGame();
     if (net.role === 'host') sendConfig();
+    showSetup();
   });
   conn.on('close', function () { dropped('Opponent disconnected.'); });
   conn.on('error', function () { dropped('Connection error.'); });
@@ -2196,7 +2415,7 @@ function send(obj) {
    simulations drift apart and the corrections become visible. */
 function sendConfig() {
   if (net.role !== 'host') return;
-  send({ t: 'c', A: A, FEEL: FEEL, PHYS: PHYS });
+  send({ t: 'c', A: A, FEEL: FEEL, PHYS: PHYS, M: MATCH });
 }
 
 function sendSnapshot() {
@@ -2230,10 +2449,18 @@ function onData(d) {
     inSeq = d.n;
   }
 
+  if (d.t === 'start' && net.role === 'guest') {
+    if (typeof d.target === 'number') { MATCH.target = d.target; paintTarget(); }
+    hideSetup();
+    startGame();
+    return;
+  }
+
   if (d.t === 'c' && net.role === 'guest') {
     Object.assign(A, d.A);
     Object.assign(FEEL, d.FEEL);
     Object.assign(PHYS, d.PHYS);
+    if (d.M) { Object.assign(MATCH, d.M); paintTarget(); }
     _feat = null;
     _featKey.length = 0;
     buildPanel();
@@ -2244,8 +2471,18 @@ function onData(d) {
 $('build').textContent = BUILD;
 
 $('btnSolo').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; updateStatus(); startGame();
+  net.role = 'solo'; mySide = 1; updateStatus(); showSetup();
 });
+$('btnStart').addEventListener('click', beginMatch);
+$('ptMinus').addEventListener('click', () => setTarget(MATCH.target - 1));
+$('ptPlus').addEventListener('click', () => setTarget(MATCH.target + 1));
+$('ptRange').addEventListener('input', e => setTarget(parseInt(e.target.value, 10)));
+
+try {
+  const saved = parseInt(localStorage.getItem('flickball.target'), 10);
+  if (!isNaN(saved)) MATCH.target = Math.max(0, Math.min(100, saved));
+} catch (e) {}
+paintTarget();
 $('btnHost').addEventListener('click', hostGame);
 $('btnJoin').addEventListener('click', joinGame);
 $('codeIn').addEventListener('keydown', function (e) { if (e.key === 'Enter') joinGame(); });
