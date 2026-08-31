@@ -1198,7 +1198,9 @@ function readout() {
     `omega ${f(p.w / DEG, 1)} &deg;/s<br>` +
     `tip   ${f(Math.hypot(tip.vx, tip.vy))} m/s<br>` +
     `ball  ${f(Math.hypot(ball.vx, ball.vy))} m/s   spin ${f(ball.w / DEG, 0)} °/s<br>` +
-    `tick  srv ${server.active ? server.world.tick : '-'}   shown ${world.tick}`;
+    `tick  srv ${server.active ? server.world.tick : '-'}   shown ${world.tick}<br>` +
+    `pred  cli ${client.tick}   from ${client.serverTick}   ` +
+    `drift ${client.drift}   want ${client.ahead}   buf ${client.filled}`;
 }
 
 // ---- input ----------------------------------------------------------------
@@ -1533,7 +1535,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v6.3-dev';
+const BUILD = 'v6.4-dev';
 
 /* ==========================================================================
    SERVER
@@ -1687,13 +1689,56 @@ function serverStepOnce(dt) {
    last said. That is deliberately laggy — your paddle does not move until a
    snapshot comes back. Step 4 puts prediction on top of exactly this.
    ========================================================================== */
-const client = { link: null, sendTick: 0, inputTick: 0, lastSnap: -1,
-                 rtt: 0, rttSmooth: 0 };
+/* The client keeps its own tick counter, aligned to the server's and running
+   AHEAD of it. Ahead, because an input stamped for tick T has to reach the
+   server before the server simulates T; how far ahead is one trip plus a
+   margin for jitter.
+
+   HIST is a ring of past inputs and past states, both keyed by tick. Rollback
+   needs the states to know whether it was right, and the inputs to replay.
+   Sized to comfortably cover a bad connection: 128 ticks is 533ms. */
+const HIST = 128;
+
+const client = {
+  link: null, sendTick: 0, inputTick: 0, lastSnap: -1,
+  rtt: 0, rttSmooth: 0,
+
+  tick: 0,              // our simulated present
+  serverTick: 0,        // newest tick the server has told us about
+  ahead: 0,             // how far in front of the server we are aiming to be
+  drift: 0,             // measured (our tick - server tick) when a snapshot lands
+
+  inputs: null,         // ring of {tx,ty,ta} by tick
+  states: null,         // ring of Worlds by tick
+  filled: 0,
+};
+
+function clientInitHistory() {
+  if (client.inputs) return;
+  client.inputs = new Array(HIST);
+  client.states = new Array(HIST);
+  for (let i = 0; i < HIST; i++) {
+    client.inputs[i] = { tx: 0, ty: 0, ta: 0 };
+    client.states[i] = makeWorld();
+  }
+}
+
+const slot = t => ((t % HIST) + HIST) % HIST;
+
+// One trip out, plus a tick of margin, plus one for the send cadence.
+function desiredAhead() {
+  const tickMs = FIXED_DT * 1000;
+  return Math.max(1, Math.ceil((client.rttSmooth / 2) / tickMs) + 2);
+}
 
 function clientAttach(end) {
+  clientInitHistory();
   client.link = end;
   client.sendTick = 0;
   client.lastSnap = -1;
+  client.tick = 0;
+  client.serverTick = 0;
+  client.filled = 0;
   const forClient = { 'snap': 1, 'pog': 1, 'sping': 1 };
   end.onMessage(m => (m && forClient[m.t]) ? clientReceive(m) : onData(m));
 }
@@ -1713,6 +1758,13 @@ function clientReceive(m) {
   if (m.t !== 'snap') return;
   if (m.d[0] <= client.lastSnap) return;   // stale snapshot
   client.lastSnap = m.d[0];
+  client.serverTick = m.d[0];
+
+  // How far ahead we actually are, versus where we want to be. Step 4b uses
+  // this to steer; for now it is only reported.
+  client.drift = client.tick - client.serverTick;
+  if (client.tick === 0) client.tick = client.serverTick + desiredAhead();
+
   unpackWorld(world, m.d);
 
 }
@@ -1721,11 +1773,22 @@ function clientStepOnce(dt) {
   captureInto(liveInput[mySide], dt);
   if (!client.link) return;
 
+  // Advance our own clock and file this tick's input under it. Nothing reads
+  // the history yet — this step exists to prove the bookkeeping before
+  // prediction depends on it.
+  client.tick++;
+  client.ahead = desiredAhead();
+  const rec = client.inputs[slot(client.tick)];
+  const src = liveInput[mySide];
+  rec.tx = src.tx; rec.ty = src.ty; rec.ta = src.ta;
+  if (client.filled < HIST) client.filled++;
+
+
   if (client.sendTick % 48 === 0) client.link.send({ t: 'png', c: performance.now() });
   const every = Math.max(1, Math.round((1 / FIXED_DT) / NET_HZ));
   if (++client.sendTick % every === 0) {
     const i = liveInput[mySide];
-    client.link.send({ t: 'in', k: ++client.inputTick,
+    client.link.send({ t: 'in', k: ++client.inputTick, w: client.tick,
                        x: i.tx, y: i.ty, a: i.ta });
   }
 }
@@ -1849,7 +1912,11 @@ function updateStatus() {
   const ping = client.rttSmooth ? Math.round(client.rttSmooth) + 'ms' : '--';
   // `link` is the delay injected into our own loopback, so it only means
   // anything on a machine that is actually running a server.
-  const link = server.active ? ' &nbsp; link ' + Math.round(linkDelayMs()) + 'ms' : '';
+  // the loopback schedules in whole ticks, so report what it can deliver
+  const q = Math.max(1, Math.round(linkDelayMs() / (FIXED_DT * 1000)));
+  const link = server.active
+    ? ' &nbsp; link ' + (q * FIXED_DT * 1000).toFixed(1) + 'ms'
+    : '';
 
   if (net.role === 'solo') {
     el.innerHTML = 'PRACTICE<br>ping ' + ping + link;
