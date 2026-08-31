@@ -1197,7 +1197,8 @@ function readout() {
     `vel   ${f(Math.hypot(p.vx, p.vy))} m/s   max ${f(maxPaddleSpeed())}<br>` +
     `omega ${f(p.w / DEG, 1)} &deg;/s<br>` +
     `tip   ${f(Math.hypot(tip.vx, tip.vy))} m/s<br>` +
-    `ball  ${f(Math.hypot(ball.vx, ball.vy))} m/s   spin ${f(ball.w / DEG, 0)} °/s`;
+    `ball  ${f(Math.hypot(ball.vx, ball.vy))} m/s   spin ${f(ball.w / DEG, 0)} °/s<br>` +
+    `tick  srv ${server.active ? server.world.tick : '-'}   shown ${world.tick}`;
 }
 
 // ---- input ----------------------------------------------------------------
@@ -1233,8 +1234,8 @@ addEventListener('keydown', e => {
   if (k === '.') { stepOnce = true; frozen = true; }
   if (k === 's') intent.ta = 0;
   if (k === 'escape') { leaveGame(); return; }
-  if (k === 'f') resetRound(world, false);
-  if (k === 'r') resetRound(world, true);
+  if (k === 'f') { if (server.active) resetRound(server.world, false); }
+  if (k === 'r') { if (server.active) resetRound(server.world, true); }
   if (k === 'v') opts.showVectors = !opts.showVectors;
   if (k === 'g') opts.showTarget = !opts.showTarget;
   if (k === 'h') { document.getElementById('panel').classList.toggle('hidden'); resize(); }
@@ -1399,22 +1400,30 @@ function startGame() {
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   resize();
 
-  // Both players get a countdown before the tip-off rather than the ball
-  // simply appearing — longer online, so the guest can settle after connecting.
-  world.scores['-1'] = 0; world.scores['1'] = 0;
-  world.lastScorer = 0;
-  world.ballHidden = true;
-  world.phase = PHASE.COUNT;
-  world.phaseT = net.role === 'solo' ? 3 : 5;
+  /* Wire up server and client. A guest has only a client; anyone else also
+     runs the server, and reaches it over a delayed loopback so their path to
+     it looks like the guest's path — same code, same latency, no home
+     advantage. */
+  const fresh = makeWorld();
+  copyWorld(world, fresh);
 
-  // Seed the control target from where the paddle actually is, so it does not
-  // lurch toward a stale intent left over from a previous session.
   const mine = me();
   intent.tx = mine.x; intent.ty = mine.y; intent.ta = mine.a;
   for (const k of ['-1', '1']) {
     liveInput[k].tx = paddles[k].x;
     liveInput[k].ty = paddles[k].y;
     liveInput[k].ta = paddles[k].a;
+  }
+
+  if (net.role === 'guest') {
+    serverStop();
+    clientAttach(net.link);
+  } else {
+    serverStart(net.role === 'solo');
+    const pair = makeLoopbackPair();
+    serverAttach(pair[0], mySide);
+    clientAttach(pair[1]);
+    if (net.role === 'host' && net.link) serverAttach(net.link, -mySide);
   }
 
   last = performance.now() / 1000;   // no giant first dt
@@ -1424,6 +1433,8 @@ function startGame() {
 
 function stopGame() {
   running = false;
+  serverStop();
+  client.link = null;
   document.body.classList.remove('playing');
   showMenu();
 }
@@ -1449,7 +1460,6 @@ function frame(nowMs) {
   const dt = Math.min(now - last, 0.25);
   last = now;
 
-  if (net.link) net.link.pump();
   pumpProbe();
 
   // The status chip carries live measurements now, so it has to be rewritten
@@ -1464,14 +1474,16 @@ function frame(nowMs) {
   if (!frozen) {
     accumulator += dt;
     while (accumulator >= FIXED_DT && steps < MAX_STEPS) {
-      captureInto(liveInput[mySide], FIXED_DT);
-      stepWorld(world, liveInput, FIXED_DT);
+      pumpLinks();
+      serverStepOnce(FIXED_DT);
+      clientStepOnce(FIXED_DT);
       accumulator -= FIXED_DT; steps++;
     }
     if (steps >= MAX_STEPS) accumulator = 0;
   } else if (stepOnce) {
-    captureInto(liveInput[mySide], FIXED_DT);
-    stepWorld(world, liveInput, FIXED_DT);
+    pumpLinks();
+    serverStepOnce(FIXED_DT);
+    clientStepOnce(FIXED_DT);
     steps = 1; stepOnce = false; accumulator = 0;
   }
   stepsLastFrame = steps;
@@ -1520,7 +1532,168 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v6-dev · step 2: transport';
+const BUILD = 'v6-dev · step 3: server';
+
+/* ==========================================================================
+   SERVER
+   Owns the authoritative world. Free-running: it ticks on its own clock and
+   never waits for a packet, because waiting is lockstep and lockstep is
+   hostage to the slowest connection. When a player's input has not arrived,
+   the last one is assumed to still be held.
+
+   It reaches its clients only through transport ends, so it cannot tell which
+   one is the loopback on this very machine and which is a WebRTC channel on
+   the other side of the country. That is the whole point: the host gets no
+   privileged path to its own server.
+   ========================================================================== */
+const PHASES = ['play', 'exit', 'announce', 'count'];
+
+const server = {
+  active: false,
+  world: makeWorld(),
+  inputs: { '-1': { tx: 0, ty: 0, ta: 0, tick: -1 },
+            '1':  { tx: 0, ty: 0, ta: 0, tick: -1 } },
+  links: [],
+  sendTick: 0,
+};
+
+// 31 numbers. Named packing rather than JSON of the world so the wire format
+// is explicit and cheap to widen later.
+function packWorld(w) {
+  const a = [w.tick, PHASES.indexOf(w.phase), w.phaseT, w.lastScorer,
+             w.ballHidden ? 1 : 0, w.scores['-1'], w.scores['1'],
+             w.ball.x, w.ball.y, w.ball.a, w.ball.vx, w.ball.vy, w.ball.w];
+  for (const k of ['-1', '1']) {
+    const p = w.p[k];
+    a.push(p.x, p.y, p.a, p.vx, p.vy, p.w, p.tx, p.ty, p.ta);
+  }
+  return a;
+}
+
+function unpackWorld(w, a) {
+  let i = 0;
+  w.tick = a[i++];
+  w.phase = PHASES[a[i++]];
+  w.phaseT = a[i++];
+  w.lastScorer = a[i++];
+  w.ballHidden = !!a[i++];
+  w.scores['-1'] = a[i++];
+  w.scores['1'] = a[i++];
+  const b = w.ball;
+  b.x = a[i++]; b.y = a[i++]; b.a = a[i++];
+  b.vx = a[i++]; b.vy = a[i++]; b.w = a[i++];
+  b.px = b.x; b.py = b.y; b.pa = b.a;      // no render lerp across a snapshot
+  for (const k of ['-1', '1']) {
+    const p = w.p[k];
+    p.x = a[i++]; p.y = a[i++]; p.a = a[i++];
+    p.vx = a[i++]; p.vy = a[i++]; p.w = a[i++];
+    p.tx = a[i++]; p.ty = a[i++]; p.ta = a[i++];
+    p.px = p.x; p.py = p.y; p.pa = p.a;
+  }
+}
+
+function serverStart(soloish) {
+  const w = server.world;
+  copyWorld(w, makeWorld());
+  w.phase = PHASE.COUNT;
+  w.phaseT = soloish ? 3 : 5;
+  w.ballHidden = true;
+
+  for (const k of ['-1', '1']) {
+    const p = w.p[k];
+    server.inputs[k].tx = p.x;
+    server.inputs[k].ty = p.y;
+    server.inputs[k].ta = p.a;
+    server.inputs[k].tick = -1;
+  }
+  server.links.length = 0;
+  server.sendTick = 0;
+  server.active = true;
+}
+
+function serverStop() {
+  server.active = false;
+  server.links.length = 0;
+}
+
+// A client connected. `side` says which paddle it drives.
+function serverAttach(end, side) {
+  end.side = side;
+  // The channel also carries config and housekeeping, so anything that is not
+  // game input has to fall through to the general handler.
+  end.onMessage(m => (m && m.t === 'in') ? serverReceive(end, m) : onData(m));
+  server.links.push(end);
+}
+
+function serverReceive(end, m) {
+  if (!m || m.t !== 'in') return;
+  const inp = server.inputs[end.side];
+  if (m.k <= inp.tick) return;             // reordered; a newer one already landed
+  inp.tick = m.k;
+  inp.tx = m.x; inp.ty = m.y; inp.ta = m.a;
+
+  // Only the remote client's trip is worth measuring; the loopback's delay is
+  // whatever we told it to be.
+  if (m.e && end.kind === 'channel') {
+    net.rtt = performance.now() - m.e;
+    net.rttSmooth += (net.rtt - net.rttSmooth) * 0.05;
+  }
+}
+
+// One authoritative tick. Called on the fixed clock, unconditionally.
+function serverStepOnce(dt) {
+  if (!server.active) return;
+  stepWorld(server.world, server.inputs, dt);
+
+  // snapshots at NET_HZ, derived from the tick counter so the rate is exact
+  const every = Math.max(1, Math.round((1 / FIXED_DT) / NET_HZ));
+  if (++server.sendTick % every === 0) {
+    const snap = { t: 'snap', d: packWorld(server.world), ts: performance.now() };
+    for (const l of server.links) l.send(snap);
+  }
+}
+
+/* ==========================================================================
+   CLIENT
+   For now it does the naive thing: send input, display whatever the server
+   last said. That is deliberately laggy — your paddle does not move until a
+   snapshot comes back. Step 4 puts prediction on top of exactly this.
+   ========================================================================== */
+const client = { link: null, sendTick: 0, inputTick: 0, lastSnap: -1, snapTs: 0 };
+
+function clientAttach(end) {
+  client.link = end;
+  client.sendTick = 0;
+  client.lastSnap = -1;
+  end.onMessage(m => (m && m.t === 'snap') ? clientReceive(m) : onData(m));
+}
+
+function clientReceive(m) {
+  if (!m || m.t !== 'snap') return;
+  if (m.d[0] <= client.lastSnap) return;   // stale snapshot
+  client.lastSnap = m.d[0];
+  unpackWorld(world, m.d);
+  if (m.ts) client.snapTs = m.ts;
+}
+
+function clientStepOnce(dt) {
+  captureInto(liveInput[mySide], dt);
+  if (!client.link) return;
+  const every = Math.max(1, Math.round((1 / FIXED_DT) / NET_HZ));
+  if (++client.sendTick % every === 0) {
+    const i = liveInput[mySide];
+    client.link.send({ t: 'in', k: ++client.inputTick,
+                       x: i.tx, y: i.ty, a: i.ta, e: client.snapTs });
+  }
+}
+
+// Every wire this machine holds, pumped on the physics clock rather than the
+// render clock — a frame of quantisation is latency we would be adding for
+// nothing on a design whose whole purpose is controlling latency.
+function pumpLinks() {
+  if (client.link) client.link.pump();
+  for (const l of server.links) l.pump();
+}
 
 /* ==========================================================================
    TRANSPORT
@@ -1664,7 +1837,7 @@ function wireConn(conn) {
   net.conn = conn;
   conn.on('open', function () {
     net.link = makeChannelEnd(conn);
-    net.link.onMessage(onData);
+    net.link.onMessage(onData);   // replaced by serverAttach/clientAttach on start
     net.up = true;
     updateStatus();
     startGame();
@@ -1774,7 +1947,6 @@ function onData(d) {
     if (d.n <= inSeq) return;      // stale, a newer one already landed
     inSeq = d.n;
   }
-  if (d.t === 'i' && d.k) net.rtt = performance.now() - d.k;
 
   if (d.t === 'c' && net.role === 'guest') {
     Object.assign(A, d.A);
