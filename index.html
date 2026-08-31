@@ -201,7 +201,7 @@ const A = {
   crossFrac: 0.45,         // how far the OFFENCE paddle may reach into the far
                             // half, as a fraction of that half's width
   defFrac: 0.55,            // share of a player's own half reserved for defence
-  paddleLength: 0.90,
+  paddleLength: 0.75,
   paddleT: 0.10,
   margin: 0.9,
 };
@@ -212,12 +212,12 @@ const A = {
    the cursor — it CHASES it, which is what gives it real linear and angular
    velocity for the ball impulse to read later. */
 const FEEL = {
-  posFreq   : 12.0,   // Hz
-  posDamp   : 2.00,   // 1.0 = critically damped
-  angFreq   : 7.0,    // Hz
-  angDamp   : 1.80,
+  posFreq   : 13.5,   // Hz
+  posDamp   : 1.90,   // 1.0 = critically damped
+  angFreq   : 13.2,   // Hz
+  angDamp   : 1.65,
   keyRate   : 220,    // degrees/sec for A and D
-  maxError  : 0.60,   // metres. The proportional term is clamped to this, so
+  maxError  : 0.75,   // metres. The proportional term is clamped to this, so
                       // the spring has the SAME authority everywhere — in open
                       // space a distant cursor no longer buys extra force that
                       // a wall-pinned target cannot match. Effectively this,
@@ -274,7 +274,7 @@ const NET = {
 };
 
 const PHYS = {
-  gravity      : 6.80,   // m/s^2
+  gravity      : 7.50,   // m/s^2
   ballR        : 0.15,   // m
   restitution  : 0.72,   // bounciness against arena and net
   friction     : 0.35,   // tangential -> this is what generates spin
@@ -1971,7 +1971,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v9.2-dev';
+const BUILD = 'v9.3-dev';
 
 /* ==========================================================================
    SERVER
