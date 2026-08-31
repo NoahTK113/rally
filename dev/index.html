@@ -1262,8 +1262,7 @@ function buildReadout() {
     `pred  lead ${client.leadMin}-${client.leadMax} / want ${client.ahead}   ` +
     `drift ${client.drift}   replay ${client.replayed}<br>` +
     `err   ball ${(client.errBall * 1000).toFixed(0)}mm   ` +
-    `mine ${(client.errMine * 1000).toFixed(0)}mm   ` +
-    `missed ${server.active ? server.missed : '-'}`;
+    `mine ${(client.errMine * 1000).toFixed(0)}mm`;
   client.leadMin = client.leadMax = 0;      // start a fresh window
   return out;
 }
@@ -1603,7 +1602,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v6.9-dev';
+const BUILD = 'v6.8r-dev';
 
 /* ==========================================================================
    SERVER
@@ -1619,26 +1618,13 @@ const BUILD = 'v6.9-dev';
    ========================================================================== */
 const PHASES = ['play', 'exit', 'announce', 'count'];
 
-/* Inputs are filed by the tick they belong to and applied at THAT tick, not
-   whenever they happen to arrive. Without this the server runs a coarsened
-   version of the player's movement that the client cannot reproduce, and the
-   two disagree by roughly one tick of paddle travel — which is centimetres
-   when someone flicks. */
-function makeInputRing() {
-  const r = new Array(HIST);
-  for (let i = 0; i < HIST; i++) r[i] = { tick: -1, tx: 0, ty: 0, ta: 0 };
-  return r;
-}
-
 const server = {
   active: false,
   world: makeWorld(),
-  inputs: { '-1': { tx: 0, ty: 0, ta: 0 },     // what the current tick will use
-            '1':  { tx: 0, ty: 0, ta: 0 } },
-  buf: null,                                    // filed by tick, per side
+  inputs: { '-1': { tx: 0, ty: 0, ta: 0, tick: -1 },
+            '1':  { tx: 0, ty: 0, ta: 0, tick: -1 } },
   links: [],
   sendTick: 0,
-  missed: 0,                                    // ticks with no input on file
 };
 
 // 31 numbers. Named packing rather than JSON of the world so the wire format
@@ -1690,10 +1676,8 @@ function serverStart(soloish) {
     server.inputs[k].ta = p.a;
     server.inputs[k].tick = -1;
   }
-  server.buf = { '-1': makeInputRing(), '1': makeInputRing() };
   server.links.length = 0;
   server.sendTick = 0;
-  server.missed = 0;
   server.active = true;
 }
 
@@ -1733,18 +1717,11 @@ function serverReceive(end, m) {
     return;
   }
 
-  if (m.t !== 'in' || !m.b) return;
-
-  // A batch covering several ticks, overlapping the previous one, so a single
-  // dropped packet loses nothing. Never let an older entry overwrite a newer
-  // one sharing a ring slot.
-  const buf = server.buf && server.buf[end.side];
-  if (!buf) return;
-  for (let i = 0; i < m.b.length; i++) {
-    const e = m.b[i], T = e[0];
-    const cell = buf[slot(T)];
-    if (T > cell.tick) { cell.tick = T; cell.tx = e[1]; cell.ty = e[2]; cell.ta = e[3]; }
-  }
+  if (m.t !== 'in') return;
+  const inp = server.inputs[end.side];
+  if (m.k <= inp.tick) return;             // reordered; a newer one already landed
+  inp.tick = m.k;
+  inp.tx = m.x; inp.ty = m.y; inp.ta = m.a;
 
   // Only the remote client's trip is worth measuring; the loopback's delay is
   // whatever we told it to be.
@@ -1757,18 +1734,6 @@ function serverReceive(end, m) {
 // One authoritative tick. Called on the fixed clock, unconditionally.
 function serverStepOnce(dt) {
   if (!server.active) return;
-
-  // Resolve each side's input for the tick about to run. Nothing on file means
-  // the packet has not arrived, so assume the last one is still held — never
-  // wait, because waiting is lockstep.
-  const T = server.world.tick + 1;
-  for (const k of ['-1', '1']) {
-    const cell = server.buf[k][slot(T)];
-    const dst = server.inputs[k];
-    if (cell.tick === T) { dst.tx = cell.tx; dst.ty = cell.ty; dst.ta = cell.ta; }
-    else if (k === String(-mySide) && net.up) server.missed++;
-  }
-
   stepWorld(server.world, server.inputs, dt);
 
   // ping every 48 ticks, about five times a second
@@ -1800,7 +1765,6 @@ function serverStepOnce(dt) {
    needs the states to know whether it was right, and the inputs to replay.
    Sized to comfortably cover a bad connection: 128 ticks is 533ms. */
 const HIST = 128;
-const INPUT_WINDOW = 8;   // ticks of input per packet; 8 = two send intervals
 
 const client = {
   link: null, sendTick: 0, inputTick: 0, lastSnap: -1,
@@ -2003,26 +1967,11 @@ function clientStepOnce(dt) {
 
 
   if (client.sendTick % 48 === 0) client.link.send({ t: 'png', c: performance.now() });
-
-  /* Quantise the input BEFORE using it locally, so what we simulate with is
-     bit-identical to what we put on the wire. Sending a rounded copy of a
-     value we stepped with unrounded would guarantee a small permanent
-     disagreement. A tenth of a millimetre is far below anything perceptible. */
-  const qi = liveInput[mySide];
-  qi.tx = Math.round(qi.tx * 1e4) / 1e4;
-  qi.ty = Math.round(qi.ty * 1e4) / 1e4;
-  qi.ta = Math.round(qi.ta * 1e5) / 1e5;
   const every = Math.max(1, Math.round((1 / FIXED_DT) / NET_HZ));
   if (++client.sendTick % every === 0) {
-    // Twice the send interval, so every tick's input rides in two consecutive
-    // packets and one lost packet costs nothing.
-    const batch = [];
-    for (let t = client.tick - INPUT_WINDOW + 1; t <= client.tick; t++) {
-      if (t < 1) continue;
-      const r = client.inputs[slot(t)];
-      batch.push([t, r.tx, r.ty, r.ta]);
-    }
-    client.link.send({ t: 'in', k: ++client.inputTick, b: batch });
+    const i = liveInput[mySide];
+    client.link.send({ t: 'in', k: ++client.inputTick, w: client.tick,
+                       x: i.tx, y: i.ty, a: i.ta });
   }
 }
 
