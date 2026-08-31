@@ -1251,7 +1251,8 @@ function readout() {
     `ball  ${f(Math.hypot(ball.vx, ball.vy))} m/s   spin ${f(ball.w / DEG, 0)} °/s<br>` +
     `tick  srv ${server.active ? server.world.tick : '-'}   shown ${world.tick}<br>` +
     `pred  cli ${client.tick}   from ${client.serverTick}   ` +
-    `drift ${client.drift}   want ${client.ahead}   buf ${client.filled}`;
+    `lead ${client.tick - client.serverTick}/${client.ahead}   ` +
+    `drift ${client.drift}   buf ${client.filled}`;
 }
 
 // ---- input ----------------------------------------------------------------
@@ -1586,7 +1587,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v6.5-dev';
+const BUILD = 'v6.6-dev';
 
 /* ==========================================================================
    SERVER
@@ -1756,8 +1757,10 @@ const client = {
 
   tick: 0,              // our simulated present
   serverTick: 0,        // newest tick the server has told us about
-  ahead: 0,             // how far in front of the server we are aiming to be
-  drift: 0,             // measured (our tick - server tick) when a snapshot lands
+  target: 0,            // where our tick ought to be
+  ahead: 0,             // how far in front of a snapshot we aim to run
+  drift: 0,             // measured (our tick - target); zero means locked on
+  pending: 0,           // a single-tick correction waiting to be applied
 
   inputs: null,         // ring of {tx,ty,ta} by tick
   states: null,         // ring of Worlds by tick
@@ -1776,10 +1779,18 @@ function clientInitHistory() {
 
 const slot = t => ((t % HIST) + HIST) % HIST;
 
-// One trip out, plus a tick of margin, plus one for the send cadence.
+/* How far ahead of a RECEIVED snapshot we must run.
+
+   A snapshot stamped tick S is already one one-way trip old when it lands, so
+   the server is at S + owd by then. An input we send now needs another
+   one-way trip to arrive — so for it to be in hand when the server simulates
+   tick C, we need C >= S + 2*owd. That is the FULL round trip, not half of it,
+   plus margin for jitter and the 60Hz send cadence. */
+const LEAD_MARGIN = 3;
+
 function desiredAhead() {
   const tickMs = FIXED_DT * 1000;
-  return Math.max(1, Math.ceil((client.rttSmooth / 2) / tickMs) + 2);
+  return Math.max(1, Math.ceil(client.rttSmooth / tickMs) + LEAD_MARGIN);
 }
 
 function clientAttach(end) {
@@ -1789,6 +1800,8 @@ function clientAttach(end) {
   client.lastSnap = -1;
   client.tick = 0;
   client.serverTick = 0;
+  client.target = 0;
+  client.pending = 0;
   client.filled = 0;
   const forClient = { 'snap': 1, 'pog': 1, 'sping': 1 };
   end.onMessage(m => (m && forClient[m.t]) ? clientReceive(m) : onData(m));
@@ -1811,10 +1824,20 @@ function clientReceive(m) {
   client.lastSnap = m.d[0];
   client.serverTick = m.d[0];
 
-  // How far ahead we actually are, versus where we want to be. Step 4b uses
-  // this to steer; for now it is only reported.
-  client.drift = client.tick - client.serverTick;
-  if (client.tick === 0) client.tick = client.serverTick + desiredAhead();
+  /* Steer our clock onto the server's. The two counters started independently
+     and would otherwise drift apart forever; what matters is not that they
+     agree but that ours stays a known distance IN FRONT.
+
+     A long way off means we just connected or the link changed character, so
+     jump. Close in means nudge by a single tick, because snapping every
+     snapshot would make our clock jitter as badly as the measurement does. */
+  client.ahead = desiredAhead();
+  client.target = client.serverTick + client.ahead;
+  client.drift = client.tick - client.target;
+
+  if (Math.abs(client.drift) > 8) client.tick = client.target;
+  else if (client.drift < 0) client.pending = 1;      // run an extra tick
+  else if (client.drift > 0) client.pending = -1;     // sit one out
 
   unpackWorld(world, m.d);
 
@@ -1827,8 +1850,11 @@ function clientStepOnce(dt) {
   // Advance our own clock and file this tick's input under it. Nothing reads
   // the history yet — this step exists to prove the bookkeeping before
   // prediction depends on it.
-  client.tick++;
-  client.ahead = desiredAhead();
+  // Apply at most one tick of correction per snapshot, so the clock walks onto
+  // target instead of hopping around it.
+  client.tick += 1 + client.pending;
+  client.pending = 0;
+
   const rec = client.inputs[slot(client.tick)];
   const src = liveInput[mySide];
   rec.tx = src.tx; rec.ty = src.ty; rec.ta = src.ta;
