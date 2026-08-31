@@ -162,6 +162,15 @@ const lineW = () => VIS.linePx / view.sDev;
 // looking the same weight as a marking.
 const contourW = () => (VIS.linePx * 2) / view.sDev;
 
+/* Latency injected into the HOST's own link to its own server. The whole
+   point of a listen server is that we can raise the host's delay but can never
+   lower the guest's, so fairness means levelling the host down to match. */
+const NET = {
+  hostDelay: 25,      // ms one-way, used when autoDelay is off
+  autoDelay: true,    // otherwise track half the measured round trip
+  floor: 15,          // never below this, so practice resembles a real match
+};
+
 const PHYS = {
   gravity      : 5.50,   // m/s^2
   ballR        : 0.15,   // m
@@ -1270,6 +1279,10 @@ const KNOBS = [
   { o: PHYS, k: 'paddleFriction', label: 'paddle grip', min: 0, max: 1.5, step: 0.01, u: '' },
   { o: PHYS, k: 'goalPull',    label: 'goal pull',   min: 0,    max: 80,  step: 1,    u: 'm/s²' },
 
+  ['LINK'],
+  { o: NET, k: 'hostDelay', label: 'host delay', min: 0, max: 200, step: 5, u: 'ms' },
+  { o: NET, k: 'floor',     label: 'delay floor',min: 0, max: 100, step: 5, u: 'ms' },
+
   ['RENDER'],
   { o: VIS, k: 'linePx', label: 'line width', min: 1, max: 8, step: 1,    u: 'px' },
   { o: VIS, k: 'glow',   label: 'glow',       min: 0, max: 3, step: 0.05, u: '×' },
@@ -1435,6 +1448,9 @@ function frame(nowMs) {
   const dt = Math.min(now - last, 0.25);
   last = now;
 
+  if (net.link) net.link.pump();
+  pumpProbe();
+
   fpsAcc += dt; fpsN++;
   if (fpsAcc > 0.25) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
 
@@ -1498,13 +1514,108 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v6-dev · step 1: replayable sim';
+const BUILD = 'v6-dev · step 2: transport';
+
+/* ==========================================================================
+   TRANSPORT
+   A link has two ends. Each end has send / onMessage / pump / close, and
+   nothing above this layer is allowed to know which kind it holds.
+
+   Two implementations:
+     channel   the real WebRTC data channel to the other machine
+     loopback  an in-process queue that holds messages for a set delay
+
+   The loopback is what lets the host's own client talk to the host's server
+   over a simulated wire. Give it half the guest's round trip and the host
+   plays under the same latency the guest does — which is the only way to make
+   a listen server fair, since we can lift the host's delay but can never
+   lower the guest's.
+   ========================================================================== */
+// Messages are cloned on send. The real channel serialises, so the receiver
+// can never share an object with the sender; the loopback must behave the same
+// or we would get aliasing bugs that only appear on the host.
+const cloneMsg = m => JSON.parse(JSON.stringify(m));
+
+function makeEnd() {
+  return {
+    kind: 'loopback',
+    other: null,
+    inbox: [],
+    handler: null,
+    onMessage(fn) { this.handler = fn; },
+    send(m) {
+      if (!this.other) return;
+      this.other.inbox.push({ due: performance.now() + linkDelayMs(), m: cloneMsg(m) });
+    },
+    pump() {
+      const now = performance.now();
+      while (this.inbox.length && this.inbox[0].due <= now) {
+        const item = this.inbox.shift();
+        if (this.handler) this.handler(item.m);
+      }
+    },
+    close() { this.inbox.length = 0; this.handler = null; this.other = null; },
+  };
+}
+
+function makeLoopbackPair() {
+  const a = makeEnd(), b = makeEnd();
+  a.other = b; b.other = a;
+  return [a, b];
+}
+
+// One-way delay applied to the host's own link. Half the round trip, because
+// the guest's packets traverse the wire once in each direction.
+function linkDelayMs() {
+  if (!NET.autoDelay) return Math.max(0, NET.hostDelay);
+  const half = net.up ? net.rttSmooth / 2 : 0;
+  return Math.max(NET.floor, half);
+}
+
+function makeChannelEnd(conn) {
+  const end = {
+    kind: 'channel',
+    handler: null,
+    onMessage(fn) { end.handler = fn; },
+    send(m) { try { conn.send(m); } catch (e) {} },
+    pump() {},                      // the channel delivers on its own
+    close() { try { conn.close(); } catch (e) {} end.handler = null; },
+  };
+  conn.on('data', d => { if (end.handler) end.handler(d); });
+  return end;
+}
+
+/* ---- loopback self-test ---------------------------------------------------
+   Bounces a ping through the local pair once a second and measures how long it
+   actually took. It should read twice linkDelayMs(), and it is the only way to
+   confirm the simulated wire behaves before anything depends on it. */
+const probe = { a: null, b: null, sent: 0, rtt: 0, seq: 0 };
+
+function initProbe() {
+  const [a, b] = makeLoopbackPair();
+  probe.a = a; probe.b = b;
+  b.onMessage(m => b.send({ pong: m.seq }));       // far end echoes
+  a.onMessage(m => { if (m.pong === probe.seq) probe.rtt = performance.now() - probe.sent; });
+}
+
+function pumpProbe() {
+  if (!probe.a) return;
+  probe.a.pump();
+  probe.b.pump();
+  const now = performance.now();
+  if (now - probe.sent > 1000) {
+    probe.sent = now;
+    probe.seq++;
+    probe.a.send({ seq: probe.seq });
+  }
+}
 
 const NET_HZ = 60;                 // packets/sec each way; they are tiny
 const PEER_PREFIX = 'rallyxz-';
 const CODE_CHARS = 'ACDEFGHJKLMNPQRTUVWXY34679';   // no look-alike characters
 
-const net = { role: 'solo', peer: null, conn: null, up: false, code: '', rtt: 0, synced: false };
+const net = { role: 'solo', peer: null, conn: null, link: null,
+              up: false, code: '', rtt: 0, rttSmooth: 40, synced: false };
 let netAcc = 0;
 let cfgTick = 0;
 let lastStamp = 0;                 // most recent host timestamp seen by the guest
@@ -1526,9 +1637,14 @@ function showMenu() { $('menu').classList.remove('hidden'); }
 
 function updateStatus() {
   const el = $('status');
-  if (net.role === 'solo') { el.innerHTML = 'PRACTICE'; return; }
+  if (net.role === 'solo') {
+    el.innerHTML = 'PRACTICE<br>link ' + Math.round(linkDelayMs()) +
+                   'ms &nbsp; loop ' + probe.rtt.toFixed(1) + 'ms';
+    return;
+  }
   el.innerHTML = net.role.toUpperCase() + ' &nbsp; <b>' + net.code + '</b><br>' +
-                 'you are ' + teamName(mySide) +
+                 'link ' + Math.round(linkDelayMs()) + 'ms &nbsp; loop ' + probe.rtt.toFixed(1) + 'ms<br>' +
+    'you are ' + teamName(mySide) +
                  (net.up ? ' &nbsp; ' + Math.round(net.rtt) + 'ms' : ' &nbsp;(waiting)');
 }
 
@@ -1541,18 +1657,20 @@ function peerAvailable() {
 function wireConn(conn) {
   net.conn = conn;
   conn.on('open', function () {
+    net.link = makeChannelEnd(conn);
+    net.link.onMessage(onData);
     net.up = true;
     updateStatus();
     startGame();
     if (net.role === 'host') sendConfig();
   });
-  conn.on('data', onData);
   conn.on('close', function () { dropped('Opponent disconnected.'); });
   conn.on('error', function () { dropped('Connection error.'); });
 }
 
 function dropped(why) {
   net.up = false;
+  if (net.link) { net.link.close(); net.link = null; }
   net.conn = null;
   net.role = 'solo';
   net.synced = false;
@@ -1608,9 +1726,9 @@ function joinGame() {
 }
 
 function send(obj) {
-  if (!net.up || !net.conn) return;
+  if (!net.up || !net.link) return;
   obj.n = ++outSeq;
-  try { net.conn.send(obj); } catch (e) {}
+  net.link.send(obj);
 }
 
 /* The host owns the tuning. Both sides must run identical numbers or their
@@ -1664,6 +1782,7 @@ function onData(d) {
 }
 
 $('build').textContent = BUILD;
+initProbe();
 
 $('btnSolo').addEventListener('click', function () {
   net.role = 'solo'; mySide = 1; updateStatus(); startGame();
