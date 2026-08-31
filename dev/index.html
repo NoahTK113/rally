@@ -178,8 +178,8 @@
 const A = {
   width: 12, height: 7,     // inner playing area
   netHeight: 2.25, netT: 0.10,
-  goalLip: 1.00,            // gap between the floor and the bottom of the opening
-  goalHeight: 2.10,         // size of the opening
+  goalLip: 0.50,            // gap between the floor and the bottom of the opening
+  goalHeight: 3.00,         // size of the opening
   goalDepth: 0.70,          // how far the box extends outside the field
   cornerR: 0.11,            // rounding on the arena contour. WORLD units, not
                             // derived from the hairline, so collision geometry
@@ -1897,7 +1897,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v8.4-dev';
+const BUILD = 'v8.5-dev';
 
 /* ==========================================================================
    SERVER
