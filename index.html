@@ -7,17 +7,22 @@
 <style>
   html,body{margin:0;height:100%;background:#070910;overflow:hidden;
     font-family:ui-monospace,Consolas,monospace;color:#c9d4e2}
-  canvas{display:block;width:100vw;height:100vh}
+  /* Nothing of the game is present until a mode is chosen — the menu is a
+     screen in its own right, not a scrim over a game already in progress. */
+  canvas{display:none;width:100vw;height:100vh}
+  body.playing canvas{display:block}
+  #tag,#help,#status{display:none}
+  body.playing #tag,body.playing #help,body.playing #status{display:block}
   #tag{position:fixed;bottom:66px;left:16px;font-size:11px;line-height:1.65;color:#66788f;
        pointer-events:none;text-shadow:0 1px 3px #000}
   #help{position:fixed;bottom:14px;left:16px;font-size:10.5px;line-height:1.8;color:#4d5c72;
         pointer-events:none;text-shadow:0 1px 3px #000}
   #help b{color:#8fa3bd;font-weight:600}
 
-  #panel{position:fixed;top:0;left:0;right:0;z-index:10;display:flex;flex-wrap:wrap;
+  #panel{position:fixed;top:0;left:0;right:0;z-index:10;display:none;flex-wrap:wrap;
          align-items:flex-end;gap:9px 13px;padding:9px 14px 10px;font-size:10px;
          background:rgba(8,12,19,.92);border-bottom:1px solid #1a2534;backdrop-filter:blur(8px)}
-  #panel.hidden{display:none}
+  body.playing #panel:not(.hidden){display:flex}
   #panel .grp{align-self:center;font-size:9px;letter-spacing:.15em;text-transform:uppercase;
               color:#3f4d61;padding-left:11px;border-left:1px solid #1c2838}
   #panel .grp.first{padding-left:0;border-left:0}
@@ -33,7 +38,7 @@
   #panel button:hover{border-color:#33496a}
 
   #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
-        background:rgba(4,6,11,.82);backdrop-filter:blur(6px)}
+        background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
   #menu.hidden{display:none}
   #menu .card{width:340px;padding:26px 26px 22px;border:1px solid #1d2939;border-radius:14px;
               background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.6);text-align:center}
@@ -1158,6 +1163,7 @@ addEventListener('keydown', e => {
   if (k === ' ') frozen = !frozen;
   if (k === '.') { stepOnce = true; frozen = true; }
   if (k === 's') me().ta = 0;
+  if (k === 'escape') { leaveGame(); return; }
   if (k === 'f') resetRound(false);
   if (k === 'r') resetRound(true);
   if (k === 'v') opts.showVectors = !opts.showVectors;
@@ -1258,7 +1264,8 @@ document.getElementById('help').innerHTML =
   '<b>mouse</b> move &nbsp; <b>wheel</b> / <b>A</b><b>D</b> rotate &nbsp; ' +
   '<b>hold right-click</b> fine rotate &nbsp; <b>S</b> level<br>' +
   '<b>space</b> freeze &nbsp; <b>.</b> step &nbsp; <b>V</b> vectors &nbsp; <b>G</b> ghost' +
-  ' &nbsp; <b>H</b> hide knobs &nbsp; <b>F</b> serve &nbsp; <b>R</b> reset score';
+  ' &nbsp; <b>H</b> knobs &nbsp; <b>F</b> serve &nbsp; <b>R</b> reset score' +
+  ' &nbsp; <b>esc</b> menu';
 
 /* ---- loop -----------------------------------------------------------------
    Physics runs at a fixed rate, decoupled from the display, and the renderer
@@ -1310,7 +1317,45 @@ function stepAll(dt) {
   }
 }
 
+/* The loop does not exist until a mode is chosen, so the menu is never
+   sitting on top of a game that is already running. */
+let running = false;
+
+function startGame() {
+  if (running) return;
+  running = true;
+  document.body.classList.add('playing');
+  hideMenu();
+  resize();
+  resetRound(true);
+  last = performance.now() / 1000;   // no giant first dt
+  accumulator = 0;
+  requestAnimationFrame(frame);
+}
+
+function stopGame() {
+  running = false;
+  document.body.classList.remove('playing');
+  showMenu();
+}
+
+// Tear everything down and go back to the menu. Destroying the peer also
+// releases the room code so it can be handed out again.
+function leaveGame() {
+  if (net.conn) { try { net.conn.close(); } catch (e) {} }
+  if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
+  net.conn = null;
+  net.peer = null;
+  net.up = false;
+  net.role = 'solo';
+  mySide = 1;
+  updateStatus();
+  stopGame();
+  setMsg('');
+}
+
 function frame(nowMs) {
+  if (!running) return;
   const now = nowMs / 1000;
   const dt = Math.min(now - last, 0.25);
   last = now;
@@ -1397,9 +1442,9 @@ function wireConn(conn) {
   net.conn = conn;
   conn.on('open', function () {
     net.up = true;
-    hideMenu();
     updateStatus();
-    if (net.role === 'host') { sendConfig(); resetRound(true); }
+    startGame();
+    if (net.role === 'host') sendConfig();
   });
   conn.on('data', onData);
   conn.on('close', function () { dropped('Opponent disconnected.'); });
@@ -1412,7 +1457,7 @@ function dropped(why) {
   net.role = 'solo';
   mySide = 1;
   updateStatus();
-  showMenu();
+  stopGame();
   setMsg(why + '<br>Start a new game when you are ready.');
 }
 
@@ -1521,7 +1566,7 @@ function onData(d) {
 }
 
 $('btnSolo').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; hideMenu(); updateStatus();
+  net.role = 'solo'; mySide = 1; updateStatus(); startGame();
 });
 $('btnHost').addEventListener('click', hostGame);
 $('btnJoin').addEventListener('click', joinGame);
@@ -1531,7 +1576,6 @@ updateStatus();
 buildPanel();
 serve();
 resize();
-requestAnimationFrame(frame);
 </script>
 </body>
 </html>
