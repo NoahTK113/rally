@@ -1532,7 +1532,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v6.1-dev';
+const BUILD = 'v6.2-dev';
 
 /* ==========================================================================
    SERVER
@@ -1621,17 +1621,37 @@ function serverAttach(end, side) {
   end.side = side;
   // The channel also carries config and housekeeping, so anything that is not
   // game input has to fall through to the general handler.
-  end.onMessage(m => (m && m.t === 'in') ? serverReceive(end, m) : onData(m));
+  const forServer = { 'in': 1, 'png': 1, 'spong': 1 };
+  end.onMessage(m => (m && forServer[m.t]) ? serverReceive(end, m) : onData(m));
   server.links.push(end);
 }
 
+/* Latency is measured with a dedicated ping that is answered IMMEDIATELY.
+   Timestamps piggybacked on the next scheduled packet pick up however long
+   that packet happened to wait for its 60Hz slot — up to 16.7ms of pure
+   cadence, averaging half that. Fine for a status readout, useless as the
+   input to the host's delay equalisation, which is what it was feeding. */
 function serverReceive(end, m) {
-  if (!m || m.t !== 'in') return;
+  if (!m) return;
+
+  if (m.t === 'png') { end.send({ t: 'pog', c: m.c }); return; }
+
+  if (m.t === 'spong') {
+    end.rtt = performance.now() - m.s;
+    end.rttSmooth = end.rttSmooth ? end.rttSmooth + (end.rtt - end.rttSmooth) * 0.1
+                                  : end.rtt;
+    if (end.kind === 'channel') {
+      net.rtt = end.rtt;
+      net.rttSmooth = end.rttSmooth;
+    }
+    return;
+  }
+
+  if (m.t !== 'in') return;
   const inp = server.inputs[end.side];
   if (m.k <= inp.tick) return;             // reordered; a newer one already landed
   inp.tick = m.k;
   inp.tx = m.x; inp.ty = m.y; inp.ta = m.a;
-  if (m.c) end.echo = m.c;                 // returned in this link's next snapshot
 
   // Only the remote client's trip is worth measuring; the loopback's delay is
   // whatever we told it to be.
@@ -1646,12 +1666,17 @@ function serverStepOnce(dt) {
   if (!server.active) return;
   stepWorld(server.world, server.inputs, dt);
 
+  // ping every 48 ticks, about five times a second
+  if (server.sendTick % 48 === 0) {
+    const s0 = { t: 'sping', s: performance.now() };
+    for (const l of server.links) l.send(s0);
+  }
+
   // snapshots at NET_HZ, derived from the tick counter so the rate is exact
   const every = Math.max(1, Math.round((1 / FIXED_DT) / NET_HZ));
   if (++server.sendTick % every === 0) {
-    const d = packWorld(server.world), ts = performance.now();
-    // built per link, because each carries that client's own echo home
-    for (const l of server.links) l.send({ t: 'snap', d, ts, e: l.echo || 0 });
+    const snap = { t: 'snap', d: packWorld(server.world) };
+    for (const l of server.links) l.send(snap);
   }
 }
 
@@ -1661,39 +1686,46 @@ function serverStepOnce(dt) {
    last said. That is deliberately laggy — your paddle does not move until a
    snapshot comes back. Step 4 puts prediction on top of exactly this.
    ========================================================================== */
-const client = { link: null, sendTick: 0, inputTick: 0, lastSnap: -1, snapTs: 0,
+const client = { link: null, sendTick: 0, inputTick: 0, lastSnap: -1,
                  rtt: 0, rttSmooth: 0 };
 
 function clientAttach(end) {
   client.link = end;
   client.sendTick = 0;
   client.lastSnap = -1;
-  end.onMessage(m => (m && m.t === 'snap') ? clientReceive(m) : onData(m));
+  const forClient = { 'snap': 1, 'pog': 1, 'sping': 1 };
+  end.onMessage(m => (m && forClient[m.t]) ? clientReceive(m) : onData(m));
 }
 
 function clientReceive(m) {
-  if (!m || m.t !== 'snap') return;
+  if (!m) return;
+
+  if (m.t === 'sping') { client.link.send({ t: 'spong', s: m.s }); return; }
+
+  if (m.t === 'pog') {
+    client.rtt = performance.now() - m.c;
+    client.rttSmooth = client.rttSmooth ? client.rttSmooth + (client.rtt - client.rttSmooth) * 0.1
+                                        : client.rtt;
+    return;
+  }
+
+  if (m.t !== 'snap') return;
   if (m.d[0] <= client.lastSnap) return;   // stale snapshot
   client.lastSnap = m.d[0];
   unpackWorld(world, m.d);
-  if (m.ts) client.snapTs = m.ts;
-  if (m.e) {
-    client.rtt = performance.now() - m.e;
-    if (!client.rttSmooth) client.rttSmooth = client.rtt;
-    client.rttSmooth += (client.rtt - client.rttSmooth) * 0.08;
-  }
+
 }
 
 function clientStepOnce(dt) {
   captureInto(liveInput[mySide], dt);
   if (!client.link) return;
+
+  if (client.sendTick % 48 === 0) client.link.send({ t: 'png', c: performance.now() });
   const every = Math.max(1, Math.round((1 / FIXED_DT) / NET_HZ));
   if (++client.sendTick % every === 0) {
     const i = liveInput[mySide];
     client.link.send({ t: 'in', k: ++client.inputTick,
-                       x: i.tx, y: i.ty, a: i.ta,
-                       e: client.snapTs,          // lets the server time us
-                       c: performance.now() });   // comes back so we can time it
+                       x: i.tx, y: i.ty, a: i.ta });
   }
 }
 
