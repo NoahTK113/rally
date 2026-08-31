@@ -484,13 +484,13 @@ function stepPaddle(p, dt) {
   if (legal.y !== p.y) { if ((legal.y - p.y) * p.vy < 0) p.vy = 0; p.y = legal.y; }
   [p.a, p.w ] = spring(p.a, p.w , p.ta, FEEL.angFreq, FEEL.angDamp, dt);
 
-  // The paddle spins freely. Keep the raw numbers bounded by shifting target
-  // and pose together by a full turn — the spring only ever reads their
-  // difference, so this is invisible to it. pa shifts too or the renderer
-  // would interpolate the whole way round.
-  const TAU = 2 * Math.PI;
-  if (p.ta > Math.PI)       { p.ta -= TAU; p.a -= TAU; p.pa -= TAU; }
-  else if (p.ta < -Math.PI) { p.ta += TAU; p.a += TAU; p.pa += TAU; }
+  /* NO ANGLE WRAPPING. It used to shift target and pose together by a turn to
+     keep the numbers tidy, which is invisible locally — the spring only reads
+     their difference — but catastrophic across a network: the moment one peer
+     wraps, it sends a target 360 degrees away from the other peer's pose, and
+     that peer's spring answers a ~358 degree error with a full-speed flick.
+     Angles are unbounded instead. A double carries thousands of radians with
+     more precision than we could ever need. */
 }
 
 // Velocity of a point rigidly attached to the paddle: v + omega x r.
@@ -1436,18 +1436,26 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v4 · 2026-08-31';
+const BUILD = 'v5 · 2026-08-31';
 
 const NET_HZ = 60;                 // packets/sec each way; they are tiny
 const POS_BLEND = 0.30;            // fraction of positional error absorbed per packet
 const SNAP_DIST = 0.9;             // metres. beyond this, stop blending and snap
+const SNAP_ANGLE = 1.0;            // radians. same idea for orientation
 const PEER_PREFIX = 'rallyxz-';
 const CODE_CHARS = 'ACDEFGHJKLMNPQRTUVWXY34679';   // no look-alike characters
 
-const net = { role: 'solo', peer: null, conn: null, up: false, code: '', rtt: 0 };
+const net = { role: 'solo', peer: null, conn: null, up: false, code: '', rtt: 0, synced: false };
 let netAcc = 0;
 let cfgTick = 0;
 let lastStamp = 0;                 // most recent host timestamp seen by the guest
+
+/* The data channel is unordered as well as unreliable — that is the right
+   trade for realtime traffic, but it means a packet can arrive after a newer
+   one. Applying a stale target yanks the paddle backwards for a frame, so
+   anything older than what we have already seen is dropped. */
+let outSeq = 0;
+let inSeq = -1;
 
 const $ = id => document.getElementById(id);
 const randomCode = () => Array.from({ length: 4 },
@@ -1488,6 +1496,8 @@ function dropped(why) {
   net.up = false;
   net.conn = null;
   net.role = 'solo';
+  net.synced = false;
+  outSeq = 0; inSeq = -1;
   mySide = 1;
   updateStatus();
   stopGame();
@@ -1539,7 +1549,9 @@ function joinGame() {
 }
 
 function send(obj) {
-  if (net.up && net.conn) { try { net.conn.send(obj); } catch (e) {} }
+  if (!net.up || !net.conn) return;
+  obj.n = ++outSeq;
+  try { net.conn.send(obj); } catch (e) {}
 }
 
 /* The host owns the tuning. Both sides must run identical numbers or their
@@ -1570,14 +1582,21 @@ function sendInput() {
 // the gap is so wide that something desynced, in which case just jump.
 function correct(o, x, y, a) {
   const ex = x - o.x, ey = y - o.y;
-  if (Math.hypot(ex, ey) > SNAP_DIST) { o.x = x; o.y = y; o.a = a; return; }
-  o.x += ex * POS_BLEND;
-  o.y += ey * POS_BLEND;
-  o.a += (a - o.a) * POS_BLEND;
+  if (Math.hypot(ex, ey) > SNAP_DIST) { o.x = x; o.y = y; }
+  else { o.x += ex * POS_BLEND; o.y += ey * POS_BLEND; }
+
+  // Angle is handled separately: easing a large orientation error means
+  // visibly spinning the paddle to get there, which is worse than a jump.
+  const ea = a - o.a;
+  o.a = Math.abs(ea) > SNAP_ANGLE ? a : o.a + ea * POS_BLEND;
 }
 
 function onData(d) {
   if (!d || !d.t) return;
+  if (d.n !== undefined) {
+    if (d.n <= inSeq) return;      // stale, a newer one already landed
+    inSeq = d.n;
+  }
 
   if (d.t === 'i' && net.role === 'host') {
     const g = paddles['-1'];
@@ -1598,6 +1617,11 @@ function onData(d) {
 
     // the host's paddle: adopt its target, nudge its pose
     const h = paddles['1'];
+    if (!net.synced) {            // first snapshot: take everything verbatim
+      net.synced = true;
+      h.x = d.h[0]; h.y = d.h[1]; h.a = d.h[2]; h.pa = h.a;
+      h.px = h.x; h.py = h.y;
+    }
     h.tx = d.h[6]; h.ty = d.h[7]; h.ta = d.h[8];
     correct(h, d.h[0], d.h[1], d.h[2]);
     h.vx = d.h[3]; h.vy = d.h[4]; h.w = d.h[5];
