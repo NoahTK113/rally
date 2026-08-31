@@ -489,6 +489,20 @@ function makePaddle(side, index) {
    overshooting stops accumulating dead travel you would have to drag back. */
 const cursor = { x: 0, y: 0 };
 
+/* Uncaptured, the cursor IS the physical mouse, so anything we assign to it is
+   overwritten by the next mouse event. These carry an origin offset, which
+   turns absolute mapping into relative-from-a-reference and lets the cursor be
+   moved — to the paddle you just picked up, say — and stay moved. */
+const rawMouse = { x: 0, y: 0, seen: false };
+const mouseOrigin = { x: 0, y: 0 };
+
+// Put the cursor at a chosen point and make it stick, whichever mode we are in.
+function placeCursor(x, y) {
+  cursor.x = x; cursor.y = y;
+  if (rawMouse.seen) { mouseOrigin.x = x - rawMouse.x; mouseOrigin.y = y - rawMouse.y; }
+  else { mouseOrigin.x = 0; mouseOrigin.y = 0; }
+}
+
 /* Capture integrates raw mouse movement instead of mapping absolute position,
    which is what makes both the clamp and a sensitivity setting possible: an
    absolute mapping has no scale factor to adjust. Sensitivity is a LOCAL
@@ -1470,7 +1484,9 @@ canvas.addEventListener('mousemove', e => {
   } else {
     const r = canvas.getBoundingClientRect();
     const w = toWorld(e.clientX - r.left, e.clientY - r.top);
-    cursor.x = w.x; cursor.y = w.y;
+    rawMouse.x = w.x; rawMouse.y = w.y; rawMouse.seen = true;
+    cursor.x = w.x + mouseOrigin.x;
+    cursor.y = w.y + mouseOrigin.y;
   }
   mouseInside = true;
 });
@@ -1516,7 +1532,7 @@ addEventListener('keydown', e => {
        is what makes parking one somewhere useful rather than a liability. */
     intent.sel = intent.sel ? 0 : 1;
     const np = paddles[idOf(mySide, intent.sel)];
-    cursor.x = np.x; cursor.y = np.y;
+    placeCursor(np.x, np.y);
     intent.tx = np.x; intent.ty = np.y; intent.ta = np.ta;
   }
   if (k === 's') intent.ta = 0;
@@ -1713,7 +1729,7 @@ function startGame() {
 
   intent.sel = 0;
   const mine = paddles[idOf(mySide, 0)];
-  cursor.x = mine.x; cursor.y = mine.y;
+  placeCursor(mine.x, mine.y);
   intent.tx = mine.x; intent.ty = mine.y; intent.ta = mine.a;
   for (const side of [-1, 1]) {
     const k = String(side), p = paddles[idOf(side, 0)];
@@ -1855,7 +1871,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v8.2-dev';
+const BUILD = 'v8.3-dev';
 
 /* ==========================================================================
    SERVER
