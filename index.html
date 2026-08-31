@@ -11,6 +11,7 @@
      screen in its own right, not a scrim over a game already in progress. */
   canvas{display:none;width:100vw;height:100vh}
   body.playing canvas{display:block}
+  body.playing canvas{cursor:none}
   /* Diagnostics live behind H, together with the tuning panel: one key, one
      view. Controls and connection state stay up, since a player needs those. */
   #tag,#help,#status{display:none}
@@ -439,12 +440,27 @@ function makePaddle(side) {
    simulation. That is the whole point: re-running tick 400 must use tick 400's
    input, not whatever the mouse is doing now. Without this, replay — and
    therefore rollback — is impossible by construction. */
+/* A VIRTUAL cursor in world units. Clamped to the same box the paddle target
+   is clamped to, which does two things: it can never leave the field, and
+   overshooting stops accumulating dead travel you would have to drag back. */
+const cursor = { x: 0, y: 0 };
+let pointerLocked = false;
+
 const intent = { tx: 0, ty: 0, ta: 0 };          // what the player wants, live
 const liveInput = { '-1': { tx: 0, ty: 0, ta: 0 },
                     '1':  { tx: 0, ty: 0, ta: 0 } };
 
+function clampCursor() {
+  const boxes = paddleBoxes(me());
+  const t = nearestLegal(boxes, cursor.x, cursor.y);
+  const r = FEEL.reach;
+  cursor.x = cursor.x < t.x - r ? t.x - r : cursor.x > t.x + r ? t.x + r : cursor.x;
+  cursor.y = cursor.y < t.y - r ? t.y - r : cursor.y > t.y + r ? t.y + r : cursor.y;
+}
+
 function captureInto(dst, dt) {
-  if (mouseInside) { intent.tx = mouse.x; intent.ty = mouse.y; }
+  clampCursor();
+  intent.tx = cursor.x; intent.ty = cursor.y;
   let rot = 0;
   if (keys.has('a')) rot += 1;
   if (keys.has('d')) rot -= 1;
@@ -1220,7 +1236,39 @@ function arrow(ox, oy, vx, vy, colour) {
 
 const VEL_SCALE = 0.11;   // metres of arrow per m/s
 
+/* Our own cursor, because a thin OS arrow over a dark field is easy to lose.
+   The tether to the paddle makes the spring visible: the longer it is, the
+   harder the paddle is being pulled. */
+function drawCursor() {
+  if (!running) return;
+  const p = me();
+  const col = goalColour(mySide);
+  const R = 0.13;
+
+  ctx.strokeStyle = col;
+  ctx.lineWidth = lineW();
+
+  ctx.globalAlpha = 0.22;
+  ctx.beginPath();
+  ctx.moveTo(cursor.x, cursor.y);
+  ctx.lineTo(lerp(p.px, p.x, renderAlpha), lerp(p.py, p.y, renderAlpha));
+  ctx.stroke();
+
+  ctx.globalAlpha = 0.8;
+  ctx.beginPath();
+  ctx.arc(cursor.x, cursor.y, R, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cursor.x - R * 1.9, cursor.y); ctx.lineTo(cursor.x - R * 0.55, cursor.y);
+  ctx.moveTo(cursor.x + R * 0.55, cursor.y); ctx.lineTo(cursor.x + R * 1.9, cursor.y);
+  ctx.moveTo(cursor.x, cursor.y - R * 1.9); ctx.lineTo(cursor.x, cursor.y - R * 0.55);
+  ctx.moveTo(cursor.x, cursor.y + R * 0.55); ctx.lineTo(cursor.x, cursor.y + R * 1.9);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
 function drawEffects() {
+  drawCursor();
   if (!opts.showVectors) return;
   const p0 = me();
   arrow(p0.x, p0.y, p0.vx * VEL_SCALE, p0.vy * VEL_SCALE, 'rgba(125,211,252,.9)');
@@ -1345,12 +1393,29 @@ function buildReadout() {
 }
 
 // ---- input ----------------------------------------------------------------
+/* Locked, we integrate raw movement at exactly the scale the absolute mapping
+   used, so the feel is unchanged — only the escape route is removed. */
 canvas.addEventListener('mousemove', e => {
-  const r = canvas.getBoundingClientRect();
-  mouse = toWorld(e.clientX - r.left, e.clientY - r.top);
+  if (pointerLocked) {
+    cursor.x += (e.movementX || 0) / view.scale;
+    cursor.y -= (e.movementY || 0) / view.scale;
+  } else {
+    const r = canvas.getBoundingClientRect();
+    const w = toWorld(e.clientX - r.left, e.clientY - r.top);
+    cursor.x = w.x; cursor.y = w.y;
+  }
   mouseInside = true;
 });
-canvas.addEventListener('mouseleave', () => { mouseInside = false; });
+
+canvas.addEventListener('mousedown', e => {
+  if (e.button === 0 && running && !pointerLocked && canvas.requestPointerLock) {
+    canvas.requestPointerLock();
+  }
+});
+document.addEventListener('pointerlockchange', () => {
+  pointerLocked = document.pointerLockElement === canvas;
+});
+document.addEventListener('pointerlockerror', () => { pointerLocked = false; });
 let fineRotate = false;   // right mouse button held
 
 canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -1480,8 +1545,8 @@ function buildPanel() {
 document.getElementById('help').innerHTML =
   '<b>mouse</b> move &nbsp; <b>wheel</b> rotate &nbsp; ' +
   '<b>hold right-click</b> fine rotate &nbsp; <b>S</b> level<br>' +
-  '<b>F</b> serve &nbsp; <b>R</b> reset score &nbsp; <b>H</b> settings' +
-  ' &nbsp; <b>esc</b> menu';
+  '<b>click</b> capture mouse &nbsp; <b>F</b> serve &nbsp; <b>R</b> reset score<br>' +
+  '<b>H</b> settings &nbsp; <b>esc</b> release mouse, again for menu';
 
 /* ---- loop -----------------------------------------------------------------
    Physics runs at a fixed rate, decoupled from the display, and the renderer
@@ -1559,6 +1624,7 @@ function startGame() {
   copyWorld(world, fresh);
 
   const mine = me();
+  cursor.x = mine.x; cursor.y = mine.y;
   intent.tx = mine.x; intent.ty = mine.y; intent.ta = mine.a;
   for (const k of ['-1', '1']) {
     liveInput[k].tx = paddles[k].x;
@@ -1586,7 +1652,13 @@ function startGame() {
    connection is still up and the settings are still wanted. Both peers reach
    this from the phase they are already being told about, so it needs no
    message of its own. */
+function releaseMouse() {
+  if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
+  pointerLocked = false;
+}
+
 function endMatch() {
+  releaseMouse();
   running = false;
   document.body.classList.remove('playing');
   serverStop();
@@ -1595,6 +1667,7 @@ function endMatch() {
 }
 
 function stopGame() {
+  releaseMouse();
   running = false;
   serverStop();
   client.link = null;
@@ -1701,7 +1774,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v7.2';
+const BUILD = 'v7.3';
 
 /* ==========================================================================
    SERVER
