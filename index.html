@@ -520,8 +520,15 @@ const intent = { sel: 0, tx: 0, ty: 0, ta: 0 };  // what the player wants, live
 const liveInput = { '-1': { sel: 0, tx: 0, ty: 0, ta: 0 },
                     '1':  { sel: 0, tx: 0, ty: 0, ta: 0 } };
 
+/* The paddle the player is holding RIGHT NOW, per their intent — not per the
+   simulation, which only learns about a switch on the next tick. Anything on
+   the input side has to use this or it spends a tick applying the previous
+   paddle's rules: with zones that meant clamping the cursor into the zone it
+   had just left, and the two would then chase each other. */
+const heldPaddle = () => paddles[idOf(mySide, intent.sel)];
+
 function clampCursor() {
-  const boxes = paddleBoxes(me());
+  const boxes = paddleBoxes(heldPaddle());
   const t = nearestLegal(boxes, cursor.x, cursor.y);
   const r = FEEL.reach;
   cursor.x = cursor.x < t.x - r ? t.x - r : cursor.x > t.x + r ? t.x + r : cursor.x;
@@ -1344,7 +1351,7 @@ const VEL_SCALE = 0.11;   // metres of arrow per m/s
    harder the paddle is being pulled. */
 function drawCursor() {
   if (!running) return;
-  const p = me();
+  const p = heldPaddle();      // tether follows intent, so it never lags a switch
   const col = goalColour(mySide);
   const R = 0.13;
 
@@ -1556,9 +1563,11 @@ addEventListener('keydown', e => {
        paddle flying to the cursor — you pick up the handle where it is, which
        is what makes parking one somewhere useful rather than a liability. */
     intent.sel = intent.sel ? 0 : 1;
-    const np = paddles[idOf(mySide, intent.sel)];
+    const np = heldPaddle();
+    // Adopt where it actually IS, not where it was heading: a paddle caught
+    // mid-flight would otherwise carry on to a target you never chose.
     placeCursor(np.x, np.y);
-    intent.tx = np.x; intent.ty = np.y; intent.ta = np.ta;
+    intent.tx = np.x; intent.ty = np.y; intent.ta = np.a;
   }
   if (k === 's') intent.ta = 0;
   if (k === '[') setSens(MOUSE.sens - 0.05);   // capture blocks the slider,
@@ -1897,7 +1906,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v8.5-dev';
+const BUILD = 'v8.6-dev';
 
 /* ==========================================================================
    SERVER
