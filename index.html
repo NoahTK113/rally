@@ -1156,6 +1156,7 @@ canvas.addEventListener('wheel', e => {
 }, { passive: false });
 
 addEventListener('keydown', e => {
+  if (!running) return;          // menu keys are the menu's business
   const k = e.key.toLowerCase();
   if (k === ' ' || k === '.') e.preventDefault();
   if (e.repeat) return;
@@ -1282,11 +1283,13 @@ let fps = 60, fpsAcc = 0, fpsN = 0;
 
 function stepAll(dt) {
   if (net.role === 'guest') {
-    // Only my own paddle is simulated here. The host's paddle and the ball
-    // arrive in snapshots; the ball is still integrated between them, with no
-    // collisions, purely so it glides instead of stepping.
-    stepPaddle(me(), dt);
-    stepBall(ball, dt, false);
+    /* Same simulation as the host, every tick: both paddles from their
+       targets, and the ball with full collisions. That is what makes motion
+       smooth between packets. Snapshots only nudge it back into line, and the
+       host stays the authority on score and phase. */
+    stepPaddle(paddles['-1'], dt);
+    stepPaddle(paddles['1'], dt);
+    if (phase === PHASE.PLAY) stepBall(ball, dt, true);
     if (phaseT > 0) phaseT -= dt;
     return;
   }
@@ -1326,8 +1329,17 @@ function startGame() {
   running = true;
   document.body.classList.add('playing');
   hideMenu();
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   resize();
-  resetRound(true);
+
+  // Both players get a countdown before the tip-off rather than the ball
+  // simply appearing — longer online, so the guest can settle after connecting.
+  scores['-1'] = 0; scores['1'] = 0;
+  lastScorer = 0;
+  ballHidden = true;
+  phase = PHASE.COUNT;
+  phaseT = net.role === 'solo' ? 3 : 5;
+
   last = performance.now() / 1000;   // no giant first dt
   accumulator = 0;
   requestAnimationFrame(frame);
@@ -1397,25 +1409,36 @@ function frame(nowMs) {
 }
 
 /* ==========================================================================
-   NETWORKING — host-authoritative over a WebRTC data channel.
+   NETWORKING — host-authoritative, with both sides simulating.
 
-   The host runs the whole simulation and ships snapshots. The guest sends only
-   its paddle target and renders what it is told, EXCEPT for its own paddle,
-   which it simulates locally so its own input never feels laggy.
+   The naive approach is to ship poses and apply them. That looks terrible:
+   at 30 packets a second the remote paddle sits still for 33 ms and then
+   teleports, while the screen refreshes four times as often.
 
-   Between snapshots the guest dead-reckons the ball with gravity but no
-   collisions, so motion stays smooth; each snapshot corrects the drift.
+   So instead BOTH machines run the identical simulation every tick, and the
+   wire only carries what a simulation cannot guess — the other player's
+   TARGET. The paddle is then genuinely animating on both screens rather than
+   being repositioned. Snapshots still arrive, but they are used to correct
+   drift rather than to drive motion, and the correction is applied as a
+   fraction per packet so it is invisible unless something has gone badly
+   wrong, in which case it snaps.
 
-   PeerJS's public broker only introduces the two browsers. Once they are
-   connected the game traffic is direct and the broker is out of the loop.
+   The host stays authoritative: its ball is the real one, and its score and
+   phase are simply obeyed.
+
+   PeerJS's public broker only introduces the two browsers. Once connected the
+   traffic is direct and the broker is out of the loop.
    ========================================================================== */
-const NET_HZ = 30;
+const NET_HZ = 60;                 // packets/sec each way; they are tiny
+const POS_BLEND = 0.30;            // fraction of positional error absorbed per packet
+const SNAP_DIST = 0.9;             // metres. beyond this, stop blending and snap
 const PEER_PREFIX = 'rallyxz-';
 const CODE_CHARS = 'ACDEFGHJKLMNPQRTUVWXY34679';   // no look-alike characters
 
-const net = { role: 'solo', peer: null, conn: null, up: false, code: '' };
+const net = { role: 'solo', peer: null, conn: null, up: false, code: '', rtt: 0 };
 let netAcc = 0;
 let cfgTick = 0;
+let lastStamp = 0;                 // most recent host timestamp seen by the guest
 
 const $ = id => document.getElementById(id);
 const randomCode = () => Array.from({ length: 4 },
@@ -1429,7 +1452,8 @@ function updateStatus() {
   const el = $('status');
   if (net.role === 'solo') { el.innerHTML = 'PRACTICE'; return; }
   el.innerHTML = net.role.toUpperCase() + ' &nbsp; <b>' + net.code + '</b><br>' +
-                 'you are ' + teamName(mySide) + (net.up ? '' : ' &nbsp;(waiting)');
+                 'you are ' + teamName(mySide) +
+                 (net.up ? ' &nbsp; ' + Math.round(net.rtt) + 'ms' : ' &nbsp;(waiting)');
 }
 
 function peerAvailable() {
@@ -1509,9 +1533,8 @@ function send(obj) {
   if (net.up && net.conn) { try { net.conn.send(obj); } catch (e) {} }
 }
 
-/* The host owns the tuning. Sending it on connect keeps the guest's local
-   paddle prediction identical to the authoritative one, so it cannot
-   rubber-band against a host running different numbers. */
+/* The host owns the tuning. Both sides must run identical numbers or their
+   simulations drift apart and the corrections become visible. */
 function sendConfig() {
   if (net.role !== 'host') return;
   send({ t: 'c', A: A, FEEL: FEEL, PHYS: PHYS });
@@ -1520,15 +1543,28 @@ function sendConfig() {
 function sendSnapshot() {
   const b = ball, h = paddles['1'];
   send({ t: 's',
+         ts: performance.now(),
          b: [b.x, b.y, b.a, b.vx, b.vy, b.w],
-         h: [h.x, h.y, h.a],
+         // pose AND target: the target drives the guest's local simulation,
+         // the pose is only there to correct where it has drifted to
+         h: [h.x, h.y, h.a, h.vx, h.vy, h.w, h.tx, h.ty, h.ta],
          sc: [scores['-1'], scores['1']],
          ph: phase, pt: phaseT, hd: ballHidden });
 }
 
 function sendInput() {
   const p = me();
-  send({ t: 'i', x: p.tx, y: p.ty, a: p.ta });
+  send({ t: 'i', x: p.tx, y: p.ty, a: p.ta, k: lastStamp });
+}
+
+// Absorb part of an error now and the rest over the next few packets, unless
+// the gap is so wide that something desynced, in which case just jump.
+function correct(o, x, y, a) {
+  const ex = x - o.x, ey = y - o.y;
+  if (Math.hypot(ex, ey) > SNAP_DIST) { o.x = x; o.y = y; o.a = a; return; }
+  o.x += ex * POS_BLEND;
+  o.y += ey * POS_BLEND;
+  o.a += (a - o.a) * POS_BLEND;
 }
 
 function onData(d) {
@@ -1537,6 +1573,7 @@ function onData(d) {
   if (d.t === 'i' && net.role === 'host') {
     const g = paddles['-1'];
     g.tx = d.x; g.ty = d.y; g.ta = d.a;
+    if (d.k) net.rtt = performance.now() - d.k;
 
   } else if (d.t === 'c' && net.role === 'guest') {
     Object.assign(A, d.A);
@@ -1548,20 +1585,31 @@ function onData(d) {
     resize();
 
   } else if (d.t === 's' && net.role === 'guest') {
-    const b = ball;
-    b.px = b.x; b.py = b.y; b.pa = b.a;
-    b.x = d.b[0]; b.y = d.b[1]; b.a = d.b[2];
-    b.vx = d.b[3]; b.vy = d.b[4]; b.w = d.b[5];
+    lastStamp = d.ts;
 
+    // the host's paddle: adopt its target, nudge its pose
     const h = paddles['1'];
-    h.px = h.x; h.py = h.y; h.pa = h.a;
-    h.x = d.h[0]; h.y = d.h[1]; h.a = d.h[2];
+    h.tx = d.h[6]; h.ty = d.h[7]; h.ta = d.h[8];
+    correct(h, d.h[0], d.h[1], d.h[2]);
+    h.vx = d.h[3]; h.vy = d.h[4]; h.w = d.h[5];
+
+    // the ball: velocity is authoritative, position is eased
+    const wasPlaying = phase === PHASE.PLAY;
+    correct(ball, d.b[0], d.b[1], d.b[2]);
+    ball.vx = d.b[3]; ball.vy = d.b[4]; ball.w = d.b[5];
 
     scores['-1'] = d.sc[0];
     scores['1'] = d.sc[1];
+    ballHidden = d.hd;
+
+    // a phase change means the ball was just teleported by a serve, so there
+    // is nothing worth easing toward — take it exactly
+    if (d.ph !== phase || !wasPlaying) {
+      ball.x = d.b[0]; ball.y = d.b[1];
+      ball.px = ball.x; ball.py = ball.y;
+    }
     phase = d.ph;
     phaseT = d.pt;
-    ballHidden = d.hd;
   }
 }
 
