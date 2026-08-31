@@ -68,28 +68,28 @@
              border:1px solid #263449}
   #setup .go:hover:not(:disabled){border-color:#22d3ee;color:#e6edf6}
   #setup .go:disabled{opacity:.45;cursor:default}
-  .sens{display:flex;align-items:center;gap:10px;margin-top:20px;padding-top:18px;
-        border-top:1px solid #1c2838;font-size:9.5px;letter-spacing:.18em;color:#4d5c72}
-  .sens input{-webkit-appearance:none;appearance:none;flex:1;height:3px;border-radius:2px;
+  .sens{display:flex;align-items:center;gap:12px;margin-top:20px;padding-top:18px;
+        border-top:1px solid #1c2838;font-size:19px;letter-spacing:.12em;color:#4d5c72}
+  .sens input{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:2px;
               background:#22303f;outline:none;cursor:pointer}
-  .sens input::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
+  .sens input::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;
               border-radius:50%;background:#22d3ee;cursor:pointer}
-  .sens .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:34px;text-align:right}
+  .sens .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:64px;text-align:right}
 
   #sensBar{position:fixed;bottom:14px;right:16px;z-index:9;display:none;align-items:center;
-           gap:9px;font-size:9.5px;letter-spacing:.16em;color:#4d5c72;
+           gap:12px;font-size:19px;letter-spacing:.1em;color:#5b6c82;
            text-shadow:0 1px 3px #000}
   body.playing #sensBar{display:flex}
-  #sensBar input{-webkit-appearance:none;appearance:none;width:110px;height:3px;
+  #sensBar input{-webkit-appearance:none;appearance:none;width:170px;height:4px;
                  border-radius:2px;background:#22303f;outline:none;cursor:pointer}
-  #sensBar input::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;
+  #sensBar input::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;
                  border-radius:50%;background:#22d3ee;cursor:pointer}
-  #sensBar .v{color:#8fa3bd;font-variant-numeric:tabular-nums;min-width:30px}
+  #sensBar .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:58px}
 
-  #lockHint{position:fixed;bottom:56px;left:50%;transform:translateX(-50%);z-index:9;
-            display:none;padding:7px 15px;border-radius:20px;font-size:10px;
-            letter-spacing:.16em;color:#8fa3bd;background:rgba(12,17,26,.85);
-            border:1px solid #24344a;pointer-events:none}
+  #lockHint{position:fixed;bottom:72px;left:50%;transform:translateX(-50%);z-index:9;
+            display:none;padding:12px 26px;border-radius:28px;font-size:20px;
+            letter-spacing:.1em;color:#c9d4e2;background:rgba(12,17,26,.88);
+            border:1px solid #2b3d57;pointer-events:none}
   body.playing:not(.locked) #lockHint{display:block}
 
   #setup .msg{margin-top:13px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:16px}
@@ -1826,7 +1826,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v7.7-dev';
+const BUILD = 'v7.8-dev';
 
 /* ==========================================================================
    SERVER
