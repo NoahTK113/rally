@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Rally</title>
+<title>Flick Ball</title>
 <style>
   html,body{margin:0;height:100%;background:#070910;overflow:hidden;
     font-family:ui-monospace,Consolas,monospace;color:#c9d4e2}
@@ -42,11 +42,35 @@
 
   #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
-  #menu.hidden{display:none}
+  #menu.hidden,#setup.hidden{display:none}
+  #setup{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;
+         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
+  #setup .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
+               background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.5);text-align:center}
+  #setup h1{font-size:15px;letter-spacing:.3em;font-weight:600;color:#8fa3bd}
+  .lab{font-size:9.5px;letter-spacing:.2em;color:#4d5c72;margin-bottom:10px}
+  .stepper{display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:12px}
+  .stepper button{width:38px;height:38px;padding:0;font-size:18px;line-height:1;
+                  background:#151d2b;color:#c9d4e2;border:1px solid #263449;border-radius:9px;
+                  cursor:pointer}
+  .stepper button:hover:not(:disabled){border-color:#22d3ee}
+  .stepper button:disabled{opacity:.3;cursor:default}
+  #ptVal{min-width:74px;font-size:30px;font-weight:700;color:#e6edf6;font-variant-numeric:tabular-nums}
+  #ptRange{-webkit-appearance:none;appearance:none;width:100%;height:3px;border-radius:2px;
+           background:#22303f;outline:none;margin:0 0 10px;cursor:pointer}
+  #ptRange::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+           background:#22d3ee;cursor:pointer}
+  #ptRange:disabled::-webkit-slider-thumb{background:#3f4d61;cursor:default}
+  .hint{font-size:10px;color:#66788f;margin-bottom:22px}
+  #setup .go{width:100%;padding:12px;font:inherit;font-size:11px;letter-spacing:.14em;
+             border-radius:8px;cursor:pointer;background:#151d2b;color:#c9d4e2;
+             border:1px solid #263449}
+  #setup .go:hover:not(:disabled){border-color:#22d3ee;color:#e6edf6}
+  #setup .go:disabled{opacity:.45;cursor:default}
+  #setup .msg{margin-top:13px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:16px}
   #menu .card{width:340px;padding:26px 26px 22px;border:1px solid #1d2939;border-radius:14px;
               background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.6);text-align:center}
-  #menu h1{margin:0 0 4px;font-size:30px;letter-spacing:.32em;font-weight:700;color:#e6edf6}
-  #menu .sub{margin:0 0 22px;font-size:10px;letter-spacing:.2em;color:#4d5c72}
+  #menu h1,#setup h1{margin:0 0 20px;font-size:30px;letter-spacing:.32em;font-weight:700;color:#e6edf6}
   #menu button{width:100%;padding:11px;margin-bottom:9px;font:inherit;font-size:11px;
                letter-spacing:.13em;border-radius:8px;cursor:pointer;
                background:#151d2b;color:#c9d4e2;border:1px solid #263449}
@@ -77,10 +101,24 @@
 <div id="help"></div>
 <div id="build"></div>
 <div id="status"></div>
+<div id="setup" class="hidden">
+  <div class="card">
+    <h1>SETUP</h1>
+    <div class="lab">POINTS TO WIN</div>
+    <div class="stepper">
+      <button id="ptMinus">&minus;</button>
+      <div id="ptVal">7</div>
+      <button id="ptPlus">+</button>
+    </div>
+    <input id="ptRange" type="range" min="0" max="100" step="1" value="7">
+    <div class="hint" id="ptHint">first to 7 goals</div>
+    <button class="go" id="btnStart">START MATCH</button>
+    <div class="msg" id="setupMsg"></div>
+  </div>
+</div>
 <div id="menu">
   <div class="card">
-    <h1>RALLY</h1>
-    <p class="sub">HIT IT OVER. PUT IT IN.</p>
+    <h1>FLICK BALL</h1>
     <button id="btnSolo">PRACTICE ALONE</button>
     <button id="btnHost">HOST A GAME</button>
     <div class="join">
@@ -164,6 +202,10 @@ const lineW = () => VIS.linePx / view.sDev;
 // inward half — so it has to be stroked at twice the visible width to end up
 // looking the same weight as a marking.
 const contourW = () => (VIS.linePx * 2) / view.sDev;
+
+/* Match rules. Synced with the rest of the config, because both simulations
+   must agree on when a match ends or they would disagree about the result. */
+const MATCH = { target: 7 };          // 0 = endless
 
 /* Latency injected into the HOST's own link to its own server. The whole
    point of a listen server is that we can raise the host's delay but can never
@@ -1464,6 +1506,7 @@ function startGame() {
   running = true;
   document.body.classList.add('playing');
   hideMenu();
+  hideSetup();
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   resize();
 
@@ -1603,7 +1646,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v7';
+const BUILD = 'v7.1';
 
 /* ==========================================================================
    SERVER
@@ -2088,7 +2131,46 @@ const randomCode = () => Array.from({ length: 4 },
 
 function setMsg(html) { $('netMsg').innerHTML = html; }
 function hideMenu() { $('menu').classList.add('hidden'); }
-function showMenu() { $('menu').classList.remove('hidden'); }
+function showMenu() { $('menu').classList.remove('hidden'); hideSetup(); }
+function hideSetup() { $('setup').classList.add('hidden'); }
+
+/* The lobby. Reached once there is someone to play against — or straight away
+   in practice — and returned to after a match. The host owns the settings and
+   the guest waits, which avoids having to resolve two people editing the same
+   number. */
+function showSetup() {
+  hideMenu();
+  $('setup').classList.remove('hidden');
+  const owner = net.role !== 'guest';
+  $('ptMinus').disabled = !owner;
+  $('ptPlus').disabled = !owner;
+  $('ptRange').disabled = !owner;
+  $('btnStart').disabled = !owner;
+  $('btnStart').textContent = owner ? 'START MATCH' : 'WAITING FOR HOST';
+  $('setupMsg').innerHTML = owner ? '' : 'The host is choosing the settings.';
+  paintTarget();
+}
+
+function paintTarget() {
+  const t = MATCH.target;
+  $('ptVal').textContent = t === 0 ? '∞' : t;
+  $('ptRange').value = t;
+  $('ptHint').textContent = t === 0 ? 'endless — play until someone quits'
+                                    : 'first to ' + t + (t === 1 ? ' goal' : ' goals');
+}
+
+function setTarget(v) {
+  MATCH.target = Math.max(0, Math.min(100, Math.round(v) || 0));
+  try { localStorage.setItem('flickball.target', MATCH.target); } catch (e) {}
+  paintTarget();
+}
+
+function beginMatch() {
+  if (net.role === 'guest') return;             // only the host may start
+  if (net.role === 'host') send({ t: 'start', target: MATCH.target });
+  hideSetup();
+  startGame();
+}
 
 function updateStatus() {
   const el = $('status');
@@ -2123,8 +2205,8 @@ function wireConn(conn) {
     net.link.onMessage(onData);   // replaced by serverAttach/clientAttach on start
     net.up = true;
     updateStatus();
-    startGame();
     if (net.role === 'host') sendConfig();
+    showSetup();
   });
   conn.on('close', function () { dropped('Opponent disconnected.'); });
   conn.on('error', function () { dropped('Connection error.'); });
@@ -2197,7 +2279,7 @@ function send(obj) {
    simulations drift apart and the corrections become visible. */
 function sendConfig() {
   if (net.role !== 'host') return;
-  send({ t: 'c', A: A, FEEL: FEEL, PHYS: PHYS });
+  send({ t: 'c', A: A, FEEL: FEEL, PHYS: PHYS, M: MATCH });
 }
 
 function sendSnapshot() {
@@ -2231,10 +2313,18 @@ function onData(d) {
     inSeq = d.n;
   }
 
+  if (d.t === 'start' && net.role === 'guest') {
+    if (typeof d.target === 'number') { MATCH.target = d.target; paintTarget(); }
+    hideSetup();
+    startGame();
+    return;
+  }
+
   if (d.t === 'c' && net.role === 'guest') {
     Object.assign(A, d.A);
     Object.assign(FEEL, d.FEEL);
     Object.assign(PHYS, d.PHYS);
+    if (d.M) { Object.assign(MATCH, d.M); paintTarget(); }
     _feat = null;
     _featKey.length = 0;
     buildPanel();
@@ -2245,8 +2335,18 @@ function onData(d) {
 $('build').textContent = BUILD;
 
 $('btnSolo').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; updateStatus(); startGame();
+  net.role = 'solo'; mySide = 1; updateStatus(); showSetup();
 });
+$('btnStart').addEventListener('click', beginMatch);
+$('ptMinus').addEventListener('click', () => setTarget(MATCH.target - 1));
+$('ptPlus').addEventListener('click', () => setTarget(MATCH.target + 1));
+$('ptRange').addEventListener('input', e => setTarget(parseInt(e.target.value, 10)));
+
+try {
+  const saved = parseInt(localStorage.getItem('flickball.target'), 10);
+  if (!isNaN(saved)) MATCH.target = Math.max(0, Math.min(100, saved));
+} catch (e) {}
+paintTarget();
 $('btnHost').addEventListener('click', hostGame);
 $('btnJoin').addEventListener('click', joinGame);
 $('codeIn').addEventListener('keydown', function (e) { if (e.key === 'Enter') joinGame(); });
