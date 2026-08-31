@@ -1818,20 +1818,11 @@ function frame(nowMs) {
   }
   stepsLastFrame = steps;
 
-  if (net.up) {
+  // Config is re-sent periodically because the channel is unreliable by
+  // design; everything else is sent by the server and client modules.
+  if (net.up && net.role === 'host') {
     netAcc += dt;
-    if (netAcc >= 1 / NET_HZ) {
-      netAcc = 0;
-      if (net.role === 'host') {
-        sendSnapshot();
-        // The channel is unreliable by design (no head-of-line blocking on a
-        // dropped snapshot), so config is re-sent periodically rather than
-        // trusted to arrive once.
-        if (++cfgTick % 60 === 0) sendConfig();
-      } else {
-        sendInput();
-      }
-    }
+    if (netAcc >= 1) { netAcc = 0; sendConfig(); }
   }
 
   renderAlpha = frozen ? 1 : accumulator / FIXED_DT;
@@ -1864,7 +1855,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v8.1-dev';
+const BUILD = 'v8.2-dev';
 
 /* ==========================================================================
    SERVER
@@ -1946,12 +1937,12 @@ function serverStart(soloish) {
   w.phaseT = soloish ? 3 : 5;
   w.ballHidden = true;
 
-  for (const k of ['-1', '1']) {
-    const p = w.p[k];
+  for (const side of [-1, 1]) {
+    const k = String(side), p = w.p[idOf(side, 0)];
+    server.inputs[k].sel = 0;
     server.inputs[k].tx = p.x;
     server.inputs[k].ty = p.y;
     server.inputs[k].ta = p.a;
-    server.inputs[k].tick = -1;
   }
   server.buf = { '-1': makeInputRing(), '1': makeInputRing() };
   server.links.length = 0;
@@ -2586,22 +2577,7 @@ function sendConfig() {
   send({ t: 'c', A: A, FEEL: FEEL, PHYS: PHYS, M: MATCH });
 }
 
-function sendSnapshot() {
-  const b = ball, h = paddles['1'];
-  send({ t: 's',
-         ts: performance.now(),
-         b: [b.x, b.y, b.a, b.vx, b.vy, b.w],
-         // pose AND target: the target drives the guest's local simulation,
-         // the pose is only there to correct where it has drifted to
-         h: [h.x, h.y, h.a, h.vx, h.vy, h.w, h.tx, h.ty, h.ta],
-         sc: [scores['-1'], scores['1']],
-         ph: world.phase, pt: world.phaseT, hd: world.ballHidden });
-}
 
-function sendInput() {
-  const p = me();
-  send({ t: 'i', x: p.tx, y: p.ty, a: p.ta, k: lastStamp });
-}
 
 // Absorb part of an error now and the rest over the next few packets, unless
 // the gap is so wide that something desynced, in which case just jump.
