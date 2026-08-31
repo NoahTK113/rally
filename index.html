@@ -42,7 +42,7 @@
 
   #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
-  #menu.hidden,#setup.hidden{display:none}
+  #menu.hidden,#setup.hidden,#setupOwner.hidden,#setupWait.hidden{display:none}
   #setup{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;
          background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
   #setup .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
@@ -103,16 +103,22 @@
 <div id="status"></div>
 <div id="setup" class="hidden">
   <div class="card">
-    <h1>SETUP</h1>
-    <div class="lab">POINTS TO WIN</div>
-    <div class="stepper">
-      <button id="ptMinus">&minus;</button>
-      <div id="ptVal">7</div>
-      <button id="ptPlus">+</button>
+    <div id="setupOwner">
+      <h1>SETUP</h1>
+      <div class="lab">POINTS TO WIN</div>
+      <div class="stepper">
+        <button id="ptMinus">&minus;</button>
+        <div id="ptVal">7</div>
+        <button id="ptPlus">+</button>
+      </div>
+      <input id="ptRange" type="range" min="0" max="100" step="1" value="7">
+      <div class="hint" id="ptHint">first to 7 goals</div>
+      <button class="go" id="btnStart">START MATCH</button>
     </div>
-    <input id="ptRange" type="range" min="0" max="100" step="1" value="7">
-    <div class="hint" id="ptHint">first to 7 goals</div>
-    <button class="go" id="btnStart">START MATCH</button>
+    <div id="setupWait" class="hidden">
+      <h1>WAITING FOR HOST</h1>
+      <div class="hint">The host is choosing the settings.</div>
+    </div>
     <div class="msg" id="setupMsg"></div>
   </div>
 </div>
@@ -584,8 +590,10 @@ function makeBall() {
                through the back of the goal and off the board
      announce  "<TEAM> TEAM SCORED" for two seconds
      count     3 - 2 - 1, then the tip-off drops */
-const PHASE = { PLAY: 'play', EXIT: 'exit', ANNOUNCE: 'announce', COUNT: 'count' };
+const PHASE = { PLAY: 'play', EXIT: 'exit', ANNOUNCE: 'announce',
+                COUNT: 'count', WIN: 'win' };
 const ANNOUNCE_T = 2.0;
+const WIN_T      = 4.0;          // how long the result stands before the lobby
 const COUNT_T    = 3.0;
 const EXIT_MAX_T = 1.5;          // fallback if the ball never clears the back
 
@@ -639,6 +647,13 @@ const me   = () => paddles[mySide];
 const them = () => paddles[-mySide];
 
 const teamName = side => side > 0 ? 'BLUE' : 'RED';
+
+// Read from MATCH rather than the world: it is a rule, not state. Both peers
+// hold the same value because it is synced with the rest of the config.
+function matchOver(w) {
+  return MATCH.target > 0 &&
+         (w.scores['-1'] >= MATCH.target || w.scores['1'] >= MATCH.target);
+}
 
 function checkGoal(w) {
   const b = w.ball;
@@ -1244,16 +1259,34 @@ function drawHud() {
   ctx.fillText('–', sx, sy);
   ctx.globalAlpha = 1;
 
+  if (MATCH.target > 0) {
+    ctx.font = `600 ${Math.max(9, Math.round(size * 0.28))}px ui-monospace, Consolas, monospace`;
+    ctx.fillStyle = 'rgba(140,160,185,.4)';
+    ctx.fillText(MATCH.target + ' POINTS TO WIN', sx, sy + size * 0.72);
+  }
+
   drawAnnouncement();
 }
 
 function drawAnnouncement() {
-  if (world.phase !== PHASE.ANNOUNCE && world.phase !== PHASE.COUNT) return;
+  if (world.phase !== PHASE.ANNOUNCE && world.phase !== PHASE.COUNT &&
+      world.phase !== PHASE.WIN) return;
 
   const cx = view.ox + (A.width / 2) * view.scale;
   const cy = view.oy - (A.height * 0.52) * view.scale;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+
+  if (world.phase === PHASE.WIN) {
+    const side = world.lastScorer;
+    const size = Math.max(20, Math.round(view.scale * 0.72));
+    ctx.font = `700 ${size}px ui-monospace, Consolas, monospace`;
+    ctx.fillStyle = goalColour(side);
+    ctx.globalAlpha = Math.min(1, (WIN_T - world.phaseT) / 0.25);
+    ctx.fillText(`${teamName(side)} TEAM WON`, cx, cy);
+    ctx.globalAlpha = 1;
+    return;
+  }
 
   if (world.phase === PHASE.ANNOUNCE) {
     const size = Math.max(16, Math.round(view.scale * 0.55));
@@ -1489,7 +1522,15 @@ function stepWorld(w, inp, dt) {
 
   } else if (w.phase === PHASE.ANNOUNCE) {
     w.phaseT -= dt;
-    if (w.phaseT <= 0) { w.phase = PHASE.COUNT; w.phaseT = COUNT_T; }
+    if (w.phaseT <= 0) {
+      // The goal that ends a match still gets its announcement; only what
+      // follows differs.
+      if (matchOver(w)) { w.phase = PHASE.WIN; w.phaseT = WIN_T; }
+      else              { w.phase = PHASE.COUNT; w.phaseT = COUNT_T; }
+    }
+
+  } else if (w.phase === PHASE.WIN) {
+    if (w.phaseT > 0) w.phaseT -= dt;      // then it simply waits to be noticed
 
   } else if (w.phase === PHASE.COUNT) {
     w.phaseT -= dt;
@@ -1539,6 +1580,18 @@ function startGame() {
   last = performance.now() / 1000;   // no giant first dt
   accumulator = 0;
   requestAnimationFrame(frame);
+}
+
+/* A finished match returns to the lobby rather than the main menu: the
+   connection is still up and the settings are still wanted. Both peers reach
+   this from the phase they are already being told about, so it needs no
+   message of its own. */
+function endMatch() {
+  running = false;
+  document.body.classList.remove('playing');
+  serverStop();
+  client.link = null;
+  showSetup();
 }
 
 function stopGame() {
@@ -1620,6 +1673,8 @@ function frame(nowMs) {
 
   renderAlpha = frozen ? 1 : accumulator / FIXED_DT;
   render();
+
+  if (world.phase === PHASE.WIN && world.phaseT <= 0) { endMatch(); return; }
   requestAnimationFrame(frame);
 }
 
@@ -1646,7 +1701,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v7.1';
+const BUILD = 'v7.2';
 
 /* ==========================================================================
    SERVER
@@ -1660,7 +1715,7 @@ const BUILD = 'v7.1';
    the other side of the country. That is the whole point: the host gets no
    privileged path to its own server.
    ========================================================================== */
-const PHASES = ['play', 'exit', 'announce', 'count'];
+const PHASES = ['play', 'exit', 'announce', 'count', 'win'];
 
 const server = {
   active: false,
@@ -2141,14 +2196,13 @@ function hideSetup() { $('setup').classList.add('hidden'); }
 function showSetup() {
   hideMenu();
   $('setup').classList.remove('hidden');
+  // A guest cannot change anything here, and showing a stale copy of a number
+  // it neither controls nor reliably receives is worse than showing nothing.
   const owner = net.role !== 'guest';
-  $('ptMinus').disabled = !owner;
-  $('ptPlus').disabled = !owner;
-  $('ptRange').disabled = !owner;
-  $('btnStart').disabled = !owner;
-  $('btnStart').textContent = owner ? 'START MATCH' : 'WAITING FOR HOST';
-  $('setupMsg').innerHTML = owner ? '' : 'The host is choosing the settings.';
-  paintTarget();
+  $('setupOwner').classList.toggle('hidden', !owner);
+  $('setupWait').classList.toggle('hidden', owner);
+  $('setupMsg').innerHTML = '';
+  if (owner) paintTarget();
 }
 
 function paintTarget() {
