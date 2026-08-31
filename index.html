@@ -444,6 +444,12 @@ function makePaddle(side) {
    is clamped to, which does two things: it can never leave the field, and
    overshooting stops accumulating dead travel you would have to drag back. */
 const cursor = { x: 0, y: 0 };
+
+/* Mouse capture is off while we find out whether the drawn cursor alone is
+   enough. Note the clamp only does half its job without it: absolute mapping
+   means overshooting the field still banks travel you have to drag back, and
+   only integrating raw movement removes that. */
+const USE_POINTER_LOCK = false;
 let pointerLocked = false;
 
 const intent = { tx: 0, ty: 0, ta: 0 };          // what the player wants, live
@@ -1408,7 +1414,8 @@ canvas.addEventListener('mousemove', e => {
 });
 
 canvas.addEventListener('mousedown', e => {
-  if (e.button === 0 && running && !pointerLocked && canvas.requestPointerLock) {
+  if (USE_POINTER_LOCK && e.button === 0 && running && !pointerLocked &&
+      canvas.requestPointerLock) {
     canvas.requestPointerLock();
   }
 });
@@ -1545,8 +1552,8 @@ function buildPanel() {
 document.getElementById('help').innerHTML =
   '<b>mouse</b> move &nbsp; <b>wheel</b> rotate &nbsp; ' +
   '<b>hold right-click</b> fine rotate &nbsp; <b>S</b> level<br>' +
-  '<b>click</b> capture mouse &nbsp; <b>F</b> serve &nbsp; <b>R</b> reset score<br>' +
-  '<b>H</b> settings &nbsp; <b>esc</b> release mouse, again for menu';
+  '<b>F</b> serve &nbsp; <b>R</b> reset score &nbsp; <b>H</b> settings' +
+  ' &nbsp; <b>esc</b> menu';
 
 /* ---- loop -----------------------------------------------------------------
    Physics runs at a fixed rate, decoupled from the display, and the renderer
@@ -1774,7 +1781,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v7.3';
+const BUILD = 'v7.4';
 
 /* ==========================================================================
    SERVER
