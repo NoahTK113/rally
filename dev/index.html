@@ -1631,6 +1631,7 @@ function serverReceive(end, m) {
   if (m.k <= inp.tick) return;             // reordered; a newer one already landed
   inp.tick = m.k;
   inp.tx = m.x; inp.ty = m.y; inp.ta = m.a;
+  if (m.c) end.echo = m.c;                 // returned in this link's next snapshot
 
   // Only the remote client's trip is worth measuring; the loopback's delay is
   // whatever we told it to be.
@@ -1648,8 +1649,9 @@ function serverStepOnce(dt) {
   // snapshots at NET_HZ, derived from the tick counter so the rate is exact
   const every = Math.max(1, Math.round((1 / FIXED_DT) / NET_HZ));
   if (++server.sendTick % every === 0) {
-    const snap = { t: 'snap', d: packWorld(server.world), ts: performance.now() };
-    for (const l of server.links) l.send(snap);
+    const d = packWorld(server.world), ts = performance.now();
+    // built per link, because each carries that client's own echo home
+    for (const l of server.links) l.send({ t: 'snap', d, ts, e: l.echo || 0 });
   }
 }
 
@@ -1659,7 +1661,8 @@ function serverStepOnce(dt) {
    last said. That is deliberately laggy — your paddle does not move until a
    snapshot comes back. Step 4 puts prediction on top of exactly this.
    ========================================================================== */
-const client = { link: null, sendTick: 0, inputTick: 0, lastSnap: -1, snapTs: 0 };
+const client = { link: null, sendTick: 0, inputTick: 0, lastSnap: -1, snapTs: 0,
+                 rtt: 0, rttSmooth: 0 };
 
 function clientAttach(end) {
   client.link = end;
@@ -1674,6 +1677,11 @@ function clientReceive(m) {
   client.lastSnap = m.d[0];
   unpackWorld(world, m.d);
   if (m.ts) client.snapTs = m.ts;
+  if (m.e) {
+    client.rtt = performance.now() - m.e;
+    if (!client.rttSmooth) client.rttSmooth = client.rtt;
+    client.rttSmooth += (client.rtt - client.rttSmooth) * 0.08;
+  }
 }
 
 function clientStepOnce(dt) {
@@ -1683,7 +1691,9 @@ function clientStepOnce(dt) {
   if (++client.sendTick % every === 0) {
     const i = liveInput[mySide];
     client.link.send({ t: 'in', k: ++client.inputTick,
-                       x: i.tx, y: i.ty, a: i.ta, e: client.snapTs });
+                       x: i.tx, y: i.ty, a: i.ta,
+                       e: client.snapTs,          // lets the server time us
+                       c: performance.now() });   // comes back so we can time it
   }
 }
 
@@ -1747,8 +1757,12 @@ function makeLoopbackPair() {
 // the guest's packets traverse the wire once in each direction.
 function linkDelayMs() {
   if (!NET.autoDelay) return Math.max(0, NET.hostDelay);
-  const half = net.up ? net.rttSmooth / 2 : 0;
-  return Math.max(NET.floor, half);
+  // Connected: match the guest's one-way trip exactly. Taking max() with the
+  // floor here would penalise the host beyond the guest on a fast link, which
+  // is the opposite of the point. The floor is only for practice, where there
+  // is no measurement and we still want a match-like feel.
+  if (net.up && net.role === 'host' && net.rttSmooth > 0) return net.rttSmooth / 2;
+  return NET.floor;
 }
 
 function makeChannelEnd(conn) {
@@ -1794,7 +1808,7 @@ const PEER_PREFIX = 'rallyxz-';
 const CODE_CHARS = 'ACDEFGHJKLMNPQRTUVWXY34679';   // no look-alike characters
 
 const net = { role: 'solo', peer: null, conn: null, link: null,
-              up: false, code: '', rtt: 0, rttSmooth: 40, synced: false };
+              up: false, code: '', rtt: 0, rttSmooth: 0, synced: false };
 let netAcc = 0;
 let cfgTick = 0;
 let lastStamp = 0;                 // most recent host timestamp seen by the guest
@@ -1816,15 +1830,18 @@ function showMenu() { $('menu').classList.remove('hidden'); }
 
 function updateStatus() {
   const el = $('status');
+  const ping = client.rttSmooth ? Math.round(client.rttSmooth) + 'ms' : '--';
+  // `link` is the delay injected into our own loopback, so it only means
+  // anything on a machine that is actually running a server.
+  const link = server.active ? ' &nbsp; link ' + Math.round(linkDelayMs()) + 'ms' : '';
+
   if (net.role === 'solo') {
-    el.innerHTML = 'PRACTICE<br>link ' + Math.round(linkDelayMs()) +
-                   'ms &nbsp; loop ' + probe.rtt.toFixed(1) + 'ms';
+    el.innerHTML = 'PRACTICE<br>ping ' + ping + link;
     return;
   }
   el.innerHTML = net.role.toUpperCase() + ' &nbsp; <b>' + net.code + '</b><br>' +
-                 'link ' + Math.round(linkDelayMs()) + 'ms &nbsp; loop ' + probe.rtt.toFixed(1) + 'ms<br>' +
-    'you are ' + teamName(mySide) +
-                 (net.up ? ' &nbsp; ' + Math.round(net.rtt) + 'ms' : ' &nbsp;(waiting)');
+                 'you are ' + teamName(mySide) +
+                 (net.up ? ' &nbsp; ping ' + ping : ' &nbsp;(waiting)') + link;
 }
 
 function peerAvailable() {
