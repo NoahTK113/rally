@@ -1574,11 +1574,30 @@ canvas.addEventListener('wheel', e => {
 addEventListener('keydown', e => {
   if (!running) return;          // menu keys are the menu's business
   const k = e.key.toLowerCase();
-  if (k === ' ' || k === '.') e.preventDefault();
+  if (k === ' ' || k === '.' || k === 'tab') e.preventDefault();
   if (e.repeat) return;
   keys.add(k);
   if (k === 'p') frozen = !frozen;      // space now switches paddles
   if (k === '.') { stepOnce = true; frozen = true; }
+  /* Practice only: take over the other team. The server reaches its clients
+     through transport ends and each end is tagged with the side it drives, so
+     switching means retagging our end — the simulation needs no notion of a
+     player changing seats. */
+  if (k === 'tab' && net.role === 'solo') {
+    mySide = -mySide;
+    for (const l of server.links) if (l.kind === 'loopback') l.side = mySide;
+
+    // Inputs already filed belong to the side we just left; replaying them
+    // onto the new one would drive the wrong paddle for a few ticks.
+    for (let i = 0; i < client.inputs.length; i++) client.inputs[i].tick = -1;
+
+    intent.sel = (world.sel[String(mySide)] | 0) & 1;
+    const np = heldPaddle();
+    placeCursor(np.x, np.y);
+    intent.tx = np.x; intent.ty = np.y; intent.ta = np.a;
+    updateStatus();
+  }
+
   if (k === ' ' && MATCH.paddles > 1) {
     /* Take hold of the other paddle. The cursor moves to it rather than the
        paddle flying to the cursor — you pick up the handle where it is, which
@@ -1701,7 +1720,8 @@ document.getElementById('help').innerHTML =
   '<b>click</b> capture mouse &nbsp; <b>space</b> switch paddle &nbsp; ' +
   '<b>[</b> <b>]</b> sensitivity<br>' +
   '<b>F</b> serve &nbsp; <b>R</b> reset score &nbsp; ' +
-  '<b>H</b> settings &nbsp; <b>esc</b> release mouse, again for menu';
+  '<b>H</b> settings &nbsp; <b>tab</b> swap team (practice) &nbsp; ' +
+  '<b>esc</b> release mouse, again for menu';
 
 /* ---- loop -----------------------------------------------------------------
    Physics runs at a fixed rate, decoupled from the display, and the renderer
@@ -1927,7 +1947,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v9';
+const BUILD = 'v9.1-dev';
 
 /* ==========================================================================
    SERVER
@@ -2562,7 +2582,7 @@ function updateStatus() {
     : '';
 
   if (net.role === 'solo') {
-    el.innerHTML = 'PRACTICE<br>ping ' + ping + link;
+    el.innerHTML = 'PRACTICE &nbsp; ' + teamName(mySide) + '<br>ping ' + ping + link;
     return;
   }
   el.innerHTML = net.role.toUpperCase() + ' &nbsp; <b>' + net.code + '</b><br>' +
