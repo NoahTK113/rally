@@ -633,9 +633,15 @@ function serve(w) {
    Treated as a disc, so I = 1/2 m R^2, which makes the tangential impulse
    needed to kill sliding exactly -vt/3. Friction is clamped to the Coulomb
    cone, and whatever tangential impulse survives becomes spin. */
-function resolveContact(b, nx, ny, pen, rest, mu, svx = 0, svy = 0) {
-  b.x += nx * pen;
-  b.y += ny * pen;
+function resolveContact(b, nx, ny, pen, rest, mu, svx = 0, svy = 0, maxPush = Infinity) {
+  /* A paddle has infinite mass, so it wins every contact — including one where
+     the ball is already against a wall. Left uncapped, its positional push
+     drives the ball's CENTRE past the wall line, and from there the wall's own
+     test computes an outward normal and expels it. Capping the push means a
+     squeezed ball merely overlaps the paddle instead of escaping. */
+  const push = pen > maxPush ? maxPush : pen;
+  b.x += nx * push;
+  b.y += ny * push;
 
   const R = PHYS.ballR;
   // velocity of the contact point: v + omega x r, with r = -R * n,
@@ -746,7 +752,48 @@ function arenaFeatures() {
     }
     segs.push(seg);
   }
-  return (_feat = { segs, arcs });
+  return (_feat = { segs, arcs, pts });
+}
+
+/* Ray cast against the arena outline. Cheap at twelve vertices, and it is the
+   only way to be certain — any test built from individual contacts can be
+   fooled by a ball that is already on the wrong side of everything. */
+function insideArena(x, y) {
+  const pts = arenaFeatures().pts;
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i], c = pts[j];
+    if ((a.y > y) !== (c.y > y) &&
+        x < (c.x - a.x) * (y - a.y) / (c.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+/* Last line of defence. If the ball has ended up outside anyway, put it back
+   on the nearest boundary and strip the velocity that took it there. This
+   should never fire; when it does, the alternative is a lost ball and a game
+   that cannot continue. */
+function containBall(b) {
+  if (insideArena(b.x, b.y)) return;
+
+  const { segs } = arenaFeatures();
+  let qx = 0, qy = 0, best = Infinity;
+  for (const g of segs) {
+    const ex = g.bx - g.ax, ey = g.by - g.ay;
+    const len2 = ex * ex + ey * ey;
+    let t = len2 > 0 ? ((b.x - g.ax) * ex + (b.y - g.ay) * ey) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const cx = g.ax + ex * t, cy = g.ay + ey * t;
+    const d2 = (b.x - cx) * (b.x - cx) + (b.y - cy) * (b.y - cy);
+    if (d2 < best) { best = d2; qx = cx; qy = cy; }
+  }
+  const dx = qx - b.x, dy = qy - b.y;
+  const d = Math.hypot(dx, dy) || 1;
+  const ux = dx / d, uy = dy / d;          // points back toward the inside
+  b.x = qx + ux * PHYS.ballR;
+  b.y = qy + uy * PHYS.ballR;
+  const vn = b.vx * ux + b.vy * uy;
+  if (vn < 0) { b.vx -= vn * ux; b.vy -= vn * uy; }   // drop the outward part
 }
 
 function collideArena(b) {
@@ -823,7 +870,8 @@ function collidePaddle(b, p) {
   const svx = p.vx - p.w * ry;
   const svy = p.vy + p.w * rx;
 
-  resolveContact(b, wnx, wny, sum - d, PHYS.paddleRest, PHYS.paddleFriction, svx, svy);
+  resolveContact(b, wnx, wny, sum - d, PHYS.paddleRest, PHYS.paddleFriction,
+                 svx, svy, PHYS.ballR * 0.5);
 }
 
 function stepBall(w, dt, collide = true) {
@@ -855,6 +903,9 @@ function stepBall(w, dt, collide = true) {
       collidePaddle(b, w.p['1']);
       collideNet(b);
       collideArena(b);      // last, so the ball can never be left inside a wall
+      // Only while the ball is meant to be on the court: during a goal it is
+      // supposed to leave through the back of the net.
+      if (w.phase === PHASE.PLAY) containBall(b);
     }
   }
 }
@@ -1535,7 +1586,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v6.4-dev';
+const BUILD = 'v6.5-dev';
 
 /* ==========================================================================
    SERVER
