@@ -762,14 +762,16 @@ function makeWorld() {
        make it several times per hit; ids let the audio layer skip what it has
        already heard. */
     evCount: 0,
-    ev: Array.from({ length: EV_SLOTS }, () => ({ id: 0, kind: '', mag: 0, x: 0 })),
+    ev: Array.from({ length: EV_SLOTS },
+                   () => ({ id: 0, kind: '', mag: 0, x: 0, side: 0 })),
   };
 }
 
-function pushEvent(w, kind, mag, x) {
+function pushEvent(w, kind, mag, x, side) {
   w.evCount++;
   const e = w.ev[w.evCount % EV_SLOTS];
   e.id = w.evCount; e.kind = kind; e.mag = mag; e.x = x;
+  e.side = side || 0;
 }
 
 const EV_SLOTS = 16;
@@ -797,7 +799,7 @@ function copyWorld(dst, src) {
   dst.evCount = src.evCount;
   for (let i = 0; i < EV_SLOTS; i++) {
     const a = dst.ev[i], b = src.ev[i];
-    a.id = b.id; a.kind = b.kind; a.mag = b.mag; a.x = b.x;
+    a.id = b.id; a.kind = b.kind; a.mag = b.mag; a.x = b.x; a.side = b.side;
   }
 }
 
@@ -829,7 +831,8 @@ function checkGoal(w) {
 }
 
 function award(w, side) {
-  pushEvent(w, 'goal', 10, w.ball.x);
+  pushEvent(w, 'goal', 10, w.ball.x, side);   // side scored; each client
+                                              // decides what that means
   w.scores[side]++;
   w.lastScorer = side;
   w.phase = PHASE.EXIT;
@@ -2013,7 +2016,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v10.3-dev';
+const BUILD = 'v10.4-dev';
 
 /* ==========================================================================
    SOUND
@@ -2036,10 +2039,11 @@ const BUILD = 'v10.3-dev';
    free: a replayed collision regenerates the same id and is skipped.
    ========================================================================== */
 const SOUNDS = {
-  paddle: 'sounds/paddle.wav',
-  wall:   'sounds/wall.wav',
-  net:    'sounds/net.wav',
-  goal:   'sounds/goal.wav',
+  paddle:    'sounds/paddle.wav',
+  wall:      'sounds/wall.wav',
+  net:       'sounds/net.wav',
+  scored:    'sounds/scored.wav',      // you put it in their goal
+  conceded:  'sounds/conceded.wav',    // they put it in yours
 };
 
 const AUDIO = { vol: 0.7 };
@@ -2130,10 +2134,12 @@ function playSynth(kind, gain, mag, x) {
   }
 
   const o = c.createOscillator();
-  if (kind === 'goal') {
+  if (kind === 'scored' || kind === 'conceded') {
+    // rising for yours, falling for theirs — legible before you read the score
+    const up = kind === 'scored';
     o.type = 'triangle';
-    o.frequency.setValueAtTime(180, t);
-    o.frequency.exponentialRampToValueAtTime(520, t + 0.28);
+    o.frequency.setValueAtTime(up ? 180 : 460, t);
+    o.frequency.exponentialRampToValueAtTime(up ? 520 : 130, t + 0.28);
     g.gain.setValueAtTime(gain * 0.9, t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
     o.connect(g); o.start(t); o.stop(t + 0.6);
@@ -2149,17 +2155,24 @@ function playSynth(kind, gain, mag, x) {
   }
 }
 
-function playEvent(kind, mag, x) {
+function playEvent(e) {
   if (!audio.ctx || AUDIO.vol <= 0) return;
   if (audio.ctx.state === 'suspended') audio.ctx.resume();
 
-  // loudness follows the impulse, so a nudge and a smash do not sound alike
-  const norm = Math.min(1, mag / 10);
-  const gain = kind === 'goal' ? 0.9 : 0.12 + norm * 0.88;
-  const rate = kind === 'goal' ? 1 : 0.9 + norm * 0.3;
+  // A goal is one event in the simulation. Which of the two it sounds like is
+  // decided here, per listener, because 'scored' and 'conceded' describe the
+  // person hearing it rather than anything the world knows about.
+  const kind = e.kind === 'goal'
+    ? (e.side === mySide ? 'scored' : 'conceded')
+    : e.kind;
 
-  if (audio.buffers[kind]) playSample(kind, gain, rate, x);
-  else playSynth(kind, gain, mag, x);
+  const goalish = kind === 'scored' || kind === 'conceded';
+  const norm = Math.min(1, e.mag / 10);
+  const gain = goalish ? 0.9 : 0.12 + norm * 0.88;
+  const rate = goalish ? 1 : 0.9 + norm * 0.3;
+
+  if (audio.buffers[kind]) playSample(kind, gain, rate, e.x);
+  else playSynth(kind, gain, e.mag, e.x);
 }
 
 // Called once per frame: play whatever the simulation recorded that we have
@@ -2172,7 +2185,7 @@ function pumpAudio() {
   const first = Math.max(audio.lastPlayed + 1, w.evCount - EV_SLOTS + 1);
   for (let id = first; id <= w.evCount; id++) {
     const e = w.ev[id % EV_SLOTS];
-    if (e && e.id === id) playEvent(e.kind, e.mag, e.x);
+    if (e && e.id === id) playEvent(e);
   }
   audio.lastPlayed = w.evCount;
 }
