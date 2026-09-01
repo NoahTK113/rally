@@ -2035,7 +2035,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v10.7-dev';
+const BUILD = 'v10.8-dev';
 
 /* ==========================================================================
    SOUND
@@ -2091,7 +2091,10 @@ function audioStart() {
 
   for (const kind in SOUNDS) {
     audio.buffers[kind] = null;
-    fetch(SOUNDS[kind])
+    // Versioned so a redeploy is never served a stale file from cache. A hard
+    // refresh reloads the page but does not reliably clear things fetched by
+    // script afterwards, which makes "did my new sound deploy" unanswerable.
+    fetch(SOUNDS[kind] + '?v=' + encodeURIComponent(BUILD))
       .then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status))
       .then(buf => audio.ctx.decodeAudioData(buf))
       .then(decoded => { audio.buffers[kind] = decoded; })
