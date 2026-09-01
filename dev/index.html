@@ -1884,6 +1884,11 @@ function startGame() {
   const fresh = makeWorld();
   copyWorld(world, fresh);
 
+  /* The audio marker is a high-water mark over world.evCount, and a new game
+     restarts that counter at zero — so without this every event in every match
+     after the first has an id below the mark and is silently dropped. */
+  audio.lastPlayed = 0;
+
   intent.sel = 0;
   const mine = paddles[idOf(mySide, 0)];
   placeCursor(mine.x, mine.y);
@@ -2030,7 +2035,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v10.6-dev';
+const BUILD = 'v10.7-dev';
 
 /* ==========================================================================
    SOUND
