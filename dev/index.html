@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Flick Ball</title>
+<title>Banjoball</title>
 <style>
   html,body{margin:0;height:100%;background:#070910;overflow:hidden;
     font-family:ui-monospace,Consolas,monospace;color:#c9d4e2}
@@ -99,6 +99,19 @@
             border:1px solid #2b3d57;pointer-events:none;text-align:center}
   #lockHint small{display:block;margin-top:12px;font-size:15px;letter-spacing:.1em;
                   color:#66788f}
+
+  #tut{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:9;
+       display:none;min-width:420px;max-width:70vw;padding:18px 26px;text-align:center;
+       border-radius:12px;background:rgba(10,14,22,.92);border:1px solid #24344a;
+       pointer-events:none}
+  body.tutorial #tut{display:block}
+  #tutText{font-size:20px;line-height:1.45;color:#e6edf6;letter-spacing:.04em}
+  #tutText b{color:#22d3ee;font-weight:600}
+  #tutHint{margin-top:8px;font-size:13px;color:#66788f;letter-spacing:.08em}
+  #tutDots{display:flex;gap:7px;justify-content:center;margin-top:14px}
+  #tutDots i{width:7px;height:7px;border-radius:50%;background:#24344a;display:block}
+  #tutDots i.on{background:#22d3ee}
+  #tutDots i.past{background:#2f5c6b}
   body.playing:not(.locked) #lockHint{display:block}
 
   #setup .msg{margin-top:13px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:16px}
@@ -144,6 +157,11 @@
   <span class="v" id="volPlayVal">70</span>
 </div>
 <div id="lockHint">CLICK TO CAPTURE THE MOUSE<small>controls are disabled until you do</small></div>
+<div id="tut">
+  <div id="tutText"></div>
+  <div id="tutHint"></div>
+  <div id="tutDots"></div>
+</div>
 <div id="setup" class="hidden">
   <div class="card">
     <div id="setupOwner">
@@ -182,7 +200,8 @@
 </div>
 <div id="menu">
   <div class="card">
-    <h1>FLICK BALL</h1>
+    <h1>BANJOBALL</h1>
+    <button id="btnTutorial">HOW TO PLAY</button>
     <button id="btnSolo">PRACTICE ALONE</button>
     <button id="btnHost">HOST A GAME</button>
     <div class="join">
@@ -730,7 +749,7 @@ function makeBall() {
      announce  "<TEAM> TEAM SCORED" for two seconds
      count     3 - 2 - 1, then the tip-off drops */
 const PHASE = { PLAY: 'play', EXIT: 'exit', ANNOUNCE: 'announce',
-                COUNT: 'count', WIN: 'win' };
+                COUNT: 'count', WIN: 'win', HOLD: 'hold' };
 const ANNOUNCE_T = 2.0;
 const WIN_T      = 4.0;          // how long the result stands before the lobby
 const COUNT_T    = 3.0;
@@ -1598,8 +1617,10 @@ canvas.addEventListener('mousemove', e => {
   }
   if (pointerLocked) {
     const k = MOUSE.sens / view.scale;
-    cursor.x += (e.movementX || 0) * k;
-    cursor.y -= (e.movementY || 0) * k;
+    const dx = (e.movementX || 0) * k, dy = -(e.movementY || 0) * k;
+    cursor.x += dx;
+    cursor.y += dy;
+    tutOnMove(dx, dy);
   } else {
     const r = canvas.getBoundingClientRect();
     const w = toWorld(e.clientX - r.left, e.clientY - r.top);
@@ -1638,7 +1659,9 @@ canvas.addEventListener('wheel', e => {
   // target is always a clean multiple however it was last nudged.
   const step = fineRotate ? STEP_FINE : STEP_COARSE;
   const dir  = -Math.sign(e.deltaY);
+  const was = intent.ta;
   intent.ta = (Math.round(intent.ta / step) + dir) * step;
+  tutOnTurn(intent.ta - was, fineRotate);
 }, { passive: false });
 
 addEventListener('keydown', e => {
@@ -1680,6 +1703,7 @@ addEventListener('keydown', e => {
     // mid-flight would otherwise carry on to a target you never chose.
     placeCursor(np.x, np.y);
     intent.tx = np.x; intent.ty = np.y; intent.ta = np.a;
+    tutOnSwitch();
   }
   if (k === 's') intent.ta = 0;
   if (k === '[') setSens(MOUSE.sens - 0.05);   // capture blocks the slider,
@@ -1868,7 +1892,7 @@ function stepWorld(w, inp, dt) {
    sitting on top of a game that is already running. */
 let running = false;
 
-function startGame() {
+function startGame(asTutorial) {
   if (running) return;
   running = true;
   document.body.classList.add('playing');
@@ -1887,7 +1911,7 @@ function startGame() {
   /* The audio marker is a high-water mark over world.evCount, and a new game
      restarts that counter at zero — so without this every event in every match
      after the first has an id below the mark and is silently dropped. */
-  audio.lastPlayed = 0;
+  lastEventSeen = 0;
 
   intent.sel = 0;
   const mine = paddles[idOf(mySide, 0)];
@@ -1898,6 +1922,8 @@ function startGame() {
     liveInput[k].sel = 0;
     liveInput[k].tx = p.x; liveInput[k].ty = p.y; liveInput[k].ta = p.a;
   }
+
+  if (asTutorial) tutStart(); else tutStop();
 
   if (net.role === 'guest') {
     serverStop();
@@ -1936,6 +1962,7 @@ function endMatch() {
 
 function stopGame() {
   releaseMouse();
+  tutStop();
   running = false;
   serverStop();
   client.link = null;
@@ -2003,7 +2030,8 @@ function frame(nowMs) {
     if (netAcc >= 1) { netAcc = 0; sendConfig(); }
   }
 
-  pumpAudio();
+  pumpEvents();
+  pumpTutorial(dt);
 
   renderAlpha = frozen ? 1 : accumulator / FIXED_DT;
   render();
@@ -2035,7 +2063,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v11.1-dev';
+const BUILD = 'v11.2-dev';
 
 /* ==========================================================================
    SOUND
@@ -2073,7 +2101,6 @@ const audio = {
   ctx: null,
   master: null,
   buffers: {},          // kind -> AudioBuffer, or null while missing
-  lastPlayed: 0,        // highest event id already heard
   started: false,
 };
 
@@ -2214,26 +2241,169 @@ function playEvent(e) {
   else playSynth(kind, gain, e.mag, e.x);
 }
 
-// Called once per frame: play whatever the simulation recorded that we have
-// not already heard.
-function pumpAudio() {
-  if (!audio.ctx) return;
+/* One pass over the simulation's event log per frame, feeding everything that
+   cares. Audio and the tutorial both want to know about contacts and goals,
+   and neither should depend on the other being alive — hanging the tutorial's
+   observation inside the audio pump meant a browser that refused an
+   AudioContext could never finish the "hit the ball" step. */
+let lastEventSeen = 0;
+
+function pumpEvents() {
   const w = world;
 
   /* Never rewind. Reconciliation can move evCount BACKWARD: we predict a goal
-     and bump the counter, then a snapshot arrives describing a tick before it
-     and copyWorld pulls the server's lower count in. Replay regenerates the
-     same ids, and rewinding here would play every one of them a second time —
-     a burst of contact sounds just after the ball crosses the line. Holding
-     the high-water mark means a re-created event is silent instead. */
-  if (w.evCount <= audio.lastPlayed) return;
+     and bump the counter, then a snapshot arrives describing a tick before it.
+     Replay regenerates the same ids, and rewinding here would fire every one
+     of them a second time. Holding the high-water mark means a re-created
+     event is ignored instead. */
+  if (w.evCount <= lastEventSeen) return;
 
-  const first = Math.max(audio.lastPlayed + 1, w.evCount - EV_SLOTS + 1);
+  const first = Math.max(lastEventSeen + 1, w.evCount - EV_SLOTS + 1);
   for (let id = first; id <= w.evCount; id++) {
     const e = w.ev[id % EV_SLOTS];
-    if (e && e.id === id) playEvent(e);
+    if (!e || e.id !== id) continue;
+    playEvent(e);            // no-ops if audio never started
+    tutOnEvent(e.kind);
   }
-  audio.lastPlayed = w.evCount;
+  lastEventSeen = w.evCount;
+}
+
+/* ==========================================================================
+   TUTORIAL
+
+   A practice session that holds the world still and walks through one control
+   at a time, advancing only when the player has actually done the thing. It is
+   a layer on top of the game rather than a mode inside it: the simulation has
+   no idea a tutorial is running, and every step is a text prompt plus a
+   predicate over ordinary game state.
+
+   Adding a step is one entry in STEPS. Nothing else needs to change.
+   ========================================================================== */
+const tut = {
+  active: false,
+  step: 0,
+  held: 0,          // seconds the current step has been satisfied
+  moved: 0,         // metres the held paddle has travelled
+  turned: 0,        // radians of commanded rotation
+  fine: 0,          // radians commanded while the fine modifier was held
+  switched: 0,      // paddle handoffs
+  hits: 0,          // paddle contacts with the ball
+  goals: 0,
+};
+
+const STEPS = [
+  {
+    text: '<b>Click</b> anywhere to capture your mouse.',
+    hint: 'nothing responds until you do — press escape to release it again',
+    done: () => pointerLocked,
+  },
+  {
+    text: 'Move the mouse to <b>steer your paddle</b>.',
+    hint: 'the paddle chases the cursor; the line between them is the pull',
+    done: () => tut.moved > 6,
+  },
+  {
+    text: '<b>Roll the mouse wheel</b> to turn the paddle.',
+    hint: 'it turns in fixed steps, so flat and upright are always reachable',
+    done: () => tut.turned > Math.PI * 1.5,
+  },
+  {
+    text: 'Hold <b>right-click</b> and roll the wheel for finer turns.',
+    hint: 'smaller steps, for angles the coarse ones skip',
+    done: () => tut.fine > Math.PI * 0.4,
+  },
+  {
+    text: 'Press <b>space</b> to take hold of your other paddle.',
+    hint: 'the one you let go of stays where you left it, and is still solid',
+    done: () => tut.switched >= 2,
+    skip: () => MATCH.paddles < 2,
+  },
+  {
+    text: 'Now <b>hit the ball</b>.',
+    hint: 'swing into it — a moving paddle adds pace, a still one only returns it',
+    enter: () => { const w = server.world; w.phase = PHASE.PLAY; w.ballHidden = false; serve(w); },
+    done: () => tut.hits >= 3,
+  },
+  {
+    text: 'Put it in the <b>far goal</b> to score.',
+    hint: 'over the net, under the crossbar',
+    done: () => tut.goals >= 1,
+  },
+  {
+    text: "That's everything. <b>Good luck.</b>",
+    hint: 'returning to the menu',
+    done: () => tut.held > 2.5,
+  },
+];
+
+function tutStart() {
+  tut.active = true;
+  tut.step = 0;
+  tut.held = tut.moved = tut.turned = tut.fine = 0;
+  tut.switched = tut.hits = tut.goals = 0;
+  document.body.classList.add('tutorial');
+  paintTutorial();
+}
+
+function tutStop() {
+  tut.active = false;
+  document.body.classList.remove('tutorial');
+}
+
+function paintTutorial() {
+  const s = STEPS[tut.step];
+  if (!s) return;
+  $('tutText').innerHTML = s.text;
+  $('tutHint').textContent = s.hint || '';
+  let dots = '';
+  for (let i = 0; i < STEPS.length; i++) {
+    dots += '<i class="' + (i === tut.step ? 'on' : i < tut.step ? 'past' : '') + '"></i>';
+  }
+  $('tutDots').innerHTML = dots;
+}
+
+// Called once per frame. Advances when the current step's predicate holds, with
+// a beat in between so a completed instruction is visibly acknowledged rather
+// than vanishing under the player's hands.
+function pumpTutorial(dt) {
+  if (!tut.active || !running) return;
+
+  const s = STEPS[tut.step];
+  if (!s) return;
+
+  if (s.skip && s.skip()) { tutAdvance(); return; }
+  if (!s.entered) { s.entered = true; if (s.enter) s.enter(); }
+
+  if (s.done()) {
+    tut.held += dt;
+    if (tut.held > 0.45) tutAdvance();
+  } else {
+    tut.held = 0;
+  }
+}
+
+function tutAdvance() {
+  STEPS[tut.step].entered = false;
+  tut.step++;
+  tut.held = 0;
+  if (tut.step >= STEPS.length) { tutStop(); leaveGame(); return; }
+  paintTutorial();
+}
+
+/* The counters below are fed from the ordinary input path and from the
+   simulation's own event log, so the tutorial observes the game rather than
+   instrumenting it. */
+function tutOnMove(dx, dy) { if (tut.active) tut.moved += Math.hypot(dx, dy); }
+function tutOnTurn(rad, fine) {
+  if (!tut.active) return;
+  tut.turned += Math.abs(rad);
+  if (fine) tut.fine += Math.abs(rad);
+}
+function tutOnSwitch() { if (tut.active) tut.switched++; }
+function tutOnEvent(kind) {
+  if (!tut.active) return;
+  if (kind === 'paddle') tut.hits++;
+  if (kind === 'goal') tut.goals++;
 }
 
 /* ==========================================================================
@@ -2248,7 +2418,7 @@ function pumpAudio() {
    the other side of the country. That is the whole point: the host gets no
    privileged path to its own server.
    ========================================================================== */
-const PHASES = ['play', 'exit', 'announce', 'count', 'win'];
+const PHASES = ['play', 'exit', 'announce', 'count', 'win', 'hold'];
 
 /* Inputs are filed by the tick they belong to and applied at THAT tick, not
    whenever they happen to arrive. Otherwise the server runs a coarsened
@@ -2313,8 +2483,13 @@ function unpackWorld(w, a) {
 function serverStart(soloish) {
   const w = server.world;
   copyWorld(w, makeWorld());
-  w.phase = PHASE.COUNT;
-  w.phaseT = soloish ? 3 : 5;
+  if (tut.active) {
+    w.phase = PHASE.HOLD;      // nothing runs until the tutorial says so
+    w.phaseT = 0;
+  } else {
+    w.phase = PHASE.COUNT;
+    w.phaseT = soloish ? 3 : 5;
+  }
   w.ballHidden = true;
 
   for (const side of [-1, 1]) {
@@ -3015,6 +3190,13 @@ $('build').textContent = BUILD;
 
 $('btnSolo').addEventListener('click', function () {
   net.role = 'solo'; mySide = 1; updateStatus(); showSetup();
+});
+$('btnTutorial').addEventListener('click', function () {
+  // Straight in: a lobby would be one more thing to explain before explaining
+  // anything.
+  net.role = 'solo'; mySide = 1; updateStatus();
+  hideMenu();
+  startGame(true);
 });
 $('btnStart').addEventListener('click', beginMatch);
 $('pd1').addEventListener('click', () => setPaddles(1));
