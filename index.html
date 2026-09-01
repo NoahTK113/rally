@@ -2030,7 +2030,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v10.5-dev';
+const BUILD = 'v10.6-dev';
 
 /* ==========================================================================
    SOUND
@@ -2157,10 +2157,10 @@ function playSynth(kind, gain, mag, x) {
     o.type = 'sine';
     o.frequency.value = kind === 'go' ? 660 : 440;
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(gain * 0.5, t + 0.008);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + (kind === 'go' ? 0.30 : 0.14));
+    g.gain.exponentialRampToValueAtTime(gain * 0.85, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + (kind === 'go' ? 0.45 : 0.21));
     o.connect(g);
-    o.start(t); o.stop(t + (kind === 'go' ? 0.34 : 0.18));
+    o.start(t); o.stop(t + (kind === 'go' ? 0.51 : 0.27));
     return;
   }
 
@@ -2211,7 +2211,14 @@ function playEvent(e) {
 function pumpAudio() {
   if (!audio.ctx) return;
   const w = world;
-  if (w.evCount <= audio.lastPlayed) { audio.lastPlayed = w.evCount; return; }
+
+  /* Never rewind. Reconciliation can move evCount BACKWARD: we predict a goal
+     and bump the counter, then a snapshot arrives describing a tick before it
+     and copyWorld pulls the server's lower count in. Replay regenerates the
+     same ids, and rewinding here would play every one of them a second time —
+     a burst of contact sounds just after the ball crosses the line. Holding
+     the high-water mark means a re-created event is silent instead. */
+  if (w.evCount <= audio.lastPlayed) return;
 
   const first = Math.max(audio.lastPlayed + 1, w.evCount - EV_SLOTS + 1);
   for (let id = first; id <= w.evCount; id++) {
