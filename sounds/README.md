@@ -9,6 +9,8 @@ Drop files here and they replace the synthesised placeholders.
 | `net.wav`      | ball hitting the net |
 | `scored.wav`   | you put it in their goal |
 | `conceded.wav` | they put it in yours |
+| `count.wav`    | each number of the countdown |
+| `go.wav`       | zero, when play resumes |
 
 `scored` and `conceded` are the same event in the simulation — the two players
 hear different sounds for it, because which one it is depends on who is

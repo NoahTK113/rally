@@ -768,6 +768,11 @@ function makeWorld() {
 }
 
 function pushEvent(w, kind, mag, x, side) {
+  // Contacts during the goal exit are real but invisible — the ball is clipped
+  // once it passes the back of the net while still being pulled out at speed.
+  const contact = kind === 'paddle' || kind === 'wall' || kind === 'net';
+  if (contact && w.phase !== PHASE.PLAY) return;
+
   w.evCount++;
   const e = w.ev[w.evCount % EV_SLOTS];
   e.id = w.evCount; e.kind = kind; e.mag = mag; e.x = x;
@@ -1838,15 +1843,24 @@ function stepWorld(w, inp, dt) {
       // The goal that ends a match still gets its announcement; only what
       // follows differs.
       if (matchOver(w)) { w.phase = PHASE.WIN; w.phaseT = WIN_T; }
-      else              { w.phase = PHASE.COUNT; w.phaseT = COUNT_T; }
+      else { w.phase = PHASE.COUNT; w.phaseT = COUNT_T;
+             pushEvent(w, 'count', 5, A.width / 2); }    // the first number
     }
 
   } else if (w.phase === PHASE.WIN) {
     if (w.phaseT > 0) w.phaseT -= dt;      // then it simply waits to be noticed
 
   } else if (w.phase === PHASE.COUNT) {
+    // One beep per number as it appears, then a higher one on zero.
+    const before = Math.ceil(w.phaseT);
     w.phaseT -= dt;
-    if (w.phaseT <= 0) resetRound(w, false);
+    if (w.phaseT > 0 && Math.ceil(w.phaseT) < before) {
+      pushEvent(w, 'count', 5, A.width / 2);
+    }
+    if (w.phaseT <= 0) {
+      pushEvent(w, 'go', 6, A.width / 2);
+      resetRound(w, false);
+    }
   }
 }
 
@@ -2016,7 +2030,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v10.4-dev';
+const BUILD = 'v10.5-dev';
 
 /* ==========================================================================
    SOUND
@@ -2044,6 +2058,8 @@ const SOUNDS = {
   net:       'sounds/net.wav',
   scored:    'sounds/scored.wav',      // you put it in their goal
   conceded:  'sounds/conceded.wav',    // they put it in yours
+  count:     'sounds/count.wav',       // each number of the countdown
+  go:        'sounds/go.wav',          // zero
 };
 
 const AUDIO = { vol: 0.7 };
@@ -2134,6 +2150,20 @@ function playSynth(kind, gain, mag, x) {
   }
 
   const o = c.createOscillator();
+
+  if (kind === 'count' || kind === 'go') {
+    // A plain sine; zero is a perfect fifth above the numbers, so the release
+    // is audible as a resolution rather than just another beep.
+    o.type = 'sine';
+    o.frequency.value = kind === 'go' ? 660 : 440;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain * 0.5, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + (kind === 'go' ? 0.30 : 0.14));
+    o.connect(g);
+    o.start(t); o.stop(t + (kind === 'go' ? 0.34 : 0.18));
+    return;
+  }
+
   if (kind === 'scored' || kind === 'conceded') {
     // rising for yours, falling for theirs — legible before you read the score
     const up = kind === 'scored';
@@ -2166,10 +2196,11 @@ function playEvent(e) {
     ? (e.side === mySide ? 'scored' : 'conceded')
     : e.kind;
 
-  const goalish = kind === 'scored' || kind === 'conceded';
+  const fixed = kind === 'scored' || kind === 'conceded' ||
+                kind === 'count' || kind === 'go';
   const norm = Math.min(1, e.mag / 10);
-  const gain = goalish ? 0.9 : 0.12 + norm * 0.88;
-  const rate = goalish ? 1 : 0.9 + norm * 0.3;
+  const gain = fixed ? 0.9 : 0.12 + norm * 0.88;
+  const rate = fixed ? 1 : 0.9 + norm * 0.3;
 
   if (audio.buffers[kind]) playSample(kind, gain, rate, e.x);
   else playSynth(kind, gain, e.mag, e.x);
