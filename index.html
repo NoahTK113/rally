@@ -214,7 +214,7 @@ const A = {
 const FEEL = {
   posFreq   : 13.5,   // Hz
   posDamp   : 1.90,   // 1.0 = critically damped
-  angFreq   : 13.2,   // Hz
+  angFreq   : 9.0,    // Hz
   angDamp   : 1.65,
   keyRate   : 220,    // degrees/sec for A and D
   maxError  : 0.75,   // metres. The proportional term is clamped to this, so
@@ -1971,7 +1971,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v10';
+const BUILD = 'v10.1';
 
 /* ==========================================================================
    SERVER
