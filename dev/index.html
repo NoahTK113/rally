@@ -76,22 +76,22 @@
   .seg button.on{border-color:#22d3ee;color:#e6edf6;background:#16222f}
 
   .sens{display:flex;align-items:center;gap:12px;margin-top:20px;padding-top:18px;
-        border-top:1px solid #1c2838;font-size:19px;letter-spacing:.12em;color:#4d5c72}
-  .sens input{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:2px;
+        border-top:1px solid #1c2838;font-size:13px;letter-spacing:.14em;color:#4d5c72}
+  .sens input{-webkit-appearance:none;appearance:none;flex:1;height:3px;border-radius:2px;
               background:#22303f;outline:none;cursor:pointer}
-  .sens input::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;
+  .sens input::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
               border-radius:50%;background:#22d3ee;cursor:pointer}
-  .sens .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:64px;text-align:right}
+  .sens .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:45px;text-align:right}
 
   #sensBar{position:fixed;bottom:14px;right:16px;z-index:9;display:none;align-items:center;
-           gap:12px;font-size:19px;letter-spacing:.1em;color:#5b6c82;
+           gap:10px;font-size:13px;letter-spacing:.12em;color:#5b6c82;
            text-shadow:0 1px 3px #000}
   body.playing #sensBar{display:flex}
-  #sensBar input{-webkit-appearance:none;appearance:none;width:170px;height:4px;
+  #sensBar input{-webkit-appearance:none;appearance:none;width:120px;height:3px;
                  border-radius:2px;background:#22303f;outline:none;cursor:pointer}
-  #sensBar input::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;
+  #sensBar input::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
                  border-radius:50%;background:#22d3ee;cursor:pointer}
-  #sensBar .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:58px}
+  #sensBar .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:41px}
 
   #lockHint{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9;
             display:none;padding:22px 38px;border-radius:14px;font-size:30px;
@@ -2035,7 +2035,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v10.8-dev';
+const BUILD = 'v11.1-dev';
 
 /* ==========================================================================
    SOUND
