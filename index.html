@@ -139,6 +139,9 @@
   <span>MOUSE</span>
   <input id="sensPlay" type="range" min="0.2" max="3" step="0.05" value="1">
   <span class="v" id="sensPlayVal">1.00</span>
+  <span>SOUND</span>
+  <input id="volPlay" type="range" min="0" max="1" step="0.05" value="0.7">
+  <span class="v" id="volPlayVal">70</span>
 </div>
 <div id="lockHint">CLICK TO CAPTURE THE MOUSE<small>controls are disabled until you do</small></div>
 <div id="setup" class="hidden">
@@ -168,6 +171,11 @@
       <span>MOUSE</span>
       <input id="sensSetup" type="range" min="0.2" max="3" step="0.05" value="1">
       <span class="v" id="sensSetupVal">1.00</span>
+    </div>
+    <div class="sens" style="margin-top:12px;padding-top:0;border-top:0">
+      <span>SOUND</span>
+      <input id="volSetup" type="range" min="0" max="1" step="0.05" value="0.7">
+      <span class="v" id="volSetupVal">70</span>
     </div>
     <div class="msg" id="setupMsg"></div>
   </div>
@@ -747,8 +755,32 @@ function makeWorld() {
     phaseT: 0,
     lastScorer: 0,
     ballHidden: false,
+
+    /* Contacts worth hearing, recorded by the simulation rather than played
+       from it. The client re-simulates the last several ticks on every
+       snapshot, so anything that made a noise at the moment of collision would
+       make it several times per hit; ids let the audio layer skip what it has
+       already heard. */
+    evCount: 0,
+    ev: Array.from({ length: EV_SLOTS },
+                   () => ({ id: 0, kind: '', mag: 0, x: 0, side: 0 })),
   };
 }
+
+function pushEvent(w, kind, mag, x, side) {
+  // Contacts during the goal exit are real but invisible — the ball is clipped
+  // once it passes the back of the net while still being pulled out at speed.
+  const contact = kind === 'paddle' || kind === 'wall' || kind === 'net';
+  if (contact && w.phase !== PHASE.PLAY) return;
+
+  w.evCount++;
+  const e = w.ev[w.evCount % EV_SLOTS];
+  e.id = w.evCount; e.kind = kind; e.mag = mag; e.x = x;
+  e.side = side || 0;
+}
+
+const EV_SLOTS = 16;
+const EV_MIN = 0.6;      // ignore resting contacts: m/s of impulse
 
 const PADDLE_F = ['x', 'y', 'a', 'vx', 'vy', 'w', 'tx', 'ty', 'ta', 'px', 'py', 'pa'];
 const BALL_F   = ['x', 'y', 'a', 'vx', 'vy', 'w', 'px', 'py', 'pa'];
@@ -769,6 +801,11 @@ function copyWorld(dst, src) {
   dst.phaseT = src.phaseT;
   dst.lastScorer = src.lastScorer;
   dst.ballHidden = src.ballHidden;
+  dst.evCount = src.evCount;
+  for (let i = 0; i < EV_SLOTS; i++) {
+    const a = dst.ev[i], b = src.ev[i];
+    a.id = b.id; a.kind = b.kind; a.mag = b.mag; a.x = b.x; a.side = b.side;
+  }
 }
 
 const world = makeWorld();
@@ -799,6 +836,8 @@ function checkGoal(w) {
 }
 
 function award(w, side) {
+  pushEvent(w, 'goal', 10, w.ball.x, side);   // side scored; each client
+                                              // decides what that means
   w.scores[side]++;
   w.lastScorer = side;
   w.phase = PHASE.EXIT;
@@ -861,6 +900,7 @@ function resolveContact(b, nx, ny, pen, rest, mu, svx = 0, svy = 0, maxPush = In
   b.vx += jn * nx + jt * tx;
   b.vy += jn * ny + jt * ty;
   b.w  += -2 * jt / R;
+  return jn;                 // how hard, for whoever wants to make a noise
 }
 
 /* ---------------------------------------------------------------------------
@@ -991,7 +1031,8 @@ function containBall(b) {
   if (vn < 0) { b.vx -= vn * ux; b.vy -= vn * uy; }   // drop the outward part
 }
 
-function collideArena(b) {
+function collideArena(w) {
+  const b = w.ball;
   const { segs, arcs } = arenaFeatures();
   const R = PHYS.ballR;
 
@@ -1004,7 +1045,8 @@ function collideArena(b) {
     let d = Math.hypot(dx, dy);
     if (d >= R) continue;
     if (d < 1e-9) { dx = 0; dy = 1; d = 1e-9; }
-    resolveContact(b, dx / d, dy / d, R - d, PHYS.restitution, PHYS.friction);
+    const j = resolveContact(b, dx / d, dy / d, R - d, PHYS.restitution, PHYS.friction);
+    if (j > EV_MIN) pushEvent(w, 'wall', j, b.x);
   }
 
   for (const c of arcs) {
@@ -1013,12 +1055,14 @@ function collideArena(b) {
     const sum = R + c.r;
     if (d >= sum) continue;
     if (d < 1e-9) { dx = 1; dy = 0; d = 1e-9; }
-    resolveContact(b, dx / d, dy / d, sum - d, PHYS.restitution, PHYS.friction);
+    const j = resolveContact(b, dx / d, dy / d, sum - d, PHYS.restitution, PHYS.friction);
+    if (j > EV_MIN) pushEvent(w, 'wall', j, b.x);
   }
 }
 
 // The net is a body, so it gets a capsule: a segment with a rounded cap.
-function collideNet(b) {
+function collideNet(w) {
+  const b = w.ball;
   const rNet = A.netT / 2;
   const cx = A.width / 2;
   const cy = clamp(b.y, 0, Math.max(0, A.netHeight - rNet));
@@ -1027,7 +1071,8 @@ function collideNet(b) {
   const R = PHYS.ballR + rNet;
   if (d >= R) return;
   if (d < 1e-9) { dx = 1; dy = 0; d = 1e-9; }
-  resolveContact(b, dx / d, dy / d, R - d, PHYS.restitution, PHYS.friction);
+  const j = resolveContact(b, dx / d, dy / d, R - d, PHYS.restitution, PHYS.friction);
+  if (j > EV_MIN) pushEvent(w, 'net', j, b.x);
 }
 
 /* Ball vs paddle. The paddle is drawn as a rounded rectangle with radius
@@ -1038,7 +1083,8 @@ function collideNet(b) {
    carries v + omega x r, so swinging into the ball adds energy, dragging
    across it adds spin, and pulling away from it takes pace off. None of that
    is possible if the paddle is teleported to the cursor. */
-function collidePaddle(b, p) {
+function collidePaddle(w, p) {
+  const b = w.ball;
   const R = PHYS.ballR;
   const half = Math.max(0, (A.paddleLength - A.paddleT) / 2);   // spine length
   const rad  = A.paddleT / 2;
@@ -1065,8 +1111,9 @@ function collidePaddle(b, p) {
   const svx = p.vx - p.w * ry;
   const svy = p.vy + p.w * rx;
 
-  resolveContact(b, wnx, wny, sum - d, PHYS.paddleRest, PHYS.paddleFriction,
-                 svx, svy, PHYS.ballR * 0.5);
+  const j = resolveContact(b, wnx, wny, sum - d, PHYS.paddleRest, PHYS.paddleFriction,
+                           svx, svy, PHYS.ballR * 0.5);
+  if (j > EV_MIN) pushEvent(w, 'paddle', j, b.x);
 }
 
 function stepBall(w, dt, collide = true) {
@@ -1097,10 +1144,10 @@ function stepBall(w, dt, collide = true) {
       for (let i = 0; i < PIDS.length; i++) {
         const pd = w.p[PIDS[i]];
         if (MATCH.paddles === 1 && pd.index === 1) continue;
-        collidePaddle(b, pd);
+        collidePaddle(w, pd);
       }
-      collideNet(b);
-      collideArena(b);      // last, so the ball can never be left inside a wall
+      collideNet(w);
+      collideArena(w);      // last, so the ball can never be left inside a wall
       // Only while the ball is meant to be on the court: during a goal it is
       // supposed to leave through the back of the net.
       if (w.phase === PHASE.PLAY) containBall(b);
@@ -1564,6 +1611,7 @@ canvas.addEventListener('mousemove', e => {
 });
 
 canvas.addEventListener('mousedown', e => {
+  audioStart();
   if (USE_POINTER_LOCK && e.button === 0 && running && !pointerLocked &&
       canvas.requestPointerLock) {
     canvas.requestPointerLock();
@@ -1795,15 +1843,24 @@ function stepWorld(w, inp, dt) {
       // The goal that ends a match still gets its announcement; only what
       // follows differs.
       if (matchOver(w)) { w.phase = PHASE.WIN; w.phaseT = WIN_T; }
-      else              { w.phase = PHASE.COUNT; w.phaseT = COUNT_T; }
+      else { w.phase = PHASE.COUNT; w.phaseT = COUNT_T;
+             pushEvent(w, 'count', 5, A.width / 2); }    // the first number
     }
 
   } else if (w.phase === PHASE.WIN) {
     if (w.phaseT > 0) w.phaseT -= dt;      // then it simply waits to be noticed
 
   } else if (w.phase === PHASE.COUNT) {
+    // One beep per number as it appears, then a higher one on zero.
+    const before = Math.ceil(w.phaseT);
     w.phaseT -= dt;
-    if (w.phaseT <= 0) resetRound(w, false);
+    if (w.phaseT > 0 && Math.ceil(w.phaseT) < before) {
+      pushEvent(w, 'count', 5, A.width / 2);
+    }
+    if (w.phaseT <= 0) {
+      pushEvent(w, 'go', 6, A.width / 2);
+      resetRound(w, false);
+    }
   }
 }
 
@@ -1826,6 +1883,11 @@ function startGame() {
      advantage. */
   const fresh = makeWorld();
   copyWorld(world, fresh);
+
+  /* The audio marker is a high-water mark over world.evCount, and a new game
+     restarts that counter at zero — so without this every event in every match
+     after the first has an id below the mark and is silently dropped. */
+  audio.lastPlayed = 0;
 
   intent.sel = 0;
   const mine = paddles[idOf(mySide, 0)];
@@ -1941,6 +2003,8 @@ function frame(nowMs) {
     if (netAcc >= 1) { netAcc = 0; sendConfig(); }
   }
 
+  pumpAudio();
+
   renderAlpha = frozen ? 1 : accumulator / FIXED_DT;
   render();
 
@@ -1971,7 +2035,206 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v10.2';
+const BUILD = 'v11';
+
+/* ==========================================================================
+   SOUND
+
+   Drop a file into sounds/ and it replaces the placeholder for that event —
+   the names below are the whole wiring. Any extension the browser can decode
+   works; .wav and .mp3 both do.
+
+   Two things make this less trivial than it looks.
+
+   Loading only works over http(s). A page opened from file:// treats every
+   local file as a separate origin and cannot fetch its own siblings, so local
+   testing falls back to the synthesised placeholders. On the deployed URL the
+   files load normally.
+
+   And the client re-simulates the last several ticks on every snapshot, so
+   anything that played a sound at the moment of collision would replay it
+   several times per hit. Instead the simulation RECORDS events with an id,
+   and this layer plays only ids it has not seen. Rollback then dedupes for
+   free: a replayed collision regenerates the same id and is skipped.
+   ========================================================================== */
+const SOUNDS = {
+  paddle:    'sounds/paddle.wav',
+  wall:      'sounds/wall.wav',
+  net:       'sounds/net.wav',
+  scored:    'sounds/scored.wav',      // you put it in their goal
+  conceded:  'sounds/conceded.wav',    // they put it in yours
+  count:     'sounds/count.wav',       // each number of the countdown
+  go:        'sounds/go.wav',          // zero
+};
+
+const AUDIO = { vol: 0.7 };
+
+const audio = {
+  ctx: null,
+  master: null,
+  buffers: {},          // kind -> AudioBuffer, or null while missing
+  lastPlayed: 0,        // highest event id already heard
+  started: false,
+};
+
+/* Browsers refuse to start audio without a user gesture. The click that
+   captures the mouse is one, so there is no separate "click to enable". */
+function audioStart() {
+  if (audio.started) return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  audio.started = true;
+  audio.ctx = new Ctx();
+  audio.master = audio.ctx.createGain();
+  audio.master.gain.value = AUDIO.vol;
+  audio.master.connect(audio.ctx.destination);
+
+  for (const kind in SOUNDS) {
+    audio.buffers[kind] = null;
+    // Versioned so a redeploy is never served a stale file from cache. A hard
+    // refresh reloads the page but does not reliably clear things fetched by
+    // script afterwards, which makes "did my new sound deploy" unanswerable.
+    fetch(SOUNDS[kind] + '?v=' + encodeURIComponent(BUILD))
+      .then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status))
+      .then(buf => audio.ctx.decodeAudioData(buf))
+      .then(decoded => { audio.buffers[kind] = decoded; })
+      .catch(() => {});          // absent or unreachable: keep the placeholder
+  }
+}
+
+function setVolume(v) {
+  AUDIO.vol = Math.max(0, Math.min(1, Math.round(v * 100) / 100));
+  if (audio.master) audio.master.gain.value = AUDIO.vol;
+  try { localStorage.setItem('flickball.vol', AUDIO.vol); } catch (e) {}
+  paintVolume();
+}
+
+// Position across the court maps to the stereo field, which makes a hit on the
+// far side legible without looking at it.
+function panFor(x) {
+  const t = (x / A.width) * 2 - 1;
+  return Math.max(-1, Math.min(1, t)) * 0.7;
+}
+
+function playSample(kind, gain, rate, x) {
+  const src = audio.ctx.createBufferSource();
+  src.buffer = audio.buffers[kind];
+  src.playbackRate.value = rate;
+  const g = audio.ctx.createGain();
+  g.gain.value = gain;
+  const pan = audio.ctx.createStereoPanner
+    ? audio.ctx.createStereoPanner() : null;
+  if (pan) { pan.pan.value = panFor(x); src.connect(g); g.connect(pan); pan.connect(audio.master); }
+  else { src.connect(g); g.connect(audio.master); }
+  src.start();
+}
+
+/* Placeholders. Deliberately plain: they exist so the timing and the mix can
+   be judged before any recording exists, not to be kept. */
+function playSynth(kind, gain, mag, x) {
+  const c = audio.ctx, t = c.currentTime;
+  const g = c.createGain();
+  const pan = c.createStereoPanner ? c.createStereoPanner() : null;
+  if (pan) { pan.pan.value = panFor(x); g.connect(pan); pan.connect(audio.master); }
+  else g.connect(audio.master);
+
+  if (kind === 'wall' || kind === 'net') {
+    // a short filtered noise burst
+    const n = c.createBufferSource();
+    const len = Math.floor(c.sampleRate * 0.08);
+    const buf = c.createBuffer(1, len, c.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    n.buffer = buf;
+    const f = c.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = kind === 'net' ? 900 : 380;
+    f.Q.value = kind === 'net' ? 4 : 1.4;
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    n.connect(f); f.connect(g);
+    n.start(t); n.stop(t + 0.1);
+    return;
+  }
+
+  const o = c.createOscillator();
+
+  if (kind === 'count' || kind === 'go') {
+    // A plain sine; zero is a perfect fifth above the numbers, so the release
+    // is audible as a resolution rather than just another beep.
+    o.type = 'sine';
+    o.frequency.value = kind === 'go' ? 660 : 440;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain * 0.85, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + (kind === 'go' ? 0.45 : 0.21));
+    o.connect(g);
+    o.start(t); o.stop(t + (kind === 'go' ? 0.51 : 0.27));
+    return;
+  }
+
+  if (kind === 'scored' || kind === 'conceded') {
+    // rising for yours, falling for theirs — legible before you read the score
+    const up = kind === 'scored';
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(up ? 180 : 460, t);
+    o.frequency.exponentialRampToValueAtTime(up ? 520 : 130, t + 0.28);
+    g.gain.setValueAtTime(gain * 0.9, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+    o.connect(g); o.start(t); o.stop(t + 0.6);
+  } else {
+    // paddle: a click that rises in pitch with how hard it was struck
+    o.type = 'square';
+    const f0 = 220 + Math.min(1, mag / 12) * 520;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f0 * 0.55, t + 0.07);
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    o.connect(g); o.start(t); o.stop(t + 0.12);
+  }
+}
+
+function playEvent(e) {
+  if (!audio.ctx || AUDIO.vol <= 0) return;
+  if (audio.ctx.state === 'suspended') audio.ctx.resume();
+
+  // A goal is one event in the simulation. Which of the two it sounds like is
+  // decided here, per listener, because 'scored' and 'conceded' describe the
+  // person hearing it rather than anything the world knows about.
+  const kind = e.kind === 'goal'
+    ? (e.side === mySide ? 'scored' : 'conceded')
+    : e.kind;
+
+  const fixed = kind === 'scored' || kind === 'conceded' ||
+                kind === 'count' || kind === 'go';
+  const norm = Math.min(1, e.mag / 10);
+  const gain = fixed ? 0.9 : 0.12 + norm * 0.88;
+  const rate = fixed ? 1 : 0.9 + norm * 0.3;
+
+  if (audio.buffers[kind]) playSample(kind, gain, rate, e.x);
+  else playSynth(kind, gain, e.mag, e.x);
+}
+
+// Called once per frame: play whatever the simulation recorded that we have
+// not already heard.
+function pumpAudio() {
+  if (!audio.ctx) return;
+  const w = world;
+
+  /* Never rewind. Reconciliation can move evCount BACKWARD: we predict a goal
+     and bump the counter, then a snapshot arrives describing a tick before it
+     and copyWorld pulls the server's lower count in. Replay regenerates the
+     same ids, and rewinding here would play every one of them a second time —
+     a burst of contact sounds just after the ball crosses the line. Holding
+     the high-water mark means a re-created event is silent instead. */
+  if (w.evCount <= audio.lastPlayed) return;
+
+  const first = Math.max(audio.lastPlayed + 1, w.evCount - EV_SLOTS + 1);
+  for (let id = first; id <= w.evCount; id++) {
+    const e = w.ev[id % EV_SLOTS];
+    if (e && e.id === id) playEvent(e);
+  }
+  audio.lastPlayed = w.evCount;
+}
 
 /* ==========================================================================
    SERVER
@@ -2013,7 +2276,7 @@ const server = {
 function packWorld(w) {
   const a = [w.tick, PHASES.indexOf(w.phase), w.phaseT, w.lastScorer,
              w.ballHidden ? 1 : 0, w.scores['-1'], w.scores['1'],
-             w.sel['-1'], w.sel['1'],
+             w.sel['-1'], w.sel['1'], w.evCount,
              w.ball.x, w.ball.y, w.ball.a, w.ball.vx, w.ball.vy, w.ball.w];
   for (const id of PIDS) {
     const p = w.p[id];
@@ -2033,6 +2296,7 @@ function unpackWorld(w, a) {
   w.scores['1'] = a[i++];
   w.sel['-1'] = a[i++];
   w.sel['1'] = a[i++];
+  w.evCount = a[i++];
   const b = w.ball;
   b.x = a[i++]; b.y = a[i++]; b.a = a[i++];
   b.vx = a[i++]; b.vy = a[i++]; b.w = a[i++];
@@ -2556,6 +2820,14 @@ function paintSens() {
   $('sensPlayVal').textContent = v;
 }
 
+function paintVolume() {
+  const pct = Math.round(AUDIO.vol * 100);
+  $('volSetup').value = AUDIO.vol;
+  $('volPlay').value = AUDIO.vol;
+  $('volSetupVal').textContent = pct;
+  $('volPlayVal').textContent = pct;
+}
+
 function setSens(v) {
   MOUSE.sens = Math.max(0.2, Math.min(3, Math.round(v * 100) / 100));
   try { localStorage.setItem('flickball.sens', MOUSE.sens); } catch (e) {}
@@ -2752,6 +3024,8 @@ $('ptPlus').addEventListener('click', () => setTarget(MATCH.target + 1));
 $('ptRange').addEventListener('input', e => setTarget(parseInt(e.target.value, 10)));
 $('sensSetup').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 $('sensPlay').addEventListener('input', e => setSens(parseFloat(e.target.value)));
+$('volSetup').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
+$('volPlay').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
 
 try {
   const saved = parseInt(localStorage.getItem('flickball.target'), 10);
@@ -2760,7 +3034,10 @@ try {
   if (!isNaN(ms)) MOUSE.sens = Math.max(0.2, Math.min(3, ms));
   const pc = parseInt(localStorage.getItem('flickball.paddles'), 10);
   if (pc === 1 || pc === 2) MATCH.paddles = pc;
+  const vv = parseFloat(localStorage.getItem('flickball.vol'));
+  if (!isNaN(vv)) AUDIO.vol = Math.max(0, Math.min(1, vv));
 } catch (e) {}
+paintVolume();
 paintTarget();
 paintPaddles();
 paintSens();
