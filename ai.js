@@ -137,11 +137,16 @@ function aiPredict(w, side) {
   b.x = src.x; b.y = src.y; b.vx = src.vx; b.vy = src.vy; b.w = src.w;
   b.px = b.x; b.py = b.y;
 
-  // The x band this side can actually operate in, across both its paddles.
+  /* The band this side can operate in — COURT ONLY. paddleBoxes also returns
+     the goal pocket for the defence paddle, and including it would have the AI
+     aim at intercepts inside its own net. It would then park on the boundary
+     between two boxes that do not touch, where nearestLegal flips between them
+     and the pose jumps the width of the gap. A person never stands there; an
+     AI aiming at a predicted point will stand there all day. */
   let lo = Infinity, hi = -Infinity;
   for (let i = 0; i < (MATCH.paddles > 1 ? 2 : 1); i++) {
-    const boxes = paddleBoxes(w.p[idOf(side, i)]);
-    for (const bx of boxes) { lo = Math.min(lo, bx.x0); hi = Math.max(hi, bx.x1); }
+    const bx = paddleBoxes(w.p[idOf(side, i)])[0];   // [0] is the court box
+    lo = Math.min(lo, bx.x0); hi = Math.max(hi, bx.x1);
   }
 
   const steps = Math.floor(AI_PRED_MAX / AI_PRED_DT);
@@ -156,21 +161,22 @@ function aiPredict(w, side) {
   return null;
 }
 
+// Station in front of our own goal, on the court.
+function aiHome(w, side) {
+  const sel = MATCH.paddles > 1 ? 1 : 0;
+  const box = paddleBoxes(w.p[idOf(side, sel)])[0];
+  ai.tx = (box.x0 + box.x1) / 2;
+  ai.ty = Math.max(box.y0, Math.min(box.y1, (goalY0() + goalY1()) / 2));
+  ai.ta = 0;
+  ai.wantSel = sel;
+  ai.hasPlan = true;
+}
+
 function aiPlan(w, side) {
   const hit = aiPredict(w, side);
+  aiHome(w, side);            // a sane fallback, overwritten if there is a plan
 
-  if (!hit) {
-    // Nothing coming: hold station in front of our own goal.
-    const home = w.p[idOf(side, MATCH.paddles > 1 ? 1 : 0)];
-    const boxes = paddleBoxes(home);
-    const box = boxes[0];
-    ai.tx = (box.x0 + box.x1) / 2;
-    ai.ty = (goalY0() + goalY1()) / 2;
-    ai.ta = 0;
-    ai.wantSel = MATCH.paddles > 1 ? 1 : 0;
-    ai.hasPlan = true;
-    return;
-  }
+  if (!hit) return;          // nothing coming: stay home
 
   // Aim at the far goal, with error that grows as accuracy falls.
   const err = 1 - AI.accuracy;
@@ -197,6 +203,11 @@ function aiPlan(w, side) {
   ai.tx = hit.x;
   ai.ty = hit.y + off;
   ai.ta = ta;
+
+  // Keep the target on the court for the same reason.
+  const own = paddleBoxes(w.p[idOf(side, ai.wantSel)])[0];
+  ai.tx = Math.max(own.x0, Math.min(own.x1, ai.tx));
+  ai.ty = Math.max(own.y0, Math.min(own.y1, ai.ty));
 
   if (MATCH.paddles > 1) {
     // Whichever paddle's own zone the ball is actually arriving in.
@@ -232,6 +243,10 @@ function aiFillInput(w, side, dst, dt) {
   } else {
     ai.sel = 0;
   }
+
+  // One non-finite number would hand the spring an impossible target, so the
+  // plan is checked before it is ever handed over.
+  if (!isFinite(ai.tx) || !isFinite(ai.ty) || !isFinite(ai.ta)) aiHome(w, side);
 
   dst.sel = ai.sel;
   dst.tx = ai.tx;
