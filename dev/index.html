@@ -221,9 +221,9 @@
   </div>
 </div>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v11.6-dev"></script>
-<script src="ai.js?v=v11.6-dev"></script>
-<script src="tutorial.js?v=v11.6-dev"></script>
+<script src="audio.js?v=v11.7-dev"></script>
+<script src="ai.js?v=v11.7-dev"></script>
+<script src="tutorial.js?v=v11.7-dev"></script>
 <script>
 'use strict';
 
@@ -2083,7 +2083,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v11.6-dev';
+const BUILD = 'v11.7-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2663,6 +2663,31 @@ const NET_HZ = 60;                 // packets/sec each way; they are tiny
 const PEER_PREFIX = 'rallyxz-';
 const CODE_CHARS = 'ACDEFGHJKLMNPQRTUVWXY34679';   // no look-alike characters
 
+/* Two browsers behind ordinary home routers usually reach each other directly
+   once STUN tells each what its public address is. When both sit behind
+   symmetric NAT, no direct path exists at all, and the only way through is a
+   TURN server relaying the traffic. Without one, PeerJS emits no error — the
+   connection simply never opens, which looks exactly like hanging.
+
+   TURN means the game traffic passes through a third party and gains a hop of
+   latency, so it is a fallback: WebRTC uses it only when nothing direct works. */
+const ICE = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    { urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject', credential: 'openrelayproject' },
+  ],
+};
+const PEER_OPTS = { config: ICE };
+
+const JOIN_TIMEOUT = 15000;   // ms before we admit it is not going to connect
+let joinTimer = null;
+
 const net = { role: 'solo', peer: null, conn: null, link: null,
               up: false, code: '', rtt: 0, rttSmooth: 0, synced: false };
 let netAcc = 0;
@@ -2799,6 +2824,7 @@ function peerAvailable() {
 function wireConn(conn) {
   net.conn = conn;
   conn.on('open', function () {
+    clearTimeout(joinTimer);
     net.link = makeChannelEnd(conn);
     net.link.onMessage(onData);   // replaced by serverAttach/clientAttach on start
     net.up = true;
@@ -2830,7 +2856,7 @@ function hostGame() {
   AI.on = false;                      // a human is on the way
   net.code = randomCode();
   setMsg('Opening room&hellip;');
-  net.peer = new Peer(PEER_PREFIX + net.code);
+  net.peer = new Peer(PEER_PREFIX + net.code, PEER_OPTS);
   net.peer.on('open', function () {
     setMsg('Give your opponent this code:<span class="code">' + net.code + '</span>');
     updateStatus();
@@ -2854,9 +2880,29 @@ function joinGame() {
   AI.on = false;
   net.code = code;
   setMsg('Connecting to ' + code + '&hellip;');
-  net.peer = new Peer();
+  net.peer = new Peer(undefined, PEER_OPTS);
   net.peer.on('open', function () {
-    wireConn(net.peer.connect(PEER_PREFIX + code, { reliable: false }));
+    const conn = net.peer.connect(PEER_PREFIX + code, { reliable: false });
+    if (!conn) { setMsg('Could not start the connection. Try again.'); return; }
+    wireConn(conn);
+
+    /* Give up out loud. A failed negotiation produces no error event at all,
+       so without this the guest sits on "connecting" indefinitely with nothing
+       to act on — the worst kind of failure, because it looks like a hang
+       rather than a problem with a cause. */
+    clearTimeout(joinTimer);
+    joinTimer = setTimeout(function () {
+      if (net.up) return;
+      const pc = conn.peerConnection;
+      const state = pc ? pc.iceConnectionState : 'unknown';
+      setMsg('Could not reach that room.<br>' +
+             'The connection stalled while negotiating (' + state + ').<br>' +
+             'One of you may be on a network that blocks direct connections.');
+      try { net.peer.destroy(); } catch (err) {}
+      net.role = 'solo';
+      mySide = 1;
+      updateStatus();
+    }, JOIN_TIMEOUT);
   });
   net.peer.on('error', function (e) {
     setMsg(e.type === 'peer-unavailable'
