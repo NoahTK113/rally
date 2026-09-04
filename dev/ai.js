@@ -50,7 +50,8 @@ const AI_FOLLOW_T = 0.12;     // s of follow-through after contact
 const AI_FOLLOW_D = 0.70;     // m the target carries on past the contact point
 const AI_SWEEP    = 0.45;     // rad the face keeps turning through the ball
 
-const KIND = { IDLE: 0, APPROACH: 1, STRIKE: 2 };
+const KIND = { IDLE: 0, APPROACH: 1, STRIKE: 2, RECOVER: 3 };
+const AI_FRONT_M = 0.10;      // m past the ball before we call it wrong-side
 
 /* One plan. Reused rather than reallocated, so planning at 5 Hz costs nothing
    in garbage. a -> b is the first segment, b -> c the follow-through. */
@@ -69,6 +70,7 @@ const ai = {
   world: null,          // scratch world for prediction
   clock: 0,             // seconds elapsed inside the current plan
   has: false,
+  recovering: false,    // latched: set when caught in front, cleared only on arrival
   wheel: 0,             // the hand's accumulated angle, exactly like intent.ta
   wheelSet: false,
   clicks: 0,            // fractional wheel budget carried between ticks
@@ -80,6 +82,7 @@ function aiInit(side) {
   ai.head = 0; ai.filled = 0;
   ai.clock = 0; ai.has = false;
   ai.wheel = 0; ai.wheelSet = false; ai.clicks = 0;
+  ai.recovering = false;
   ai.wantSel = ai.sel = 0;
   ai.selHeld = 0;
   if (!ai.hist) {
@@ -275,6 +278,11 @@ function aiShot(hit, side, curA, errAim, errAng) {
   return { dirx, diry, a: aiNearAngle(a + errAng, curA) };
 }
 
+/* Signed distance behind the ball, along the axis of our own goal. `side` is
+   also the direction toward that goal, so positive is safely behind and
+   negative means caught on the wrong side. */
+const aiBehind = (p, seen, side) => side * (p.x - seen.x);
+
 /* How far behind the ball to stand. Far enough that a ball struck now takes
    longer to arrive than we need to see it and start moving — which is why it
    is built from reaction and commit rather than picked out of the air. It
@@ -352,45 +360,51 @@ function aiMakePlan(w, side) {
      being positive means we are past the ball on the attacking side. The 0.10
      keeps it from chattering at the boundary; recovery overshoots well past
      that, so it cannot oscillate. */
-  const inFront = -side * (p.x - seen.x) > 0.10;
-
   // No point predicting an intercept we are not allowed to take.
-  const hit = inFront ? null : aiPredict(w, side);
+  const hit = ai.recovering ? null : aiPredict(w, side);
 
-  if (!hit) {
-    /* IDLE. One state: stand at the ball's height, a safe distance behind it.
-       Being in front of the ball is not a different intention, only a
-       different ROUTE to the same place — which is why this used to oscillate
-       when they were separate states, each hauling the paddle where the other
-       had just left.
+  if (ai.recovering) {
+    /* RECOVER is a GOAL, not a position: get behind the ball. It is latched
+       elsewhere and cleared only on arrival, so it cannot be abandoned by a
+       boundary test flickering — which is what kept it oscillating while it
+       was a mode idle could talk it out of every 200ms.
 
-       There is nothing special about the centre of the zone, and aiming for it
-       was the whole bug: recovery put the paddle behind the ball, idle dragged
-       it back to centre, which is in front of the ball, and recovery fired
-       again. One swing per plan, forever. */
+       And it runs as long as the move takes, not for one commit interval.
+       Crossing the court to get behind the ball is not a decision worth
+       re-taking five times a second; it is one unambiguous movement. Both
+       segments travel at the paddle's top speed, so the duration falls out of
+       the distance rather than being chosen.
+
+       Round the ball, not through it: rise or dive clear first, then run back
+       past it at that height. A straight line to the far side would go through
+       the ball and hit it exactly the wrong way. Go whichever way has more
+       room, so we do not climb into the ceiling. */
+    const clear = PHYS.ballR + A.paddleLength * 0.5 + 0.25;
+    const up = box.y1 - seen.y, down = seen.y - box.y0;
+    const clearY = clamp(seen.y + (up >= down ? clear : -clear), box.y0, box.y1);
     const destX = clamp(seen.x + side * aiSafeDist(seen), box.x0, box.x1);
-    const destY = clamp(seen.y, box.y0, box.y1);
-    plan.kind = KIND.IDLE;
-    plan.dur = AI.commit;
+    const top = aiPaddleTopSpeed();
 
-    if (inFront) {
-      /* Round the ball, not through it. Rise or dive clear first, then run
-         back past it at that height — a straight line to the far side would go
-         through the ball and hit it exactly the wrong way. Go whichever way
-         has more room, so we do not climb into the ceiling. */
-      const clear = PHYS.ballR + A.paddleLength * 0.5 + 0.25;
-      const up = box.y1 - seen.y, down = seen.y - box.y0;
-      const clearY = clamp(seen.y + (up >= down ? clear : -clear), box.y0, box.y1);
-      plan.hitT = plan.dur * 0.45;            // rise, then run
-      plan.bx = clamp(p.x, box.x0, box.x1); plan.by = clearY;
-      plan.cx = destX;                        plan.cy = clearY;
-    } else {
-      plan.hitT = plan.dur;                   // already behind it: go straight there
-      plan.bx = destX; plan.by = destY;
-      plan.cx = destX; plan.cy = destY;
-    }
+    plan.kind = KIND.RECOVER;
+    plan.bx = clamp(p.x, box.x0, box.x1); plan.by = clearY;
+    plan.cx = destX;                      plan.cy = clearY;
+    plan.hitT = Math.max(0.02, Math.abs(plan.by - p.y) / top);
+    plan.dur  = plan.hitT + Math.max(0.02, Math.abs(plan.cx - plan.bx) / top);
     plan.ba = aiFaceBall(plan.bx, plan.by, seen.x, seen.y, p.a);
     plan.ca = aiFaceBall(plan.cx, plan.cy, seen.x, seen.y, plan.ba);
+
+  } else if (!hit) {
+    /* IDLE is a position to HOLD: the ball's height, a safe distance behind
+       it. There is nothing special about the centre of the zone, and aiming
+       for it was a bug in its own right — it sits in front of the ball, so it
+       fought recovery directly. */
+    plan.kind = KIND.IDLE;
+    plan.dur = AI.commit;
+    plan.hitT = plan.dur;
+    plan.bx = clamp(seen.x + side * aiSafeDist(seen), box.x0, box.x1);
+    plan.by = clamp(seen.y, box.y0, box.y1);
+    plan.ba = aiFaceBall(plan.bx, plan.by, seen.x, seen.y, p.a);
+    plan.cx = plan.bx; plan.cy = plan.by; plan.ca = plan.ba;
 
   } else {
     const shot = aiShot(hit, side, p.a, errAim, errAng);
@@ -447,6 +461,24 @@ function aiMakePlan(w, side) {
 function aiFillInput(w, side, dst, dt) {
   if (!ai.hist) aiInit(side);
   aiSample(w);
+
+  /* The latch, tested every tick rather than only when a plan expires. Both
+     edges have to be immediate: being caught in front must interrupt whatever
+     is running, and arriving must end a recovery at once, or a move that takes
+     a second and a half would carry on long after it had succeeded.
+
+     The gap between the two thresholds is the whole point. It enters at a tenth
+     of a metre past the ball and leaves only at nearly the full safe distance
+     behind it — so a paddle sitting near the boundary cannot flip between them,
+     which is precisely how the oscillation worked. */
+  const mine = w.p[idOf(side, ai.sel)];
+  const now = aiPerceived(FIXED_DT);
+  const behind = aiBehind(mine, now, side);
+  if (ai.recovering) {
+    if (behind >= aiSafeDist(now) * 0.9) { ai.recovering = false; ai.clock = plan.dur; }
+  } else if (behind < -AI_FRONT_M) {
+    ai.recovering = true; ai.clock = plan.dur;
+  }
 
   ai.clock += dt;
   if (!ai.has || ai.clock >= plan.dur) { aiMakePlan(w, side); ai.clock = 0; }
