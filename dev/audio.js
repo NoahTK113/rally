@@ -71,7 +71,9 @@ function audioStart() {
 function setVolume(v) {
   AUDIO.vol = Math.max(0, Math.min(1, Math.round(v * 100) / 100));
   if (audio.master) audio.master.gain.value = AUDIO.vol;
-  try { localStorage.setItem('flickball.vol', AUDIO.vol); } catch (e) {}
+  // Read back as banjoball.vol; the old flickball key was left behind by the
+  // rename, so volume silently failed to persist at all.
+  try { localStorage.setItem('banjoball.vol', AUDIO.vol); } catch (e) {}
   paintVolume();
 }
 
