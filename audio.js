@@ -18,11 +18,11 @@
    testing falls back to the synthesised placeholders. On the deployed URL the
    files load normally.
 
-   And the client re-simulates the last several ticks on every snapshot, so
-   anything that played a sound at the moment of collision would replay it
-   several times per hit. Instead the simulation RECORDS events with an id,
-   and this layer plays only ids it has not seen. Rollback then dedupes for
-   free: a replayed collision regenerates the same id and is skipped.
+   Sound is driven from an event log rather than from the collision itself:
+   the simulation records each event with an id, and this layer plays only ids
+   it has not heard. That was built so rollback could re-simulate a collision
+   without replaying its sound; with no rollback left it simply keeps sound out
+   of the physics, which is where it belongs anyway.
    ========================================================================== */
 const SOUNDS = {
   paddle:    'sounds/paddle.wav',
