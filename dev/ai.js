@@ -34,20 +34,22 @@ const AI = {
   accuracy: 0.85,     // 0..1 — 1 aims exactly, 0 is hopeless
   switchTime: 0.35,   // s — deliberation before committing to the other paddle
   wheelRate: 12,      // wheel clicks per second — the hand's actual limit
-  maxCommit: 0.50,    // s — the longest ANY plan may run, and the furthest
-                      //     ahead an intercept is worth acting on at all
+  maxCommit: 0.50,    // s — how far ahead a STRIKE is worth predicting at all,
+                      //     and the longest a non-recovery plan may run
+  maxRecover: 2.00,   // s — a recovery may commit for far longer; it is one
+                      //     unambiguous movement, and the opponent is unlikely
+                      //     to be able to interrupt it
 };
 
 const AI_LEVELS = {
-  easy:   { reaction: 0.34, commit: 0.30, accuracy: 0.55, switchTime: 0.70, wheelRate: 7,  maxCommit: 0.60 },
-  normal: { reaction: 0.18, commit: 0.20, accuracy: 0.85, switchTime: 0.35, wheelRate: 12, maxCommit: 0.50 },
-  hard:   { reaction: 0.09, commit: 0.12, accuracy: 0.97, switchTime: 0.16, wheelRate: 18, maxCommit: 0.38 },
+  easy:   { reaction: 0.34, commit: 0.30, accuracy: 0.55, switchTime: 0.70, wheelRate: 7,  maxCommit: 0.60, maxRecover: 2.2 },
+  normal: { reaction: 0.18, commit: 0.20, accuracy: 0.85, switchTime: 0.35, wheelRate: 12, maxCommit: 0.50, maxRecover: 2.0 },
+  hard:   { reaction: 0.09, commit: 0.12, accuracy: 0.97, switchTime: 0.16, wheelRate: 18, maxCommit: 0.38, maxRecover: 1.8 },
 };
 
 const AI_HIST = 256;          // ticks of ball history, for delayed perception
 const AI_PRED_DT = 1 / 120;   // coarser than the sim: prediction is cheap, and
                               // half a tick of error is far below the aim error
-const AI_PRED_MAX = 4.0;      // s to look ahead before giving up
 const AI_FOLLOW_T = 0.12;     // s of follow-through after contact
 const AI_FOLLOW_D = 0.70;     // m the target carries on past the contact point
 const AI_SWEEP    = 0.45;     // rad the face keeps turning through the ball
@@ -107,6 +109,7 @@ function aiSetLevel(name) {
   AI.switchTime = L.switchTime;
   AI.wheelRate = L.wheelRate;
   AI.maxCommit = L.maxCommit;
+  AI.maxRecover = L.maxRecover;
   try { localStorage.setItem('banjoball.ai', name); } catch (e) {}
 }
 
@@ -232,7 +235,13 @@ function aiPredict(w, side) {
      make. Take the first it can actually be at, and fall back to the earliest
      only when none is reachable - arriving late still beats not going. */
   let first = null;
-  const steps = Math.floor(AI_PRED_MAX / AI_PRED_DT);
+  /* The horizon is the strike commitment, not a fixed constant. There is no
+     value in predicting a contact a second out: the AI cannot know what the
+     opponent will do, and by then the ball would have been hit, bounced or
+     rolled somewhere else. Beyond the horizon there is simply no candidate, so
+     the AI holds station rather than standing on a stale guess — and each
+     prediction costs a fraction of what it did. */
+  const steps = Math.floor(AI.maxCommit / AI_PRED_DT);
   for (let i = 0; i < steps; i++) {
     stepBall(pw, AI_PRED_DT, true, true);          // world collisions, no paddles
     const towardUs = side < 0 ? b.vx < 0 : b.vx > 0;
@@ -415,22 +424,7 @@ function aiMakePlan(w, side) {
   } else {
     const shot = aiShot(hit, side, p.a, errAim, errAng);
 
-    if (hit.t > AI.maxCommit) {
-      /* Too far off to act on at all. Standing on a point the ball reaches in
-         two seconds looks exactly as stupid as it is: the ball bounces, rolls,
-         gets hit again, and the paddle is still waiting on a prediction made
-         about a world that no longer exists. Hold station instead — idle
-         already tracks the ball, so position converges on its own. */
-      plan.kind = KIND.IDLE;
-      plan.dur = AI.commit;
-      plan.hitT = plan.dur;
-      plan.t2 = 0;
-      plan.bx = clamp(seen.x + side * aiSafeDist(seen), box.x0, box.x1);
-      plan.by = clamp(seen.y, box.y0, box.y1);
-      plan.ba = aiFaceBall(plan.bx, plan.by, seen.x, seen.y, p.a);
-      plan.cx = plan.bx; plan.cy = plan.by; plan.ca = plan.ba;
-
-    } else if (hit.t > AI.commit * 1.6) {
+    if (hit.t > AI.commit * 1.6) {
       /* Too far off to swing at. Set up BEHIND the contact point, so when the
          strike comes there is room to accelerate through the ball instead of
          starting from a standstill on top of it. */
@@ -460,12 +454,20 @@ function aiMakePlan(w, side) {
     }
   }
 
-  /* Nothing is worth committing to for longer than this. A plan that outruns
-     it is TRUNCATED, not rescaled: the paddle stops partway along the same
-     path and the next plan carries on from there, having had another look at
-     the world in between. Recovery keeps its latch across that boundary, so
-     the goal survives even though the plan does not. */
-  plan.dur = Math.min(plan.dur, AI.maxCommit);
+  /* Recovery gets a far longer leash, because it is a different kind of
+     decision. Running corner to corner to get behind the ball is one
+     unambiguous movement, and while it happens the opponent is unlikely to be
+     able to change the situation — so committing two seconds to it is sound,
+     where committing two seconds to a STRIKE never is: the opponent would
+     simply be standing there when it arrived.
+
+     Whatever the limit, a plan that outruns it is TRUNCATED, not rescaled. The
+     paddle stops partway along the same path and the next plan continues from
+     there. Recovery keeps its latch across that boundary, so the goal survives
+     even though the plan does not — and if the ball does come back, the latch
+     ends the recovery early on its own. */
+  plan.dur = Math.min(plan.dur,
+                      plan.kind === KIND.RECOVER ? AI.maxRecover : AI.maxCommit);
 
   const t1 = Math.max(1e-3, plan.hitT);
   plan.v1x = (plan.bx - plan.ax) / t1;
