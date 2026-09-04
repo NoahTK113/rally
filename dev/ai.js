@@ -30,11 +30,11 @@
 const AI = {
   on: false,
   reaction: 0.18,     // s — how stale our view of the BALL is. Nothing else.
-  commit:   0.20,     // s — how long a stroke runs before it is reconsidered
+  commit:   0.35,     // s — how long a stroke runs before it is reconsidered
   accuracy: 0.85,     // 0..1 — 1 aims exactly, 0 is hopeless
   switchTime: 0.35,   // s — deliberation before committing to the other paddle
   wheelRate: 12,      // wheel clicks per second — the hand's actual limit
-  maxCommit: 0.50,    // s — how far ahead a STRIKE is worth predicting at all,
+  maxCommit: 0.90,    // s — how far ahead a STRIKE is worth predicting at all,
                       //     and the longest a non-recovery plan may run
   standoff: 3.5,      // multiplier on the safe distance. Hovering right on
                       //     the ball is both annoying and easy to hit past
@@ -44,9 +44,9 @@ const AI = {
 };
 
 const AI_LEVELS = {
-  easy:   { reaction: 0.34, commit: 0.30, accuracy: 0.55, switchTime: 0.70, wheelRate: 7,  maxCommit: 0.60, maxRecover: 2.2, standoff: 4.0 },
-  normal: { reaction: 0.18, commit: 0.20, accuracy: 0.85, switchTime: 0.35, wheelRate: 12, maxCommit: 0.50, maxRecover: 2.0, standoff: 3.5 },
-  hard:   { reaction: 0.09, commit: 0.12, accuracy: 0.97, switchTime: 0.16, wheelRate: 18, maxCommit: 0.38, maxRecover: 1.8, standoff: 3.0 },
+  easy:   { reaction: 0.34, commit: 0.50, accuracy: 0.55, switchTime: 0.70, wheelRate: 7,  maxCommit: 0.80, maxRecover: 2.2, standoff: 4.0 },
+  normal: { reaction: 0.18, commit: 0.35, accuracy: 0.85, switchTime: 0.35, wheelRate: 12, maxCommit: 0.90, maxRecover: 2.0, standoff: 3.5 },
+  hard:   { reaction: 0.09, commit: 0.25, accuracy: 0.97, switchTime: 0.16, wheelRate: 18, maxCommit: 1.00, maxRecover: 1.8, standoff: 3.0 },
 };
 
 const AI_HIST = 256;          // ticks of ball history, for delayed perception
