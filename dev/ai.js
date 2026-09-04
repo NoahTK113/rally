@@ -49,7 +49,7 @@ const AI_FOLLOW_T = 0.12;     // s of follow-through after contact
 const AI_FOLLOW_D = 0.70;     // m the target carries on past the contact point
 const AI_SWEEP    = 0.45;     // rad the face keeps turning through the ball
 
-const KIND = { TRACK: 0, APPROACH: 1, STRIKE: 2 };
+const KIND = { TRACK: 0, APPROACH: 1, STRIKE: 2, RECOVER: 3 };
 
 /* One plan. Reused rather than reallocated, so planning at 5 Hz costs nothing
    in garbage. a -> b is the first segment, b -> c the follow-through. */
@@ -161,6 +161,17 @@ function aiNearAngle(target, current) {
   return target + Math.PI * 2 * Math.round((current - target) / (Math.PI * 2));
 }
 
+/* Square to the ball: the face normal points straight at it, so the paddle
+   presents its whole width to whatever arrives rather than a glancing edge.
+   This is the resting posture between shots — you do not stand side-on to a
+   ball you might have to reach. */
+function aiFaceBall(px, py, bx, by, curA) {
+  const nx = bx - px, ny = by - py;
+  const nl = Math.hypot(nx, ny);
+  if (nl < 1e-6) return curA;
+  return aiNearAngle(Math.atan2(-nx / nl, ny / nl), curA);
+}
+
 /* Roughly how fast a paddle travels once it is up to speed, and how far behind
    its target it rides while doing so. Both come from the tuning rather than
    being measured, so they stay honest when the feel is retuned. */
@@ -267,6 +278,7 @@ function aiMakePlan(w, side) {
   const err = 1 - AI.accuracy;
   const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
 
+
   // Sampled ONCE per plan, so error is a decision about this shot rather than
   // noise re-rolled underneath the paddle every tick.
   const errAim = (Math.random() * 2 - 1) * err;
@@ -274,18 +286,52 @@ function aiMakePlan(w, side) {
   const errOff = (Math.random() * 2 - 1) * 0.5 * err;
 
   plan.ax = p.x; plan.ay = p.y; plan.aa = p.a;
-  const hit = aiPredict(w, side);
+  const seen = aiPerceived(FIXED_DT);
 
-  if (!hit) {
+  /* Which side of the ball are we on? A paddle between the ball and the goal
+     it is attacking cannot do anything useful with it: hitting it at all sends
+     it the wrong way, toward our own goal. Getting back behind it is a basic
+     move of this game and the AI had no concept of it — it would sit in front
+     of the ball and swat it homeward, over and over.
+
+     `side` is also the direction toward our own goal, so -side * (p.x - ball.x)
+     being positive means we are past the ball on the attacking side. The 0.10
+     keeps it from chattering at the boundary; recovery overshoots well past
+     that, so it cannot oscillate. */
+  const inFront = -side * (p.x - seen.x) > 0.10;
+
+  // No point predicting an intercept we are not allowed to take.
+  const hit = inFront ? null : aiPredict(w, side);
+
+  if (inFront) {
+    /* Round the ball, not through it. Rise or dive clear first, then run back
+       past it at that height — a straight line to the far side would go
+       through the ball and hit it exactly the wrong way. Go whichever way has
+       more room, so we do not climb into the ceiling. */
+    const clear = PHYS.ballR + A.paddleLength * 0.5 + 0.25;
+    const gap   = PHYS.ballR + A.paddleLength * 0.5 + 0.30;
+    const up = box.y1 - seen.y, down = seen.y - box.y0;
+    const clearY = clamp(seen.y + (up >= down ? clear : -clear), box.y0, box.y1);
+
+    plan.kind = KIND.RECOVER;
+    plan.dur = AI.commit;
+    plan.hitT = plan.dur * 0.45;              // rise, then run
+    plan.bx = clamp(p.x, box.x0, box.x1);
+    plan.by = clearY;
+    plan.cx = clamp(seen.x + side * gap, box.x0, box.x1);
+    plan.cy = clearY;
+    plan.ba = aiFaceBall(plan.bx, plan.by, seen.x, seen.y, p.a);
+    plan.ca = aiFaceBall(plan.cx, plan.cy, seen.x, seen.y, plan.ba);
+
+  } else if (!hit) {
     /* Idle is a path like everything else, so there is no second mechanism to
        flicker against. Track the ball's height and drift toward the middle of
        the zone: what a player does with nothing to hit. */
-    const seen = aiPerceived(FIXED_DT);
     plan.kind = KIND.TRACK;
     plan.dur = AI.commit;
     plan.bx = (box.x0 + box.x1) / 2;
     plan.by = clamp(seen.y, box.y0, box.y1);
-    plan.ba = aiNearAngle(0, p.a);
+    plan.ba = aiFaceBall(plan.bx, plan.by, seen.x, seen.y, p.a);
     plan.hitT = plan.dur;
 
   } else {
@@ -318,7 +364,9 @@ function aiMakePlan(w, side) {
     }
   }
 
-  if (plan.kind !== KIND.STRIKE) { plan.cx = plan.bx; plan.cy = plan.by; plan.ca = plan.ba; }
+  if (plan.kind === KIND.TRACK || plan.kind === KIND.APPROACH) {
+    plan.cx = plan.bx; plan.cy = plan.by; plan.ca = plan.ba;
+  }
 
   const t1 = Math.max(1e-3, plan.hitT);
   plan.v1x = (plan.bx - plan.ax) / t1;
@@ -350,7 +398,9 @@ function aiFillInput(w, side, dst, dt) {
 
   const s = ai.clock;
   let px, py, pa, vx, vy, vw;
-  if (plan.kind === KIND.STRIKE && s >= plan.hitT) {
+  /* Segment two, for any plan that has one. TRACK and APPROACH set c = b and
+     hitT = dur, so they simply never get here. */
+  if (s >= plan.hitT) {
     const u = Math.min(s - plan.hitT, plan.dur - plan.hitT);
     px = plan.bx + plan.v2x * u; py = plan.by + plan.v2y * u; pa = plan.ba + plan.w2 * u;
     vx = plan.v2x; vy = plan.v2y; vw = plan.w2;
