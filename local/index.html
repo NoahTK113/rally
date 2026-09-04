@@ -220,8 +220,9 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="audio.js?v=v15.1-local"></script>
-<script src="tutorial.js?v=v15.1-local"></script>
+<script src="ai.js?v=v15.2-local"></script>
+<script src="audio.js?v=v15.2-local"></script>
+<script src="tutorial.js?v=v15.2-local"></script>
 <script>
 'use strict';
 
@@ -1629,6 +1630,23 @@ function readout() {
   document.getElementById('tag').innerHTML = readoutHold;
 }
 
+/* Tier 0 verification. `lag` is how far the perceived ball sits behind the
+   real one; `expect` is ball speed times reaction. They should track each
+   other whenever the ball is moving in a straight line, and diverge only
+   across a bounce, where the straight-line estimate is simply wrong. If lag
+   reads zero with the ball moving, the channel is not delayed at all. */
+function aiReadout() {
+  const o = aiPerceived();
+  const f = (n, d = 2) => n.toFixed(d).padStart(6);
+  const lag = Math.hypot(ball.x - o.ball.x, ball.y - o.ball.y);
+  const expect = Math.hypot(ball.vx, ball.vy) * AI.reaction;
+  const t = aiThem(mySide).p0;
+  const tNow = paddles[idOf(-mySide, 0)];
+  return `see   ball ${f(o.ball.x)}, ${f(o.ball.y)}   now ${f(ball.x)}, ${f(ball.y)}<br>` +
+         `lag   ${f(lag)} m   expect ${f(expect)}   @ ${AI.reaction.toFixed(2)}s<br>` +
+         `them  ${f(t.x)}, ${f(t.y)}   now ${f(tNow.x)}, ${f(tNow.y)}`;
+}
+
 function buildReadout() {
   const p = me();
   const tip = tipVelocity(p, 1);
@@ -1642,7 +1660,8 @@ function buildReadout() {
     `omega ${f(p.w / DEG, 1)} &deg;/s<br>` +
     `tip   ${f(Math.hypot(tip.vx, tip.vy))} m/s<br>` +
     `ball  ${f(Math.hypot(ball.vx, ball.vy))} m/s   spin ${f(ball.w / DEG, 0)} °/s<br>` +
-    `tick  ${world.tick}`;
+    `tick  ${world.tick}<br>` +
+    aiReadout();
   return out;
 }
 
@@ -1796,6 +1815,9 @@ const KNOBS = [
   { o: PHYS, k: 'goalPull',    label: 'goal pull',   min: 0,    max: 80,  step: 1,    u: 'm/s²' },
 
 
+  ['AI'],
+  { o: AI, k: 'reaction',   label: 'reaction',  min: 0,    max: 0.6, step: 0.01, u: 's' },
+
   ['RENDER'],
   { o: VIS, k: 'linePx', label: 'line width', min: 1, max: 8, step: 1,    u: 'px' },
   { o: VIS, k: 'glow',   label: 'glow',       min: 0, max: 3, step: 0.05, u: '×' },
@@ -1944,6 +1966,12 @@ let running = false;
 function stepLocal(dt) {
   captureInto(liveInput[String(mySide)], dt);
 
+  /* Observe before stepping, so an observation is the world at the START of
+     the tick the AI would have been acting on. It runs whether or not an
+     opponent is switched on: perception costs almost nothing, and a ring that
+     only fills while the AI plays would start every match blind. */
+  aiStep(world, -mySide, liveInput[String(-mySide)], dt);
+
   /* The ready gate. It used to ask the server which seats still had to click
      in; with one player the question answers itself. */
   if (world.phase === PHASE.READY && intent.rdy) {
@@ -2090,7 +2118,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v15.1-local';
+const BUILD = 'v15.2-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
