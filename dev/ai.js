@@ -34,12 +34,14 @@ const AI = {
   accuracy: 0.85,     // 0..1 — 1 aims exactly, 0 is hopeless
   switchTime: 0.35,   // s — deliberation before committing to the other paddle
   wheelRate: 12,      // wheel clicks per second — the hand's actual limit
+  maxCommit: 0.50,    // s — the longest ANY plan may run, and the furthest
+                      //     ahead an intercept is worth acting on at all
 };
 
 const AI_LEVELS = {
-  easy:   { reaction: 0.34, commit: 0.30, accuracy: 0.55, switchTime: 0.70, wheelRate: 7 },
-  normal: { reaction: 0.18, commit: 0.20, accuracy: 0.85, switchTime: 0.35, wheelRate: 12 },
-  hard:   { reaction: 0.09, commit: 0.12, accuracy: 0.97, switchTime: 0.16, wheelRate: 18 },
+  easy:   { reaction: 0.34, commit: 0.30, accuracy: 0.55, switchTime: 0.70, wheelRate: 7,  maxCommit: 0.60 },
+  normal: { reaction: 0.18, commit: 0.20, accuracy: 0.85, switchTime: 0.35, wheelRate: 12, maxCommit: 0.50 },
+  hard:   { reaction: 0.09, commit: 0.12, accuracy: 0.97, switchTime: 0.16, wheelRate: 18, maxCommit: 0.38 },
 };
 
 const AI_HIST = 256;          // ticks of ball history, for delayed perception
@@ -60,6 +62,7 @@ const plan = {
   ax: 0, ay: 0, aa: 0,          // start pose: where the paddle actually was
   bx: 0, by: 0, ba: 0,          // contact pose, or simply the end
   cx: 0, cy: 0, ca: 0,          // follow-through pose
+  t2: 0,                        // how long segment two WANTS, before any cap
   v1x: 0, v1y: 0, w1: 0,        // velocities, precomputed once per plan
   v2x: 0, v2y: 0, w2: 0,
 };
@@ -103,6 +106,7 @@ function aiSetLevel(name) {
   AI.accuracy = L.accuracy;
   AI.switchTime = L.switchTime;
   AI.wheelRate = L.wheelRate;
+  AI.maxCommit = L.maxCommit;
   try { localStorage.setItem('banjoball.ai', name); } catch (e) {}
 }
 
@@ -389,7 +393,8 @@ function aiMakePlan(w, side) {
     plan.bx = clamp(p.x, box.x0, box.x1); plan.by = clearY;
     plan.cx = destX;                      plan.cy = clearY;
     plan.hitT = Math.max(0.02, Math.abs(plan.by - p.y) / top);
-    plan.dur  = plan.hitT + Math.max(0.02, Math.abs(plan.cx - plan.bx) / top);
+    plan.t2   = Math.max(0.02, Math.abs(plan.cx - plan.bx) / top);
+    plan.dur  = plan.hitT + plan.t2;
     plan.ba = aiFaceBall(plan.bx, plan.by, seen.x, seen.y, p.a);
     plan.ca = aiFaceBall(plan.cx, plan.cy, seen.x, seen.y, plan.ba);
 
@@ -401,6 +406,7 @@ function aiMakePlan(w, side) {
     plan.kind = KIND.IDLE;
     plan.dur = AI.commit;
     plan.hitT = plan.dur;
+    plan.t2 = 0;
     plan.bx = clamp(seen.x + side * aiSafeDist(seen), box.x0, box.x1);
     plan.by = clamp(seen.y, box.y0, box.y1);
     plan.ba = aiFaceBall(plan.bx, plan.by, seen.x, seen.y, p.a);
@@ -409,7 +415,22 @@ function aiMakePlan(w, side) {
   } else {
     const shot = aiShot(hit, side, p.a, errAim, errAng);
 
-    if (hit.t > AI.commit * 1.6) {
+    if (hit.t > AI.maxCommit) {
+      /* Too far off to act on at all. Standing on a point the ball reaches in
+         two seconds looks exactly as stupid as it is: the ball bounces, rolls,
+         gets hit again, and the paddle is still waiting on a prediction made
+         about a world that no longer exists. Hold station instead — idle
+         already tracks the ball, so position converges on its own. */
+      plan.kind = KIND.IDLE;
+      plan.dur = AI.commit;
+      plan.hitT = plan.dur;
+      plan.t2 = 0;
+      plan.bx = clamp(seen.x + side * aiSafeDist(seen), box.x0, box.x1);
+      plan.by = clamp(seen.y, box.y0, box.y1);
+      plan.ba = aiFaceBall(plan.bx, plan.by, seen.x, seen.y, p.a);
+      plan.cx = plan.bx; plan.cy = plan.by; plan.ca = plan.ba;
+
+    } else if (hit.t > AI.commit * 1.6) {
       /* Too far off to swing at. Set up BEHIND the contact point, so when the
          strike comes there is room to accelerate through the ball instead of
          starting from a standstill on top of it. */
@@ -419,12 +440,14 @@ function aiMakePlan(w, side) {
       plan.by = clamp(hit.y - shot.diry * 0.5, box.y0, box.y1);
       plan.ba = plan.aa + (shot.a - plan.aa) * 0.5;   // rotate part of the way
       plan.hitT = plan.dur;
+      plan.t2 = 0;
       plan.cx = plan.bx; plan.cy = plan.by; plan.ca = plan.ba;
 
     } else {
       plan.kind = KIND.STRIKE;
       plan.hitT = Math.max(0.03, hit.t);
-      plan.dur = plan.hitT + AI_FOLLOW_T;
+      plan.t2 = AI_FOLLOW_T;
+      plan.dur = plan.hitT + plan.t2;
       plan.bx = clamp(hit.x, box.x0, box.x1);
       plan.by = clamp(hit.y + errOff, box.y0, box.y1);
       plan.ba = shot.a;
@@ -437,11 +460,21 @@ function aiMakePlan(w, side) {
     }
   }
 
+  /* Nothing is worth committing to for longer than this. A plan that outruns
+     it is TRUNCATED, not rescaled: the paddle stops partway along the same
+     path and the next plan carries on from there, having had another look at
+     the world in between. Recovery keeps its latch across that boundary, so
+     the goal survives even though the plan does not. */
+  plan.dur = Math.min(plan.dur, AI.maxCommit);
+
   const t1 = Math.max(1e-3, plan.hitT);
   plan.v1x = (plan.bx - plan.ax) / t1;
   plan.v1y = (plan.by - plan.ay) / t1;
   plan.w1  = (plan.ba - plan.aa) / t1;
-  const t2 = Math.max(1e-3, plan.dur - plan.hitT);
+  /* From what segment two ASKED for, not from what is left of a capped plan.
+     Deriving it from dur would make a truncated path travel the same distance
+     in less time, ie faster — the cap must shorten the move, never hurry it. */
+  const t2 = Math.max(1e-3, plan.t2);
   plan.v2x = (plan.cx - plan.bx) / t2;
   plan.v2y = (plan.cy - plan.by) / t2;
   plan.w2  = (plan.ca - plan.ba) / t2;
@@ -488,7 +521,7 @@ function aiFillInput(w, side, dst, dt) {
   /* Segment two, for any plan that has one. A plan with nothing to do after
      its waypoint sets c = b and hitT = dur, so it never gets here. */
   if (s >= plan.hitT) {
-    const u = Math.min(s - plan.hitT, plan.dur - plan.hitT);
+    const u = Math.min(s - plan.hitT, plan.t2);
     px = plan.bx + plan.v2x * u; py = plan.by + plan.v2y * u; pa = plan.ba + plan.w2 * u;
     vx = plan.v2x; vy = plan.v2y; vw = plan.w2;
   } else {
