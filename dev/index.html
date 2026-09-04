@@ -222,9 +222,9 @@
   </div>
 </div>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v11.9-dev"></script>
-<script src="ai.js?v=v11.9-dev"></script>
-<script src="tutorial.js?v=v11.9-dev"></script>
+<script src="audio.js?v=v12.0-dev"></script>
+<script src="ai.js?v=v12.0-dev"></script>
+<script src="tutorial.js?v=v12.0-dev"></script>
 <script>
 'use strict';
 
@@ -238,10 +238,10 @@ const A = {
   cornerR: 0.11,            // rounding on the arena contour. WORLD units, not
                             // derived from the hairline, so collision geometry
                             // never changes when the window resizes.
-  crossFrac: 0.45,         // how far the OFFENCE paddle may reach into the far
+  crossFrac: 0.35,         // how far the OFFENCE paddle may reach into the far
                             // half, as a fraction of that half's width
-  defFrac: 0.55,            // share of a player's own half reserved for defence
-  paddleLength: 0.75,
+  defFrac: 0.65,            // share of a player's own half reserved for defence
+  paddleLength: 0.85,
   paddleT: 0.10,
   margin: 0.9,
 };
@@ -252,7 +252,7 @@ const A = {
    the cursor — it CHASES it, which is what gives it real linear and angular
    velocity for the ball impulse to read later. */
 const FEEL = {
-  posFreq   : 13.5,   // Hz
+  posFreq   : 10.0,   // Hz
   posDamp   : 1.90,   // 1.0 = critically damped
   angFreq   : 9.0,    // Hz
   angDamp   : 1.65,
@@ -312,9 +312,9 @@ const NET = {
 };
 
 const PHYS = {
-  gravity      : 6.80,   // m/s^2
+  gravity      : 5.50,   // m/s^2
   ballR        : 0.15,   // m
-  restitution  : 0.72,   // bounciness against arena and net
+  restitution  : 0.66,   // bounciness against arena and net
   friction     : 0.35,   // tangential -> this is what generates spin
   paddleRest   : 0.30,   // paddles are livelier than walls
   paddleFriction: 0.60,  // and grippier, so slicing actually bites
@@ -2128,7 +2128,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v11.9-dev';
+const BUILD = 'v12.0-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
