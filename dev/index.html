@@ -242,9 +242,9 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v12.7-dev"></script>
-<script src="ai.js?v=v12.7-dev"></script>
-<script src="tutorial.js?v=v12.7-dev"></script>
+<script src="audio.js?v=v12.8-dev"></script>
+<script src="ai.js?v=v12.8-dev"></script>
+<script src="tutorial.js?v=v12.8-dev"></script>
 <script>
 'use strict';
 
@@ -1856,6 +1856,7 @@ const KNOBS = [
 
   ['AI'],
   { o: AI, k: 'reaction',   label: 'reaction',  min: 0.02, max: 0.6, step: 0.01, u: 's' },
+  { o: AI, k: 'commit',     label: 'commit',    min: 0.04, max: 0.6, step: 0.01, u: 's' },
   { o: AI, k: 'accuracy',   label: 'accuracy',  min: 0,    max: 1,   step: 0.01, u: '' },
   { o: AI, k: 'switchTime', label: 'switch',    min: 0.05, max: 1.2, step: 0.01, u: 's' },
 
@@ -2175,7 +2176,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v12.7-dev';
+const BUILD = 'v12.8-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that

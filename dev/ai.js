@@ -7,66 +7,74 @@
    simulation has no idea it exists: `{sel, tx, ty, ta}` goes into
    server.inputs and stepWorld treats it identically to anything else.
 
-   Three stages per plan:
+   THREE CLOCKS.
 
-     PREDICT  copy the world and run the REAL physics forward until the ball
-              reaches somewhere this side can reach. Not a heuristic — the
-              same stepBall the game uses, so bounces off walls and the net
-              are accounted for exactly. Paddles are skipped: our own would
-              make it circular, and we cannot know where the human's will be.
+     perception   the ball is read `reaction` seconds stale, always
+     plan         every `commit` seconds: predict, choose a stroke, build a path
+     tick         240 Hz: evaluate the path, emit a target. No decisions.
 
-     AIM      solve the launch angle that lands the ball in the far goal, then
-              work backwards to the paddle angle that produces it. The ball
-              arcs under gravity, so aiming straight at the goal always falls
-              short.
+   The plan is a motor program; the tick is the muscle. Between plans the AI
+   cannot see anything new and cannot reconsider — it can only execute the
+   stroke it committed to. That is the whole point. An earlier version emitted
+   ONE frozen coordinate per plan, so its target was a staircase at 5 Hz while
+   a human's moves every tick; the paddle lurched between parking spots and
+   met the ball dead still, unable to hit with any pace at all.
 
-     CHOOSE   with two paddles, decide which one is going to take it, and
-              refuse to change its mind for switchTime.
+   Perception delay and commitment length are separate here because they are
+   separate in a person: how late your eyes are has nothing to do with how
+   often your hand changes course.
 
-   Difficulty is three human limits rather than a speed multiplier: how late it
-   reacts, how badly it aims, and how long it dithers over which paddle.
+   Two things are known exactly and continuously, because proprioception is
+   not perception: where our own paddle is, and how our own spring behaves.
    ========================================================================== */
 const AI = {
   on: false,
-  reaction: 0.18,     // s — how stale its view of the ball is, and how often
-                      //     it re-plans. This is perception delay, not speed.
+  reaction: 0.18,     // s — how stale our view of the BALL is. Nothing else.
+  commit:   0.20,     // s — how long a stroke runs before it is reconsidered
   accuracy: 0.85,     // 0..1 — 1 aims exactly, 0 is hopeless
   switchTime: 0.35,   // s — deliberation before committing to the other paddle
 };
 
 const AI_LEVELS = {
-  easy:   { reaction: 0.34, accuracy: 0.55, switchTime: 0.70 },
-  normal: { reaction: 0.18, accuracy: 0.85, switchTime: 0.35 },
-  hard:   { reaction: 0.09, accuracy: 0.97, switchTime: 0.16 },
+  easy:   { reaction: 0.34, commit: 0.30, accuracy: 0.55, switchTime: 0.70 },
+  normal: { reaction: 0.18, commit: 0.20, accuracy: 0.85, switchTime: 0.35 },
+  hard:   { reaction: 0.09, commit: 0.12, accuracy: 0.97, switchTime: 0.16 },
 };
 
-const AI_HIST = 128;          // ticks of ball history, for delayed perception
+const AI_HIST = 256;          // ticks of ball history, for delayed perception
 const AI_PRED_DT = 1 / 120;   // coarser than the sim: prediction is cheap, and
                               // half a tick of error is far below the aim error
-const AI_PRED_MAX = 4.0;      // s to look ahead before giving up. A wider
-                              // court under lower gravity means longer flights,
-                              // and a horizon shorter than the flight makes the
-                              // AI believe nothing is coming.
+const AI_PRED_MAX = 4.0;      // s to look ahead before giving up
+const AI_FOLLOW_T = 0.12;     // s of follow-through after contact
+const AI_FOLLOW_D = 0.70;     // m the target carries on past the contact point
+const AI_SWEEP    = 0.45;     // rad the face keeps turning through the ball
+
+const KIND = { TRACK: 0, APPROACH: 1, STRIKE: 2 };
+
+/* One plan. Reused rather than reallocated, so planning at 5 Hz costs nothing
+   in garbage. a -> b is the first segment, b -> c the follow-through. */
+const plan = {
+  kind: KIND.TRACK, dur: 0.2, hitT: 0,
+  ax: 0, ay: 0, aa: 0,          // start pose: where the paddle actually was
+  bx: 0, by: 0, ba: 0,          // contact pose, or simply the end
+  cx: 0, cy: 0, ca: 0,          // follow-through pose
+  v1x: 0, v1y: 0, w1: 0,        // velocities, precomputed once per plan
+  v2x: 0, v2y: 0, w2: 0,
+};
 
 const ai = {
   side: -1,
-  hist: null,           // ring of past ball states
-  head: 0,
-  filled: 0,
-  replan: 0,            // countdown to the next plan
+  hist: null, head: 0, filled: 0,
   world: null,          // scratch world for prediction
-  // the current plan
-  tx: 0, ty: 0, ta: 0, sel: 0,
-  wantSel: 0, selHeld: 0,
-  hasPlan: false,
+  clock: 0,             // seconds elapsed inside the current plan
+  has: false,
+  sel: 0, wantSel: 0, selHeld: 0,
 };
 
 function aiInit(side) {
   ai.side = side;
-  ai.head = 0;
-  ai.filled = 0;
-  ai.replan = 0;
-  ai.hasPlan = false;
+  ai.head = 0; ai.filled = 0;
+  ai.clock = 0; ai.has = false;
   ai.wantSel = ai.sel = 0;
   ai.selHeld = 0;
   if (!ai.hist) {
@@ -83,6 +91,7 @@ onNewGame(() => aiInit(-mySide));
 function aiSetLevel(name) {
   const L = AI_LEVELS[name] || AI_LEVELS.normal;
   AI.reaction = L.reaction;
+  AI.commit = L.commit;
   AI.accuracy = L.accuracy;
   AI.switchTime = L.switchTime;
   try { localStorage.setItem('banjoball.ai', name); } catch (e) {}
@@ -107,8 +116,7 @@ function aiPerceived(dt) {
 /* Launch angles that land at (tx,ty) from (px,py) at speed s under gravity g.
    BOTH solutions are returned. The flat one is the better shot — less time in
    the air to answer — but it is also the one that hits the net, and which of
-   those matters depends on geometry the solver cannot see. The caller decides.
-   Returns null when the target is out of range at that speed. */
+   those matters depends on geometry the solver cannot see. */
 function aiLaunchAngle(px, py, tx, ty, s, g) {
   const dx = tx - px, dy = ty - py;
   const x = Math.abs(dx);
@@ -122,10 +130,7 @@ function aiLaunchAngle(px, py, tx, ty, s, g) {
            high: Math.atan((s2 + root) / (g * x)) };
 }
 
-/* Where a shot passes over the net, and whether that is above it. The net was
-   short relative to the court when the flat shot was chosen unconditionally;
-   it no longer is, so a shot picked purely for being fast now spends its life
-   thudding into the net from the AI's own half. */
+// Does a shot pass over the net rather than into it?
 function aiClearsNet(px, py, theta, s, g, dx) {
   const dxn = A.width / 2 - px;
   if (dxn * dx <= 0 || Math.abs(dxn) > Math.abs(dx)) return true;   // not in the way
@@ -135,32 +140,9 @@ function aiClearsNet(px, py, theta, s, g, dx) {
   return y > A.netHeight + PHYS.ballR * 1.5;
 }
 
-/* Roughly how fast a paddle travels once it is up to speed. The position
-   spring clamps its error, so the pull is constant beyond that distance and
-   the paddle settles at a terminal velocity rather than accelerating without
-   limit. Derived from the tuning rather than measured, so it stays honest when
-   the feel is retuned. */
-function aiPaddleTopSpeed() {
-  const w = 2 * Math.PI * FEEL.posFreq;
-  const maxE = Math.min(FEEL.maxError, FEEL.reach);
-  return Math.max(0.5, w * maxE / (2 * FEEL.posDamp));
-}
-
-// Can either of this side's paddles actually be there in time?
-function aiCanReach(w, side, hit) {
-  const v = aiPaddleTopSpeed();
-  let near = Infinity;
-  for (let i = 0; i < (MATCH.paddles > 1 ? 2 : 1); i++) {
-    const p = w.p[idOf(side, i)];
-    near = Math.min(near, Math.hypot(hit.x - p.x, hit.y - p.y));
-  }
-  return near / v + 0.12 <= hit.t;      // the constant is the spring's ramp-up
-}
-
 /* The paddle angle that turns an incoming velocity into a desired outgoing
    direction. A bounce mirrors the velocity about the surface normal, so the
-   normal bisects the reversed incoming direction and the outgoing one. The
-   paddle's face normal is perpendicular to its long axis, hence the atan2. */
+   normal bisects the reversed incoming direction and the outgoing one. */
 function aiPaddleAngleFor(vinx, viny, dirx, diry) {
   const vl = Math.hypot(vinx, viny);
   let nx, ny;
@@ -171,9 +153,39 @@ function aiPaddleAngleFor(vinx, viny, dirx, diry) {
   return Math.atan2(-nx / nl, ny / nl);
 }
 
-/* Run the real physics forward from the perceived ball state until it arrives
-   somewhere one of our paddles could meet it. Paddles are excluded from the
-   prediction, so this answers "where would the ball go if nobody touched it". */
+/* atan2 answers in (-pi, pi]; the paddle's angle is unbounded, because
+   wrapping it is what once sent a peer a target a full turn from its pose.
+   Choosing the nearest equivalent HERE is a different act: it picks which of
+   the infinitely many equal angles to aim at, before anything is sent. */
+function aiNearAngle(target, current) {
+  return target + Math.PI * 2 * Math.round((current - target) / (Math.PI * 2));
+}
+
+/* Roughly how fast a paddle travels once it is up to speed, and how far behind
+   its target it rides while doing so. Both come from the tuning rather than
+   being measured, so they stay honest when the feel is retuned. */
+function aiPaddleTopSpeed() {
+  const w = 2 * Math.PI * FEEL.posFreq;
+  const maxE = Math.min(FEEL.maxError, FEEL.reach);
+  return Math.max(0.5, w * maxE / (2 * FEEL.posDamp));
+}
+const aiPosLag = () => 2 * FEEL.posDamp / (2 * Math.PI * FEEL.posFreq);
+const aiAngLag = () => 2 * FEEL.angDamp / (2 * Math.PI * FEEL.angFreq);
+
+// Can either of this side's paddles be there in time?
+function aiCanReach(w, side, hit) {
+  const v = aiPaddleTopSpeed();
+  let near = Infinity;
+  for (let i = 0; i < (MATCH.paddles > 1 ? 2 : 1); i++) {
+    const p = w.p[idOf(side, i)];
+    near = Math.min(near, Math.hypot(hit.x - p.x, hit.y - p.y));
+  }
+  return near / v + 0.12 <= hit.t;      // the constant is the spring's ramp-up
+}
+
+/* Run the real physics forward from the PERCEIVED ball state until it arrives
+   somewhere one of our paddles could meet it. Paddles are excluded, so this
+   answers "where would the ball go if nobody touched it". */
 function aiPredict(w, side) {
   const src = aiPerceived(FIXED_DT);
   const pw = ai.world;
@@ -182,24 +194,19 @@ function aiPredict(w, side) {
   b.x = src.x; b.y = src.y; b.vx = src.vx; b.vy = src.vy; b.w = src.w;
   b.px = b.x; b.py = b.y;
 
-  /* The band this side can operate in — COURT ONLY. paddleBoxes also returns
-     the goal pocket for the defence paddle, and including it would have the AI
-     aim at intercepts inside its own net. It would then park on the boundary
-     between two boxes that do not touch, where nearestLegal flips between them
-     and the pose jumps the width of the gap. A person never stands there; an
-     AI aiming at a predicted point will stand there all day. */
+  /* COURT ONLY. paddleBoxes also returns the goal pocket, and including it
+     would have the AI aim at intercepts inside its own net, then park on the
+     boundary between two boxes that do not touch. */
   let lo = Infinity, hi = -Infinity;
   for (let i = 0; i < (MATCH.paddles > 1 ? 2 : 1); i++) {
-    const bx = paddleBoxes(w.p[idOf(side, i)])[0];   // [0] is the court box
+    const bx = paddleBoxes(w.p[idOf(side, i)])[0];
     lo = Math.min(lo, bx.x0); hi = Math.max(hi, bx.x1);
   }
 
-  /* The ball is in reach for a stretch of its crossing, not an instant, so
-     there is a choice of where along it to meet the ball. Taking the earliest
-     point means committing to an intercept the paddle often cannot make — it
-     sets off, arrives late, and does it again next plan. Take the first point
-     it can actually be at instead, and fall back to the earliest only when
-     none of them is reachable, since arriving late still beats not going. */
+  /* The ball is in reach for a stretch of its crossing, not an instant. Taking
+     the earliest point means committing to an intercept the paddle cannot
+     make. Take the first it can actually be at, and fall back to the earliest
+     only when none is reachable - arriving late still beats not going. */
   let first = null;
   const steps = Math.floor(AI_PRED_MAX / AI_PRED_DT);
   for (let i = 0; i < steps; i++) {
@@ -215,33 +222,18 @@ function aiPredict(w, side) {
   return first;
 }
 
-// Station in front of our own goal, on the court.
-function aiHome(w, side) {
-  const sel = MATCH.paddles > 1 ? 1 : 0;
-  const box = paddleBoxes(w.p[idOf(side, sel)])[0];
-  ai.tx = (box.x0 + box.x1) / 2;
-  ai.ty = Math.max(box.y0, Math.min(box.y1, (goalY0() + goalY1()) / 2));
-  ai.ta = 0;
-  ai.wantSel = sel;
-  ai.hasPlan = true;
-}
-
-function aiPlan(w, side) {
-  const hit = aiPredict(w, side);
-  aiHome(w, side);            // a sane fallback, overwritten if there is a plan
-
-  if (!hit) return;          // nothing coming: stay home
-
-  // Aim at the far goal, with error that grows as accuracy falls.
-  const err = 1 - AI.accuracy;
+/* Where to send the ball from the intercept, and the face angle that does it.
+   Returns a unit direction plus the paddle angle, already chosen as the
+   representative nearest the paddle's current angle. */
+function aiShot(hit, side, curA, errAim, errAng) {
   const goalX = side < 0 ? A.width : 0;
   const goalMid = (goalY0() + goalY1()) / 2;
   const spread = (goalY1() - goalY0()) * 0.5 + 1.5;
-  const aimY = goalMid + (Math.random() * 2 - 1) * spread * err;
+  const aimY = goalMid + errAim * spread;
 
-  /* An estimate of how fast the ball will leave, not a speed the AI can pick —
-     it only chooses where the face points. The floor is the speed that carries
-     half the court at 45 degrees, so a slow ball still gets aimed at the goal
+  /* An estimate of how fast the ball will leave, not a speed we can pick - the
+     AI only chooses where the face points. The floor is the speed that carries
+     half the court at 45 degrees, so a slow ball is still aimed at the goal
      rather than at an impossible solution. */
   const floor = Math.sqrt(Math.max(1, A.width * 0.5 * PHYS.gravity));
   const speed = Math.max(floor, Math.hypot(hit.vx, hit.vy) * 1.15);
@@ -249,77 +241,152 @@ function aiPlan(w, side) {
 
   let dirx, diry;
   if (shot) {
-    // Flat when it clears the net, lofted when it does not.
-    let theta = shot.low;
-    if (!aiClearsNet(hit.x, hit.y, theta, speed, PHYS.gravity, goalX - hit.x)) theta = shot.high;
+    let theta = shot.low;                          // flat if it clears the net,
+    if (!aiClearsNet(hit.x, hit.y, theta, speed, PHYS.gravity, goalX - hit.x))
+      theta = shot.high;                           // lofted if it does not
     dirx = shot.sign * Math.cos(theta);
     diry = Math.sin(theta);
   } else {
-    /* Nothing reaches the goal at this speed. Send it as far as it will go
-       instead of at a fixed shallow slope that dies in the net: 45 degrees is
-       the maximum-range launch, and clears comfortably. */
+    // Out of range: send it as far as it will go. 45 degrees is the
+    // maximum-range launch, and clears the net comfortably.
     dirx = (side < 0 ? 1 : -1) * Math.SQRT1_2;
     diry = Math.SQRT1_2;
   }
 
-  let ta = aiPaddleAngleFor(hit.vx, hit.vy, dirx, diry);
-  if (ta === null) ta = 0;
-  ta += (Math.random() * 2 - 1) * 0.5 * err;        // aim wobble
+  let a = aiPaddleAngleFor(hit.vx, hit.vy, dirx, diry);
+  if (a === null) a = 0;
+  return { dirx, diry, a: aiNearAngle(a + errAng, curA) };
+}
 
-  // Miss the intercept by a little when inaccurate, too — a bad opponent is
-  // out of position as often as it is badly angled.
-  const off = (Math.random() * 2 - 1) * 0.5 * err;
+/* Build the stroke for the next stretch of time. Every path starts at the
+   paddle's LIVE pose - never at where the last plan assumed it would end up,
+   or the staircase reappears at plan boundaries. */
+function aiMakePlan(w, side) {
+  const p = w.p[idOf(side, ai.sel)];
+  const box = paddleBoxes(p)[0];
+  const err = 1 - AI.accuracy;
+  const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
 
-  ai.tx = hit.x;
-  ai.ty = hit.y + off;
-  ai.ta = ta;
+  // Sampled ONCE per plan, so error is a decision about this shot rather than
+  // noise re-rolled underneath the paddle every tick.
+  const errAim = (Math.random() * 2 - 1) * err;
+  const errAng = (Math.random() * 2 - 1) * 0.5 * err;
+  const errOff = (Math.random() * 2 - 1) * 0.5 * err;
 
-  // Keep the target on the court for the same reason.
-  const own = paddleBoxes(w.p[idOf(side, ai.wantSel)])[0];
-  ai.tx = Math.max(own.x0, Math.min(own.x1, ai.tx));
-  ai.ty = Math.max(own.y0, Math.min(own.y1, ai.ty));
+  plan.ax = p.x; plan.ay = p.y; plan.aa = p.a;
+  const hit = aiPredict(w, side);
 
+  if (!hit) {
+    /* Idle is a path like everything else, so there is no second mechanism to
+       flicker against. Track the ball's height and drift toward the middle of
+       the zone: what a player does with nothing to hit. */
+    const seen = aiPerceived(FIXED_DT);
+    plan.kind = KIND.TRACK;
+    plan.dur = AI.commit;
+    plan.bx = (box.x0 + box.x1) / 2;
+    plan.by = clamp(seen.y, box.y0, box.y1);
+    plan.ba = aiNearAngle(0, p.a);
+    plan.hitT = plan.dur;
+
+  } else {
+    const shot = aiShot(hit, side, p.a, errAim, errAng);
+
+    if (hit.t > AI.commit * 1.6) {
+      /* Too far off to swing at. Set up BEHIND the contact point, so when the
+         strike comes there is room to accelerate through the ball instead of
+         starting from a standstill on top of it. */
+      plan.kind = KIND.APPROACH;
+      plan.dur = AI.commit;
+      plan.bx = clamp(hit.x - shot.dirx * 0.5, box.x0, box.x1);
+      plan.by = clamp(hit.y - shot.diry * 0.5, box.y0, box.y1);
+      plan.ba = plan.aa + (shot.a - plan.aa) * 0.5;   // rotate part of the way
+      plan.hitT = plan.dur;
+
+    } else {
+      plan.kind = KIND.STRIKE;
+      plan.hitT = Math.max(0.03, hit.t);
+      plan.dur = plan.hitT + AI_FOLLOW_T;
+      plan.bx = clamp(hit.x, box.x0, box.x1);
+      plan.by = clamp(hit.y + errOff, box.y0, box.y1);
+      plan.ba = shot.a;
+      /* Carry on THROUGH the contact rather than stopping on it. At the moment
+         the ball arrives the paddle is still being pulled forward, so it hits
+         moving - and the face is still turning, which is what puts spin on it. */
+      plan.cx = clamp(plan.bx + shot.dirx * AI_FOLLOW_D, box.x0, box.x1);
+      plan.cy = clamp(plan.by + shot.diry * AI_FOLLOW_D, box.y0, box.y1);
+      plan.ca = plan.ba + Math.sign(plan.ba - plan.aa || 1) * AI_SWEEP;
+    }
+  }
+
+  if (plan.kind !== KIND.STRIKE) { plan.cx = plan.bx; plan.cy = plan.by; plan.ca = plan.ba; }
+
+  const t1 = Math.max(1e-3, plan.hitT);
+  plan.v1x = (plan.bx - plan.ax) / t1;
+  plan.v1y = (plan.by - plan.ay) / t1;
+  plan.w1  = (plan.ba - plan.aa) / t1;
+  const t2 = Math.max(1e-3, plan.dur - plan.hitT);
+  plan.v2x = (plan.cx - plan.bx) / t2;
+  plan.v2y = (plan.cy - plan.by) / t2;
+  plan.w2  = (plan.ca - plan.ba) / t2;
+
+  // Two-paddle: which zone the ball is arriving in. Inherits the paths untuned.
   if (MATCH.paddles > 1) {
-    // Whichever paddle's own zone the ball is actually arriving in.
     const boxA = paddleBoxes(w.p[idOf(side, 0)])[0];
-    ai.wantSel = (hit.x >= boxA.x0 && hit.x <= boxA.x1) ? 0 : 1;
+    ai.wantSel = hit && hit.x >= boxA.x0 && hit.x <= boxA.x1 ? 0 : 1;
   } else {
     ai.wantSel = 0;
   }
-  ai.hasPlan = true;
+  ai.has = true;
 }
 
-/* Called by the server each tick, in place of reading a network input. */
+/* Called by the server each tick, in place of reading a network input. No
+   decisions here - evaluate the stroke and move the hand. */
 function aiFillInput(w, side, dst, dt) {
   if (!ai.hist) aiInit(side);
   aiSample(w);
 
-  ai.replan -= dt;
-  if (ai.replan <= 0 || !ai.hasPlan) {
-    ai.replan = AI.reaction;
-    aiPlan(w, side);
+  ai.clock += dt;
+  if (!ai.has || ai.clock >= plan.dur) { aiMakePlan(w, side); ai.clock = 0; }
+
+  const s = ai.clock;
+  let px, py, pa, vx, vy, vw;
+  if (plan.kind === KIND.STRIKE && s >= plan.hitT) {
+    const u = Math.min(s - plan.hitT, plan.dur - plan.hitT);
+    px = plan.bx + plan.v2x * u; py = plan.by + plan.v2y * u; pa = plan.ba + plan.w2 * u;
+    vx = plan.v2x; vy = plan.v2y; vw = plan.w2;
+  } else {
+    const u = Math.min(s, plan.hitT);
+    px = plan.ax + plan.v1x * u; py = plan.ay + plan.v1y * u; pa = plan.aa + plan.w1 * u;
+    vx = plan.v1x; vy = plan.v1y; vw = plan.w1;
   }
 
-  // Committing to a paddle takes time, and having committed it does not
-  // immediately reconsider. Without this it flickers between the two whenever
-  // the prediction crosses a zone boundary.
+  // The spring rides behind a moving target by a fixed slice of time, so aim
+  // that far ahead of where the paddle is wanted - as a person compensates for
+  // their own hand rather than for the mouse.
+  let tx = px + vx * aiPosLag();
+  let ty = py + vy * aiPosLag();
+  let ta = pa + vw * aiAngLag();
+
+  /* EFFICIENCY, not saturation. stepPaddle clamps position error to maxError,
+     so the pull is already at its limit there - holding the target further out
+     buys nothing and costs precision on arrival. This is the difference
+     between flinging the mouse across the desk and moving it exactly as far as
+     it needs to go. The angle spring has no such clamp, so it is left alone. */
+  const p = w.p[idOf(side, ai.sel)];
+  const maxE = Math.min(FEEL.maxError, FEEL.reach);
+  const dx = tx - p.x, dy = ty - p.y, d = Math.hypot(dx, dy);
+  if (d > maxE) { const k = maxE / d; tx = p.x + dx * k; ty = p.y + dy * k; }
+
   if (MATCH.paddles > 1) {
     if (ai.wantSel !== ai.sel) {
       ai.selHeld += dt;
       if (ai.selHeld >= AI.switchTime) { ai.sel = ai.wantSel; ai.selHeld = 0; }
-    } else {
-      ai.selHeld = 0;
-    }
-  } else {
-    ai.sel = 0;
-  }
+    } else ai.selHeld = 0;
+  } else ai.sel = 0;
 
-  // One non-finite number would hand the spring an impossible target, so the
-  // plan is checked before it is ever handed over.
-  if (!isFinite(ai.tx) || !isFinite(ai.ty) || !isFinite(ai.ta)) aiHome(w, side);
+  // One non-finite number would hand the spring an impossible target.
+  if (!isFinite(tx) || !isFinite(ty) || !isFinite(ta)) { tx = p.x; ty = p.y; ta = p.a; }
 
   dst.sel = ai.sel;
-  dst.tx = ai.tx;
-  dst.ty = ai.ty;
-  dst.ta = ai.ta;
+  dst.tx = tx; dst.ty = ty; dst.ta = ta;
 }
