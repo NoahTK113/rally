@@ -242,9 +242,9 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v12.5"></script>
-<script src="ai.js?v=v12.5"></script>
-<script src="tutorial.js?v=v12.5"></script>
+<script src="audio.js?v=v12.6"></script>
+<script src="ai.js?v=v12.6"></script>
+<script src="tutorial.js?v=v12.6"></script>
 <script>
 'use strict';
 
@@ -2175,7 +2175,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v12.5';
+const BUILD = 'v12.6';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3122,6 +3122,34 @@ $('sensSetup').addEventListener('input', e => setSens(parseFloat(e.target.value)
 $('sensPlay').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 $('volSetup').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
 $('volPlay').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
+
+/* Stored preferences carry the format version they were written under. Bump
+   PREFS_VERSION when a stored value's MEANING changes — a rescaled
+   sensitivity, a third paddle mode, a points target that stops meaning goals —
+   and the whole set is dropped rather than read as something it never was.
+
+   Note what is NOT here: none of the tuning lives in storage, so changing the
+   physics or arena defaults never needs a bump. Only these five choices about
+   the player persist, and wiping them is a real cost to that player — so bump
+   it when a value would be MISREAD, not merely when a default moves. */
+const PREFS_VERSION = 1;
+const PREFS_KEYS = ['banjoball.target', 'banjoball.sens', 'banjoball.ai',
+                    'banjoball.paddles', 'banjoball.vol'];
+
+function prefsCheck() {
+  try {
+    const v = localStorage.getItem('banjoball.prefsVersion');
+    // No stamp means prefs written before versioning existed. They are in the
+    // current format, so they are adopted rather than thrown away.
+    if (v === null || parseInt(v, 10) === PREFS_VERSION) {
+      localStorage.setItem('banjoball.prefsVersion', PREFS_VERSION);
+      return;
+    }
+    for (const k of PREFS_KEYS) localStorage.removeItem(k);
+    localStorage.setItem('banjoball.prefsVersion', PREFS_VERSION);
+  } catch (e) {}
+}
+prefsCheck();
 
 try {
   const saved = parseInt(localStorage.getItem('banjoball.target'), 10);
