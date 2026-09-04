@@ -29,33 +29,45 @@
    ========================================================================== */
 const AI = {
   on: false,
-  reaction: 0.05,     // s — how stale our view of the BALL is. Nothing else.
-  commit:   0.22,     // s — how long a stroke runs before it is reconsidered
-  accuracy: 0.99,     // 0..1 — 1 aims exactly, 0 is hopeless
+  reaction: 0.045,     // s — how stale our view of the BALL is. Nothing else.
+  commit:   0.40,     // s — how long a stroke runs before it is reconsidered.
+                      //     LONGER is better up to about half a second: it
+                      //     enters the stroke earlier, so the swing develops
+  accuracy: 0.985,     // 0..1 — 1 aims exactly, 0 is hopeless
   switchTime: 0.12,   // s — deliberation before committing to the other paddle
   wheelRate: 24,      // wheel clicks per second — the hand's actual limit
-  maxCommit: 1.10,    // s — how far ahead a STRIKE is worth predicting at all,
+  maxCommit: 1.00,    // s — how far ahead a STRIKE is worth predicting at all,
                       //     and the longest a non-recovery plan may run
-  standoff: 3.1,      // multiplier on the safe distance. Hovering right on
+  standoff: 2.5,      // multiplier on the safe distance. Hovering right on
                       //     the ball is both annoying and easy to hit past
   maxRecover: 1.70,   // s — a recovery may commit for far longer; it is one
                       //     unambiguous movement, and the opponent is unlikely
                       //     to be able to interrupt it
 };
 
-/* The whole ladder moved up. What used to be HARD is now EASY, and HARD is
-   the machine playing at its limit: no perception delay at all, and aim with
-   no error term in it. Everything between is interpolated.
+/* HARD is play-tested, not derived; EASY and NORMAL interpolate down from it.
 
-   Note where standoff lands. It is not tuned per level — safe distance is
-   ball speed times (reaction + half a commit) times standoff, so a level with
-   no reaction delay stands markedly closer than one with 0.09s of it, from the
-   same multiplier. Better players playing tighter still falls out of the
-   definition rather than being written in. */
+   Two of these do NOT get better by getting smaller, which is worth writing
+   down because both look like they should.
+
+   COMMIT is the one that bit. A stroke is entered when contact is within
+   commit x 1.6, so a LONGER commit plans the swing EARLIER — the paddle reaches
+   its backswing point with time in hand rather than scrambling into the ball.
+   Half a second gives a clean touch; cutting it does not sharpen the AI, it
+   rushes it. It stops helping somewhere past that, when the plan outlives what
+   it was based on.
+
+   STANDOFF likewise: closer is not timid, it is aggressive. It puts the paddle
+   between the ball and the goal sooner and blocks more, and 2x reads as a bot
+   pressing you rather than one hanging back waiting to be beaten.
+
+   Safe distance is ball speed x (reaction + half a commit) x standoff, so these
+   two and reaction all feed it. HARD ends up around 3.6m and EASY around 5.2m
+   despite HARD having the smaller multiplier. */
 const AI_LEVELS = {
-  easy:   { reaction: 0.09, commit: 0.25, accuracy: 0.97, switchTime: 0.16, wheelRate: 18, maxCommit: 1.00, maxRecover: 1.8, standoff: 3.0 },
-  normal: { reaction: 0.05, commit: 0.22, accuracy: 0.99, switchTime: 0.12, wheelRate: 24, maxCommit: 1.10, maxRecover: 1.7, standoff: 3.1 },
-  hard:   { reaction: 0.00, commit: 0.20, accuracy: 1.00, switchTime: 0.08, wheelRate: 30, maxCommit: 1.20, maxRecover: 1.6, standoff: 3.2 },
+  easy:   { reaction: 0.090, commit: 0.30, accuracy: 0.970, switchTime: 0.16, wheelRate: 18, maxCommit: 0.90, maxRecover: 1.8, standoff: 3.0 },
+  normal: { reaction: 0.045, commit: 0.40, accuracy: 0.985, switchTime: 0.12, wheelRate: 24, maxCommit: 1.00, maxRecover: 1.7, standoff: 2.5 },
+  hard:   { reaction: 0.000, commit: 0.50, accuracy: 1.000, switchTime: 0.08, wheelRate: 30, maxCommit: 1.10, maxRecover: 1.6, standoff: 2.0 },
 };
 
 const AI_HIST = 256;          // ticks of ball history, for delayed perception
