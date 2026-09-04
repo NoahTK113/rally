@@ -221,9 +221,9 @@
   </div>
 </div>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v11.7-dev"></script>
-<script src="ai.js?v=v11.7-dev"></script>
-<script src="tutorial.js?v=v11.7-dev"></script>
+<script src="audio.js?v=v11.8-dev"></script>
+<script src="ai.js?v=v11.8-dev"></script>
+<script src="tutorial.js?v=v11.8-dev"></script>
 <script>
 'use strict';
 
@@ -255,7 +255,6 @@ const FEEL = {
   posDamp   : 1.90,   // 1.0 = critically damped
   angFreq   : 9.0,    // Hz
   angDamp   : 1.65,
-  keyRate   : 220,    // degrees/sec for A and D
   maxError  : 0.75,   // metres. The proportional term is clamped to this, so
                       // the spring has the SAME authority everywhere — in open
                       // space a distant cursor no longer buys extra force that
@@ -277,7 +276,6 @@ const FEEL = {
    one, so switching between them never strands the paddle between grids. */
 const STEP_COARSE = 30.0 * Math.PI / 180;   // 90 / 3
 const STEP_FINE   =  7.5 * Math.PI / 180;   // 90 / 12, and exactly a quarter of coarse
-const FINE_DIV    = STEP_COARSE / STEP_FINE;
 
 /* Which paddle THIS browser drives. The host takes blue (+1) and the joining
    player takes red (-1); solo play is blue. Everything else keys off the side
@@ -599,10 +597,6 @@ function captureInto(dst, dt) {
   if (controlsLive()) {
     clampCursor();
     intent.tx = cursor.x; intent.ty = cursor.y;
-    let rot = 0;
-    if (keys.has('a')) rot += 1;
-    if (keys.has('d')) rot -= 1;
-    if (rot) intent.ta += rot * FEEL.keyRate * (fineRotate ? 1 / FINE_DIV : 1) * DEG * dt;
   }
   dst.sel = intent.sel;
   dst.tx = intent.tx; dst.ty = intent.ty; dst.ta = intent.ta;
@@ -1691,7 +1685,7 @@ addEventListener('keydown', e => {
      through transport ends and each end is tagged with the side it drives, so
      switching means retagging our end — the simulation needs no notion of a
      player changing seats. */
-  if (!controlsLive() && (k === ' ' || k === 's' || k === 'tab')) return;
+  if (!controlsLive() && (k === ' ' || k === 'tab')) return;
 
   if (k === 'tab' && net.role === 'solo') {
     mySide = -mySide;
@@ -1720,7 +1714,6 @@ addEventListener('keydown', e => {
     intent.tx = np.x; intent.ty = np.y; intent.ta = np.a;
     tutOnSwitch();
   }
-  if (k === 's') intent.ta = 0;
   if (k === '[') setSens(MOUSE.sens - 0.05);   // capture blocks the slider,
   if (k === ']') setSens(MOUSE.sens + 0.05);   // so keys work mid-match too
   if (k === 'escape') { leaveGame(); return; }
@@ -1743,7 +1736,6 @@ const KNOBS = [
   { o: FEEL, k: 'posDamp',    label: 'pos damp',   min: 0.2, max: 8,   step: 0.02, u: 'z'  },
   { o: FEEL, k: 'angFreq',    label: 'ang freq',   min: 1,   max: 30,  step: 0.1,  u: 'Hz' },
   { o: FEEL, k: 'angDamp',    label: 'ang damp',   min: 0.2, max: 8,   step: 0.02, u: 'z'  },
-  { o: FEEL, k: 'keyRate',    label: 'key rate',   min: 30,  max: 720, step: 10,   u: '°/s' },
   { o: FEEL, k: 'maxError',   label: 'max error',  min: 0.05,max: 3,   step: 0.05, u: 'm'   },
   { o: FEEL, k: 'reach',      label: 'reach',      min: 0,   max: 3,   step: 0.05, u: 'm'   },
   { o: A,    k: 'paddleLength', label: 'length',   min: 0.4, max: 3,   step: 0.05, u: 'm' },
@@ -1832,7 +1824,7 @@ function buildPanel() {
 
 document.getElementById('help').innerHTML =
   '<b>mouse</b> move &nbsp; <b>wheel</b> rotate &nbsp; ' +
-  '<b>hold right-click</b> fine rotate &nbsp; <b>S</b> level<br>' +
+  '<b>hold right-click</b> fine rotate<br>' +
   '<b>click</b> capture mouse &nbsp; <b>space</b> switch paddle &nbsp; ' +
   '<b>[</b> <b>]</b> sensitivity<br>' +
   '<b>F</b> serve &nbsp; <b>R</b> reset score &nbsp; ' +
@@ -2083,7 +2075,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v11.7-dev';
+const BUILD = 'v11.8-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
