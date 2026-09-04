@@ -50,12 +50,12 @@ const AI_FOLLOW_T = 0.12;     // s of follow-through after contact
 const AI_FOLLOW_D = 0.70;     // m the target carries on past the contact point
 const AI_SWEEP    = 0.45;     // rad the face keeps turning through the ball
 
-const KIND = { TRACK: 0, APPROACH: 1, STRIKE: 2, RECOVER: 3 };
+const KIND = { IDLE: 0, APPROACH: 1, STRIKE: 2 };
 
 /* One plan. Reused rather than reallocated, so planning at 5 Hz costs nothing
    in garbage. a -> b is the first segment, b -> c the follow-through. */
 const plan = {
-  kind: KIND.TRACK, dur: 0.2, hitT: 0,
+  kind: KIND.IDLE, dur: 0.2, hitT: 0,
   ax: 0, ay: 0, aa: 0,          // start pose: where the paddle actually was
   bx: 0, by: 0, ba: 0,          // contact pose, or simply the end
   cx: 0, cy: 0, ca: 0,          // follow-through pose
@@ -357,41 +357,40 @@ function aiMakePlan(w, side) {
   // No point predicting an intercept we are not allowed to take.
   const hit = inFront ? null : aiPredict(w, side);
 
-  if (inFront) {
-    /* Round the ball, not through it. Rise or dive clear first, then run back
-       past it at that height — a straight line to the far side would go
-       through the ball and hit it exactly the wrong way. Go whichever way has
-       more room, so we do not climb into the ceiling. */
-    const clear = PHYS.ballR + A.paddleLength * 0.5 + 0.25;
-    const gap   = aiSafeDist(seen);      // land exactly where idle wants to be
-    const up = box.y1 - seen.y, down = seen.y - box.y0;
-    const clearY = clamp(seen.y + (up >= down ? clear : -clear), box.y0, box.y1);
-
-    plan.kind = KIND.RECOVER;
-    plan.dur = AI.commit;
-    plan.hitT = plan.dur * 0.45;              // rise, then run
-    plan.bx = clamp(p.x, box.x0, box.x1);
-    plan.by = clearY;
-    plan.cx = clamp(seen.x + side * gap, box.x0, box.x1);
-    plan.cy = clearY;
-    plan.ba = aiFaceBall(plan.bx, plan.by, seen.x, seen.y, p.a);
-    plan.ca = aiFaceBall(plan.cx, plan.cy, seen.x, seen.y, plan.ba);
-
-  } else if (!hit) {
-    /* Idle is a path like everything else, so there is no second mechanism to
-       flicker against. Stand at the ball's height, a safe distance behind it.
+  if (!hit) {
+    /* IDLE. One state: stand at the ball's height, a safe distance behind it.
+       Being in front of the ball is not a different intention, only a
+       different ROUTE to the same place — which is why this used to oscillate
+       when they were separate states, each hauling the paddle where the other
+       had just left.
 
        There is nothing special about the centre of the zone, and aiming for it
-       was actively harmful: recovery would put the paddle behind the ball, idle
-       would immediately haul it back to centre — which is in FRONT of the ball
-       — and recovery would fire again. Two attractors pulling opposite ways,
-       one swing per plan. Both now want the same place, so it settles. */
-    plan.kind = KIND.TRACK;
+       was the whole bug: recovery put the paddle behind the ball, idle dragged
+       it back to centre, which is in front of the ball, and recovery fired
+       again. One swing per plan, forever. */
+    const destX = clamp(seen.x + side * aiSafeDist(seen), box.x0, box.x1);
+    const destY = clamp(seen.y, box.y0, box.y1);
+    plan.kind = KIND.IDLE;
     plan.dur = AI.commit;
-    plan.bx = clamp(seen.x + side * aiSafeDist(seen), box.x0, box.x1);
-    plan.by = clamp(seen.y, box.y0, box.y1);
+
+    if (inFront) {
+      /* Round the ball, not through it. Rise or dive clear first, then run
+         back past it at that height — a straight line to the far side would go
+         through the ball and hit it exactly the wrong way. Go whichever way
+         has more room, so we do not climb into the ceiling. */
+      const clear = PHYS.ballR + A.paddleLength * 0.5 + 0.25;
+      const up = box.y1 - seen.y, down = seen.y - box.y0;
+      const clearY = clamp(seen.y + (up >= down ? clear : -clear), box.y0, box.y1);
+      plan.hitT = plan.dur * 0.45;            // rise, then run
+      plan.bx = clamp(p.x, box.x0, box.x1); plan.by = clearY;
+      plan.cx = destX;                        plan.cy = clearY;
+    } else {
+      plan.hitT = plan.dur;                   // already behind it: go straight there
+      plan.bx = destX; plan.by = destY;
+      plan.cx = destX; plan.cy = destY;
+    }
     plan.ba = aiFaceBall(plan.bx, plan.by, seen.x, seen.y, p.a);
-    plan.hitT = plan.dur;
+    plan.ca = aiFaceBall(plan.cx, plan.cy, seen.x, seen.y, plan.ba);
 
   } else {
     const shot = aiShot(hit, side, p.a, errAim, errAng);
@@ -406,6 +405,7 @@ function aiMakePlan(w, side) {
       plan.by = clamp(hit.y - shot.diry * 0.5, box.y0, box.y1);
       plan.ba = plan.aa + (shot.a - plan.aa) * 0.5;   // rotate part of the way
       plan.hitT = plan.dur;
+      plan.cx = plan.bx; plan.cy = plan.by; plan.ca = plan.ba;
 
     } else {
       plan.kind = KIND.STRIKE;
@@ -421,10 +421,6 @@ function aiMakePlan(w, side) {
       plan.cy = clamp(plan.by + shot.diry * AI_FOLLOW_D, box.y0, box.y1);
       plan.ca = plan.ba + Math.sign(plan.ba - plan.aa || 1) * AI_SWEEP;
     }
-  }
-
-  if (plan.kind === KIND.TRACK || plan.kind === KIND.APPROACH) {
-    plan.cx = plan.bx; plan.cy = plan.by; plan.ca = plan.ba;
   }
 
   const t1 = Math.max(1e-3, plan.hitT);
@@ -457,8 +453,8 @@ function aiFillInput(w, side, dst, dt) {
 
   const s = ai.clock;
   let px, py, pa, vx, vy, vw;
-  /* Segment two, for any plan that has one. TRACK and APPROACH set c = b and
-     hitT = dur, so they simply never get here. */
+  /* Segment two, for any plan that has one. A plan with nothing to do after
+     its waypoint sets c = b and hitT = dur, so it never gets here. */
   if (s >= plan.hitT) {
     const u = Math.min(s - plan.hitT, plan.dur - plan.hitT);
     px = plan.bx + plan.v2x * u; py = plan.by + plan.v2y * u; pa = plan.ba + plan.w2 * u;

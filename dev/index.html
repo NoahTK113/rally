@@ -242,9 +242,9 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v13.1-dev"></script>
-<script src="ai.js?v=v13.1-dev"></script>
-<script src="tutorial.js?v=v13.1-dev"></script>
+<script src="audio.js?v=v13.2-dev"></script>
+<script src="ai.js?v=v13.2-dev"></script>
+<script src="tutorial.js?v=v13.2-dev"></script>
 <script>
 'use strict';
 
@@ -2177,7 +2177,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v13.1-dev';
+const BUILD = 'v13.2-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
