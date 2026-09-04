@@ -222,9 +222,9 @@
   </div>
 </div>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v12.0-dev"></script>
-<script src="ai.js?v=v12.0-dev"></script>
-<script src="tutorial.js?v=v12.0-dev"></script>
+<script src="audio.js?v=v12.1-dev"></script>
+<script src="ai.js?v=v12.1-dev"></script>
+<script src="tutorial.js?v=v12.1-dev"></script>
 <script>
 'use strict';
 
@@ -2128,7 +2128,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v12.0-dev';
+const BUILD = 'v12.1-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2605,7 +2605,7 @@ function clientStepOnce(dt) {
 
     const rec = client.inputs[slot(client.tick)];
     rec.tick = client.tick;
-    rec.sel = qi.sel;
+    rec.sel = qi.sel; rec.rdy = qi.rdy;
     rec.tx = qi.tx; rec.ty = qi.ty; rec.ta = qi.ta;
     if (client.filled < HIST) client.filled++;
 
