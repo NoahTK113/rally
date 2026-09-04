@@ -221,10 +221,30 @@
     <div class="msg" id="netMsg"></div>
   </div>
 </div>
+<script>
+/* ==========================================================================
+   SESSION STATE REGISTRY
+
+   Anything that outlives a match and must not. Twice now a new variable was
+   added, the reset was written somewhere else, and a stale value from the
+   previous game leaked into the next one — the ready flag started matches on
+   their own, and the AI opened every game after its first still holding the
+   last one's ball history.
+
+   The cure is to keep the clear NEXT TO the declaration. Registering is one
+   line directly under the variable, so forgetting means noticing while you
+   write it rather than while you play it. startGame runs the lot.
+
+   Defined here, ahead of the other scripts, so they can register at load.
+   ========================================================================== */
+var SESSION_RESETS = [];
+function onNewGame(fn) { SESSION_RESETS.push(fn); }
+function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
+</script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v12.3-dev"></script>
-<script src="ai.js?v=v12.3-dev"></script>
-<script src="tutorial.js?v=v12.3-dev"></script>
+<script src="audio.js?v=v12.4-dev"></script>
+<script src="ai.js?v=v12.4-dev"></script>
+<script src="tutorial.js?v=v12.4-dev"></script>
 <script>
 'use strict';
 
@@ -571,6 +591,10 @@ let pointerLocked = false;
 const intent = { sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 };  // what the player wants, live
 const liveInput = { '-1': { sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 },
                     '1':  { sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 } };
+onNewGame(() => {
+  intent.sel = 0; intent.rdy = 0;
+  for (const k of ['-1', '1']) liveInput[k].rdy = 0;
+});
 
 /* The paddle the player is holding RIGHT NOW, per their intent — not per the
    simulation, which only learns about a switch on the next tick. Anything on
@@ -1906,6 +1930,7 @@ let last = performance.now() / 1000;
 let stepsLastFrame = 0;
 let statusAcc = 0;
 let frozen = false, stepOnce = false;
+onNewGame(() => { frozen = false; stepOnce = false; });
 let fps = 60, fpsAcc = 0, fpsN = 0;
 
 /* One tick. Reads nothing but the world and the inputs handed to it, so
@@ -1999,19 +2024,8 @@ function startGame(asTutorial) {
      after the first has an id below the mark and is silently dropped. */
   lastEventSeen = 0;
 
-  /* Everything that outlives a match, cleared in one place. Each of these
-     lives somewhere sensible for the rest of the time — which is exactly why
-     they get missed: nothing about a fresh world touches them. */
-  frozen = false; stepOnce = false;        // the P and . debug keys
-  aiInit(-mySide);                         // ball history and plan from last time
-  for (const k of ['-1', '1']) liveInput[k].rdy = 0;
-  /* The input ring is allocated once and reused. Tick numbers restart at zero
-     with every match, so a stale record could in principle answer to a tick
-     number it never belonged to; marking them all unused costs nothing. */
-  if (client.inputs) for (let i = 0; i < client.inputs.length; i++) client.inputs[i].tick = -1;
+  resetSession();          // every registered clear, in one call
 
-  intent.sel = 0;
-  intent.rdy = 0;
   const mine = paddles[idOf(mySide, 0)];
   placeCursor(mine.x, mine.y);
   intent.tx = mine.x; intent.ty = mine.y; intent.ta = mine.a;
@@ -2161,7 +2175,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v12.3-dev';
+const BUILD = 'v12.4-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2170,6 +2184,9 @@ const BUILD = 'v12.3-dev';
    observation inside the audio pump meant a browser that refused an
    AudioContext could never finish the "hit the ball" step. */
 let lastEventSeen = 0;
+/* A high-water mark over world.evCount, which restarts at zero every match —
+   so without this every event in every later match is silently dropped. */
+onNewGame(() => { lastEventSeen = 0; });
 
 function pumpEvents() {
   const w = world;
@@ -2451,6 +2468,14 @@ const client = {
   states: null,         // ring of Worlds by tick
   filled: 0,
 };
+
+/* The ring is allocated once and reused, while tick numbers restart at zero
+   every match — so a stale record could answer to a tick number it never
+   belonged to. Marking them unused costs nothing and closes that off. */
+onNewGame(() => {
+  if (!client.inputs) return;
+  for (let i = 0; i < client.inputs.length; i++) client.inputs[i].tick = -1;
+});
 
 function clientInitHistory() {
   if (client.inputs) return;

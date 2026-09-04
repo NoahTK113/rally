@@ -73,6 +73,10 @@ function aiInit(side) {
   if (!ai.world) ai.world = makeWorld();
 }
 
+/* Registered rather than called from startGame: this state belongs to the AI,
+   so the knowledge that it needs clearing belongs here too. */
+onNewGame(() => aiInit(-mySide));
+
 function aiSetLevel(name) {
   const L = AI_LEVELS[name] || AI_LEVELS.normal;
   AI.reaction = L.reaction;
