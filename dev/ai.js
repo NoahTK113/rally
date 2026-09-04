@@ -275,6 +275,23 @@ function aiShot(hit, side, curA, errAim, errAng) {
   return { dirx, diry, a: aiNearAngle(a + errAng, curA) };
 }
 
+/* How far behind the ball to stand. Far enough that a ball struck now takes
+   longer to arrive than we need to see it and start moving — which is why it
+   is built from reaction and commit rather than picked out of the air. It
+   scales with how fast the ball is actually going, with a floor at the speed
+   a shot would need to cross half the court, since a ball sitting still will
+   not stay that way.
+
+   A pleasant consequence: a quicker AI stands closer, because it can afford
+   to. That falls out of the definition rather than being tuned in per level. */
+function aiSafeDist(seen) {
+  const nominal = Math.sqrt(Math.max(1, A.width * 0.5 * PHYS.gravity));
+  const v = Math.max(nominal, Math.hypot(seen.vx, seen.vy));
+  const d = v * (AI.reaction + AI.commit * 0.5);
+  const min = PHYS.ballR + A.paddleLength * 0.5 + 0.30;   // clear of the ball
+  return Math.min(Math.max(d, min), A.width * 0.22);
+}
+
 /* A hand cannot dial in an arbitrary angle. The wheel moves in detents and
    only so many per second, and every value it can produce is a multiple of the
    active step. The path asks for a smooth real-valued angle; this turns that
@@ -346,7 +363,7 @@ function aiMakePlan(w, side) {
        through the ball and hit it exactly the wrong way. Go whichever way has
        more room, so we do not climb into the ceiling. */
     const clear = PHYS.ballR + A.paddleLength * 0.5 + 0.25;
-    const gap   = PHYS.ballR + A.paddleLength * 0.5 + 0.30;
+    const gap   = aiSafeDist(seen);      // land exactly where idle wants to be
     const up = box.y1 - seen.y, down = seen.y - box.y0;
     const clearY = clamp(seen.y + (up >= down ? clear : -clear), box.y0, box.y1);
 
@@ -362,11 +379,16 @@ function aiMakePlan(w, side) {
 
   } else if (!hit) {
     /* Idle is a path like everything else, so there is no second mechanism to
-       flicker against. Track the ball's height and drift toward the middle of
-       the zone: what a player does with nothing to hit. */
+       flicker against. Stand at the ball's height, a safe distance behind it.
+
+       There is nothing special about the centre of the zone, and aiming for it
+       was actively harmful: recovery would put the paddle behind the ball, idle
+       would immediately haul it back to centre — which is in FRONT of the ball
+       — and recovery would fire again. Two attractors pulling opposite ways,
+       one swing per plan. Both now want the same place, so it settles. */
     plan.kind = KIND.TRACK;
     plan.dur = AI.commit;
-    plan.bx = (box.x0 + box.x1) / 2;
+    plan.bx = clamp(seen.x + side * aiSafeDist(seen), box.x0, box.x1);
     plan.by = clamp(seen.y, box.y0, box.y1);
     plan.ba = aiFaceBall(plan.bx, plan.by, seen.x, seen.y, p.a);
     plan.hitT = plan.dur;
