@@ -36,23 +36,24 @@ const AI = {
   wheelRate: 12,      // wheel clicks per second — the hand's actual limit
   maxCommit: 0.50,    // s — how far ahead a STRIKE is worth predicting at all,
                       //     and the longest a non-recovery plan may run
+  standoff: 3.5,      // multiplier on the safe distance. Hovering right on
+                      //     the ball is both annoying and easy to hit past
   maxRecover: 2.00,   // s — a recovery may commit for far longer; it is one
                       //     unambiguous movement, and the opponent is unlikely
                       //     to be able to interrupt it
 };
 
 const AI_LEVELS = {
-  easy:   { reaction: 0.34, commit: 0.30, accuracy: 0.55, switchTime: 0.70, wheelRate: 7,  maxCommit: 0.60, maxRecover: 2.2 },
-  normal: { reaction: 0.18, commit: 0.20, accuracy: 0.85, switchTime: 0.35, wheelRate: 12, maxCommit: 0.50, maxRecover: 2.0 },
-  hard:   { reaction: 0.09, commit: 0.12, accuracy: 0.97, switchTime: 0.16, wheelRate: 18, maxCommit: 0.38, maxRecover: 1.8 },
+  easy:   { reaction: 0.34, commit: 0.30, accuracy: 0.55, switchTime: 0.70, wheelRate: 7,  maxCommit: 0.60, maxRecover: 2.2, standoff: 4.0 },
+  normal: { reaction: 0.18, commit: 0.20, accuracy: 0.85, switchTime: 0.35, wheelRate: 12, maxCommit: 0.50, maxRecover: 2.0, standoff: 3.5 },
+  hard:   { reaction: 0.09, commit: 0.12, accuracy: 0.97, switchTime: 0.16, wheelRate: 18, maxCommit: 0.38, maxRecover: 1.8, standoff: 3.0 },
 };
 
 const AI_HIST = 256;          // ticks of ball history, for delayed perception
 const AI_PRED_DT = 1 / 120;   // coarser than the sim: prediction is cheap, and
                               // half a tick of error is far below the aim error
 const AI_FOLLOW_T = 0.12;     // s of follow-through after contact
-const AI_FOLLOW_D = 0.70;     // m the target carries on past the contact point
-const AI_SWEEP    = 0.45;     // rad the face keeps turning through the ball
+const AI_BACKSWING = 0.18;    // s of run-up before contact, to arrive moving
 
 const KIND = { IDLE: 0, APPROACH: 1, STRIKE: 2, RECOVER: 3 };
 const AI_FRONT_M = 0.10;      // m past the ball before we call it wrong-side
@@ -110,6 +111,7 @@ function aiSetLevel(name) {
   AI.wheelRate = L.wheelRate;
   AI.maxCommit = L.maxCommit;
   AI.maxRecover = L.maxRecover;
+  AI.standoff = L.standoff;
   try { localStorage.setItem('banjoball.ai', name); } catch (e) {}
 }
 
@@ -154,19 +156,6 @@ function aiClearsNet(px, py, theta, s, g, dx) {
   if (Math.abs(c) < 1e-6) return true;                              // straight up
   const y = py + X * Math.tan(theta) - g * X * X / (2 * s * s * c * c);
   return y > A.netHeight + PHYS.ballR * 1.5;
-}
-
-/* The paddle angle that turns an incoming velocity into a desired outgoing
-   direction. A bounce mirrors the velocity about the surface normal, so the
-   normal bisects the reversed incoming direction and the outgoing one. */
-function aiPaddleAngleFor(vinx, viny, dirx, diry) {
-  const vl = Math.hypot(vinx, viny);
-  let nx, ny;
-  if (vl < 0.05) { nx = dirx; ny = diry; }         // a still ball: just face it
-  else { nx = dirx - vinx / vl; ny = diry - viny / vl; }
-  const nl = Math.hypot(nx, ny);
-  if (nl < 1e-6) return null;
-  return Math.atan2(-nx / nl, ny / nl);
 }
 
 /* atan2 answers in (-pi, pi]; the paddle's angle is unbounded, because
@@ -255,21 +244,37 @@ function aiPredict(w, side) {
   return first;
 }
 
-/* Where to send the ball from the intercept, and the face angle that does it.
-   Returns a unit direction plus the paddle angle, already chosen as the
-   representative nearest the paddle's current angle. */
+/* Where to send the ball, the face angle that does it, and HOW HARD TO SWING.
+
+   The contact solver gives, along the normal:
+
+       v_out·n  =  -e·(v_in·n) + (1+e)·(v_p·n)        e = PHYS.paddleRest
+
+   With e at 0.18 a stationary paddle returns under a fifth of what arrives —
+   below restThreshold it returns nothing but its own motion. The swing IS the
+   shot. This used to model a mirror bouncing a ball off a still paddle, which
+   is the opposite of the physics: it could only find a solution when the ball
+   already arrived fast, and then fell short anyway, because the speed it
+   solved for was never the speed it produced.
+
+   So: point the face at the target, swing along that normal, and pick the
+   speed. Ball speed becomes a decision rather than something inherited, which
+   is what puts the far goal in range from almost anywhere on the court.
+
+   The approximation: the incoming ball's TANGENTIAL velocity survives the
+   contact and skews the result a little. Under a hard swing the normal term
+   dominates, so it is a few degrees, well inside the aim error. */
 function aiShot(hit, side, curA, errAim, errAng) {
   const goalX = side < 0 ? A.width : 0;
   const goalMid = (goalY0() + goalY1()) / 2;
   const spread = (goalY1() - goalY0()) * 0.5 + 1.5;
   const aimY = goalMid + errAim * spread;
 
-  /* An estimate of how fast the ball will leave, not a speed we can pick - the
-     AI only chooses where the face points. The floor is the speed that carries
-     half the court at 45 degrees, so a slow ball is still aimed at the goal
-     rather than at an impossible solution. */
-  const floor = Math.sqrt(Math.max(1, A.width * 0.5 * PHYS.gravity));
-  const speed = Math.max(floor, Math.hypot(hit.vx, hit.vy) * 1.15);
+  // The hardest ball this paddle can produce, and therefore the flattest,
+  // fastest shot available. Always swing at the maximum.
+  const e = PHYS.paddleRest;
+  const vpMax = aiPaddleTopSpeed();
+  const speed = (1 + e) * vpMax;
   const shot = aiLaunchAngle(hit.x, hit.y, goalX, aimY, speed, PHYS.gravity);
 
   let dirx, diry;
@@ -286,9 +291,16 @@ function aiShot(hit, side, curA, errAim, errAng) {
     diry = Math.SQRT1_2;
   }
 
-  let a = aiPaddleAngleFor(hit.vx, hit.vy, dirx, diry);
-  if (a === null) a = 0;
-  return { dirx, diry, a: aiNearAngle(a + errAng, curA) };
+  /* Face square along the outgoing direction, and swing that way. Solving for
+     the paddle speed that yields the wanted ball speed: a ball already moving
+     toward the face does part of the work, so v_in·n reduces the swing needed. */
+  const vinN = hit.vx * dirx + hit.vy * diry;
+  let vp = (speed + e * vinN) / (1 + e);
+  if (!(vp > 0)) vp = 0;
+  if (vp > vpMax) vp = vpMax;
+
+  const a = Math.atan2(-dirx, diry);          // face normal points along (dirx,diry)
+  return { dirx, diry, vp, a: aiNearAngle(a + errAng, curA) };
 }
 
 /* Signed distance behind the ball, along the axis of our own goal. `side` is
@@ -308,9 +320,9 @@ const aiBehind = (p, seen, side) => side * (p.x - seen.x);
 function aiSafeDist(seen) {
   const nominal = Math.sqrt(Math.max(1, A.width * 0.5 * PHYS.gravity));
   const v = Math.max(nominal, Math.hypot(seen.vx, seen.vy));
-  const d = v * (AI.reaction + AI.commit * 0.5);
+  const d = v * (AI.reaction + AI.commit * 0.5) * AI.standoff;
   const min = PHYS.ballR + A.paddleLength * 0.5 + 0.30;   // clear of the ball
-  return Math.min(Math.max(d, min), A.width * 0.22);
+  return Math.min(Math.max(d, min), A.width * 0.45);
 }
 
 /* A hand cannot dial in an arbitrary angle. The wheel moves in detents and
@@ -438,19 +450,43 @@ function aiMakePlan(w, side) {
       plan.cx = plan.bx; plan.cy = plan.by; plan.ca = plan.ba;
 
     } else {
+      /* Arrive MOVING. The old path ran from wherever the paddle was to the
+         contact point over hitT, so the better positioned it was the SLOWER it
+         arrived — a short distance over a fixed time — and the follow-through
+         only accelerated after the ball had already gone. It was decoration.
+
+         The two segments are now a backswing and a swing. b sits behind the
+         contact along the swing line, and segment two runs from there, through
+         the ball, to the follow-through, at one constant speed. Contact happens
+         INSIDE that segment, so the paddle is at full swing speed exactly when
+         the ball arrives and is still driving through it afterwards. */
       plan.kind = KIND.STRIKE;
-      plan.hitT = Math.max(0.03, hit.t);
-      plan.t2 = AI_FOLLOW_T;
-      plan.dur = plan.hitT + plan.t2;
-      plan.bx = clamp(hit.x, box.x0, box.x1);
-      plan.by = clamp(hit.y + errOff, box.y0, box.y1);
+      const tau = Math.min(AI_BACKSWING, Math.max(0, hit.t - 0.02));
+      const hx = clamp(hit.x, box.x0, box.x1);
+      const hy = clamp(hit.y + errOff, box.y0, box.y1);
+
+      plan.bx = clamp(hx - shot.dirx * shot.vp * tau, box.x0, box.x1);
+      plan.by = clamp(hy - shot.diry * shot.vp * tau, box.y0, box.y1);
+
+      /* A backswing clipped by a wall is a shorter run-up, and a shorter run-up
+         cannot reach the same speed in the same time. Take the speed the
+         geometry actually allows rather than asking the target to outrun the
+         paddle it is pulling. */
+      const runD = Math.hypot(hx - plan.bx, hy - plan.by);
+      const vp = tau > 1e-3 ? Math.min(shot.vp, runD / tau) : shot.vp;
+
+      plan.cx = clamp(hx + shot.dirx * vp * AI_FOLLOW_T, box.x0, box.x1);
+      plan.cy = clamp(hy + shot.diry * vp * AI_FOLLOW_T, box.y0, box.y1);
+
+      plan.hitT = Math.max(0.02, hit.t - tau);   // reach the backswing by here
+      plan.t2   = tau + AI_FOLLOW_T;             // then one sweep through the ball
+      plan.dur  = plan.hitT + plan.t2;
+
+      /* Face set before the swing and held through it. Turning during contact
+         would move the normal mid-hit, and the wheel could not deliver that
+         rotation anyway. */
       plan.ba = shot.a;
-      /* Carry on THROUGH the contact rather than stopping on it. At the moment
-         the ball arrives the paddle is still being pulled forward, so it hits
-         moving - and the face is still turning, which is what puts spin on it. */
-      plan.cx = clamp(plan.bx + shot.dirx * AI_FOLLOW_D, box.x0, box.x1);
-      plan.cy = clamp(plan.by + shot.diry * AI_FOLLOW_D, box.y0, box.y1);
-      plan.ca = plan.ba + Math.sign(plan.ba - plan.aa || 1) * AI_SWEEP;
+      plan.ca = shot.a;
     }
   }
 
@@ -543,7 +579,11 @@ function aiFillInput(w, side, dst, dt) {
      a big turn now has to be started early enough for the hand to get there,
      which is exactly why APPROACH pre-rotates half way. */
   if (!ai.wheelSet) { ai.wheel = w.p[idOf(side, ai.sel)].a; ai.wheelSet = true; }
-  let ta = aiWheel(pa + vw * aiAngLag(), dt);
+  /* Hands off the wheel while recovering. Facing the ball while ORBITING it at
+     close range means the bearing sweeps quickly, so chasing it spent the whole
+     click budget on an angle that never settled — and the face does not matter
+     until we are back behind the ball. */
+  let ta = plan.kind === KIND.RECOVER ? ai.wheel : aiWheel(pa + vw * aiAngLag(), dt);
 
   /* EFFICIENCY, not saturation. stepPaddle clamps position error to maxError,
      so the pull is already at its limit there - holding the target further out
