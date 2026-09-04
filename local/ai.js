@@ -97,9 +97,9 @@ function aiObserve(w) {
   const b = w.ball;
   o.ball.x = b.x; o.ball.y = b.y; o.ball.vx = b.vx; o.ball.vy = b.vy; o.ball.w = b.w;
   for (const id of PIDS) {
-    const src = w.p[id], dst = o.p[id];
-    dst.x = src.x; dst.y = src.y; dst.a = src.a;
-    dst.vx = src.vx; dst.vy = src.vy; dst.w = src.w;
+    const src = w.p[id], rec = o.p[id];
+    rec.x = src.x; rec.y = src.y; rec.a = src.a;
+    rec.vx = src.vx; rec.vy = src.vy; rec.w = src.w;
   }
   o.sel['-1'] = w.sel['-1'];
   o.sel['1'] = w.sel['1'];
