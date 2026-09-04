@@ -55,7 +55,7 @@ const AI_PRED_DT = 1 / 120;   // coarser than the sim: prediction is cheap, and
 const AI_FOLLOW_T = 0.12;     // s of follow-through after contact
 const AI_BACKSWING = 0.18;    // s of run-up before contact, to arrive moving
 
-const KIND = { IDLE: 0, APPROACH: 1, STRIKE: 2, RECOVER: 3 };
+const KIND = { IDLE: 0, APPROACH: 1, STRIKE: 2, RECOVER: 3, CLEAR: 4 };
 const AI_FRONT_M = 0.10;      // m past the ball before we call it wrong-side
 
 /* One plan. Reused rather than reallocated, so planning at 5 Hz costs nothing
@@ -77,6 +77,7 @@ const ai = {
   clock: 0,             // seconds elapsed inside the current plan
   has: false,
   recovering: false,    // latched: set when caught in front, cleared only on arrival
+  clearing: false,      // latched: no room to stand off, so hit it away instead
   wheel: 0,             // the hand's accumulated angle, exactly like intent.ta
   wheelSet: false,
   clicks: 0,            // fractional wheel budget carried between ticks
@@ -88,7 +89,7 @@ function aiInit(side) {
   ai.head = 0; ai.filled = 0;
   ai.clock = 0; ai.has = false;
   ai.wheel = 0; ai.wheelSet = false; ai.clicks = 0;
-  ai.recovering = false;
+  ai.recovering = false; ai.clearing = false;
   ai.wantSel = ai.sel = 0;
   ai.selHeld = 0;
   if (!ai.hist) {
@@ -386,7 +387,7 @@ function aiMakePlan(w, side) {
      keeps it from chattering at the boundary; recovery overshoots well past
      that, so it cannot oscillate. */
   // No point predicting an intercept we are not allowed to take.
-  const hit = ai.recovering ? null : aiPredict(w, side);
+  const hit = (ai.recovering || ai.clearing) ? null : aiPredict(w, side);
 
   if (ai.recovering) {
     /* RECOVER is a GOAL, not a position: get behind the ball. It is latched
@@ -418,6 +419,30 @@ function aiMakePlan(w, side) {
     plan.dur  = plan.hitT + plan.t2;
     plan.ba = aiFaceBall(plan.bx, plan.by, seen.x, seen.y, p.a);
     plan.ca = aiFaceBall(plan.cx, plan.cy, seen.x, seen.y, plan.ba);
+
+  } else if (ai.clearing) {
+    /* CLEAR: drive straight through the ball and get it off our wall. No
+       backswing — the room behind us is exactly what is missing — so the run-up
+       is whatever distance already separates us from the ball, taken at top
+       speed. The face is set 45 degrees upfield, which is the maximum-range
+       launch and clears the net, so wherever the ball goes it is away from our
+       goal. Being behind the ball is already guaranteed: if we were not, the
+       recovery latch would have claimed this tick instead. */
+    const dirx = -side * Math.SQRT1_2, diry = Math.SQRT1_2;
+    const top = aiPaddleTopSpeed();
+    const tx = clamp(seen.x, box.x0, box.x1), ty = clamp(seen.y, box.y0, box.y1);
+    let sx = tx - p.x, sy = ty - p.y;
+    const sl = Math.max(1e-4, Math.hypot(sx, sy));
+    sx /= sl; sy /= sl;
+
+    plan.kind = KIND.CLEAR;
+    plan.bx = tx; plan.by = ty;
+    plan.cx = clamp(tx + sx * top * AI_FOLLOW_T, box.x0, box.x1);
+    plan.cy = clamp(ty + sy * top * AI_FOLLOW_T, box.y0, box.y1);
+    plan.hitT = Math.max(0.02, sl / top);
+    plan.t2 = AI_FOLLOW_T;
+    plan.dur = plan.hitT + plan.t2;
+    plan.ba = plan.ca = aiNearAngle(Math.atan2(-dirx, diry), p.a);
 
   } else if (!hit) {
     /* IDLE is a position to HOLD: the ball's height, a safe distance behind
@@ -545,10 +570,33 @@ function aiFillInput(w, side, dst, dt) {
   const mine = w.p[idOf(side, ai.sel)];
   const now = aiPerceived(FIXED_DT);
   const behind = aiBehind(mine, now, side);
+  const safe = aiSafeDist(now);
+  const depth = side < 0 ? now.x : A.width - now.x;    // ball's distance to OUR wall
+
   if (ai.recovering) {
-    if (behind >= aiSafeDist(now) * 0.9) { ai.recovering = false; ai.clock = plan.dur; }
+    /* The goal has to be REACHABLE or recovery never ends. With the ball near
+       our own wall there is not room to get a full safe distance behind it —
+       you cannot stand outside the court — so the target is whatever the space
+       actually allows. Demanding the full distance would have left the AI
+       recovering forever against a ball parked near its goal. */
+    const want = Math.min(safe * 0.9, Math.max(0.25, depth - 0.35));
+    if (behind >= want) { ai.recovering = false; ai.clock = plan.dur; }
   } else if (behind < -AI_FRONT_M) {
     ai.recovering = true; ai.clock = plan.dur;
+  }
+
+  /* No room to stand off: the standoff position would be outside the court, so
+     holding station means pinning itself to its own back wall and waiting to be
+     squeezed between the wall and the ball. Hit it away instead. Latched, with
+     the exit well above the entry, because the two behaviours want opposite
+     things — one drives at the ball, the other retreats from it — and a
+     boundary they could flip across is exactly how the earlier oscillations
+     worked. Clearing is self-resolving anyway: a successful clear moves the
+     ball away and the condition stops holding. */
+  if (ai.clearing) {
+    if (depth > safe * 1.35) ai.clearing = false;
+  } else if (depth < safe && !ai.recovering) {
+    ai.clearing = true; ai.clock = plan.dur;
   }
 
   ai.clock += dt;
