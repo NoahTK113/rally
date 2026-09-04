@@ -33,12 +33,13 @@ const AI = {
   commit:   0.20,     // s — how long a stroke runs before it is reconsidered
   accuracy: 0.85,     // 0..1 — 1 aims exactly, 0 is hopeless
   switchTime: 0.35,   // s — deliberation before committing to the other paddle
+  wheelRate: 12,      // wheel clicks per second — the hand's actual limit
 };
 
 const AI_LEVELS = {
-  easy:   { reaction: 0.34, commit: 0.30, accuracy: 0.55, switchTime: 0.70 },
-  normal: { reaction: 0.18, commit: 0.20, accuracy: 0.85, switchTime: 0.35 },
-  hard:   { reaction: 0.09, commit: 0.12, accuracy: 0.97, switchTime: 0.16 },
+  easy:   { reaction: 0.34, commit: 0.30, accuracy: 0.55, switchTime: 0.70, wheelRate: 7 },
+  normal: { reaction: 0.18, commit: 0.20, accuracy: 0.85, switchTime: 0.35, wheelRate: 12 },
+  hard:   { reaction: 0.09, commit: 0.12, accuracy: 0.97, switchTime: 0.16, wheelRate: 18 },
 };
 
 const AI_HIST = 256;          // ticks of ball history, for delayed perception
@@ -68,6 +69,9 @@ const ai = {
   world: null,          // scratch world for prediction
   clock: 0,             // seconds elapsed inside the current plan
   has: false,
+  wheel: 0,             // the hand's accumulated angle, exactly like intent.ta
+  wheelSet: false,
+  clicks: 0,            // fractional wheel budget carried between ticks
   sel: 0, wantSel: 0, selHeld: 0,
 };
 
@@ -75,6 +79,7 @@ function aiInit(side) {
   ai.side = side;
   ai.head = 0; ai.filled = 0;
   ai.clock = 0; ai.has = false;
+  ai.wheel = 0; ai.wheelSet = false; ai.clicks = 0;
   ai.wantSel = ai.sel = 0;
   ai.selHeld = 0;
   if (!ai.hist) {
@@ -94,6 +99,7 @@ function aiSetLevel(name) {
   AI.commit = L.commit;
   AI.accuracy = L.accuracy;
   AI.switchTime = L.switchTime;
+  AI.wheelRate = L.wheelRate;
   try { localStorage.setItem('banjoball.ai', name); } catch (e) {}
 }
 
@@ -269,6 +275,37 @@ function aiShot(hit, side, curA, errAim, errAng) {
   return { dirx, diry, a: aiNearAngle(a + errAng, curA) };
 }
 
+/* A hand cannot dial in an arbitrary angle. The wheel moves in detents and
+   only so many per second, and every value it can produce is a multiple of the
+   active step. The path asks for a smooth real-valued angle; this turns that
+   intent into the discrete, rate-limited stream a wrist can actually make.
+
+   Without it the AI emitted angles no wheel could generate — a strike needing
+   a quarter turn inside 30ms works out at some three thousand degrees a
+   second, continuously, which is what read as the mouse spinning impossibly.
+
+   The grid-snap is copied deliberately from the wheel handler rather than
+   approximated: same rounding, same one-notch advance, so the AI can only ever
+   sit on angles a player could also have reached.
+
+   Coarse while far, fine for the last stretch — the choice a player makes
+   without thinking about it. */
+function aiWheel(desired, dt) {
+  ai.clicks = Math.min(ai.clicks + AI.wheelRate * dt, 2);   // no saved-up bursts
+  const budget = Math.floor(ai.clicks);
+  if (budget < 1) return ai.wheel;
+
+  const err = desired - ai.wheel;
+  const step = Math.abs(err) >= STEP_COARSE ? STEP_COARSE : STEP_FINE;
+  const notches = Math.round(err / step);
+  if (notches === 0) return ai.wheel;
+
+  const use = Math.min(budget, Math.abs(notches));
+  ai.clicks -= use;
+  ai.wheel = (Math.round(ai.wheel / step) + Math.sign(notches) * use) * step;
+  return ai.wheel;
+}
+
 /* Build the stroke for the next stretch of time. Every path starts at the
    paddle's LIVE pose - never at where the last plan assumed it would end up,
    or the staircase reappears at plan boundaries. */
@@ -415,7 +452,13 @@ function aiFillInput(w, side, dst, dt) {
   // their own hand rather than for the mouse.
   let tx = px + vx * aiPosLag();
   let ty = py + vy * aiPosLag();
-  let ta = pa + vw * aiAngLag();
+
+  /* The path's angle is what the AI WANTS; the wheel is what it can actually
+     do. The plan's angular rates are advisory from here on — a stroke needing
+     a big turn now has to be started early enough for the hand to get there,
+     which is exactly why APPROACH pre-rotates half way. */
+  if (!ai.wheelSet) { ai.wheel = w.p[idOf(side, ai.sel)].a; ai.wheelSet = true; }
+  let ta = aiWheel(pa + vw * aiAngLag(), dt);
 
   /* EFFICIENCY, not saturation. stepPaddle clamps position error to maxError,
      so the pull is already at its limit there - holding the target further out
@@ -435,7 +478,7 @@ function aiFillInput(w, side, dst, dt) {
   } else ai.sel = 0;
 
   // One non-finite number would hand the spring an impossible target.
-  if (!isFinite(tx) || !isFinite(ty) || !isFinite(ta)) { tx = p.x; ty = p.y; ta = p.a; }
+  if (!isFinite(tx) || !isFinite(ty) || !isFinite(ta)) { tx = p.x; ty = p.y; ta = ai.wheel = p.a; }
 
   dst.sel = ai.sel;
   dst.tx = tx; dst.ty = ty; dst.ta = ta;
