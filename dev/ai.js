@@ -43,7 +43,10 @@ const AI_LEVELS = {
 const AI_HIST = 128;          // ticks of ball history, for delayed perception
 const AI_PRED_DT = 1 / 120;   // coarser than the sim: prediction is cheap, and
                               // half a tick of error is far below the aim error
-const AI_PRED_MAX = 2.6;      // s to look ahead before giving up
+const AI_PRED_MAX = 4.0;      // s to look ahead before giving up. A wider
+                              // court under lower gravity means longer flights,
+                              // and a horizon shorter than the flight makes the
+                              // AI believe nothing is coming.
 
 const ai = {
   side: -1,
@@ -101,9 +104,10 @@ function aiPerceived(dt) {
   return ai.hist[((ai.head - 1 - back) % AI_HIST + AI_HIST) % AI_HIST];
 }
 
-/* Launch angle to land at (tx,ty) from (px,py) at speed s under gravity g.
-   Two solutions exist when the target is reachable; the flatter one is chosen
-   because a low ball is harder to answer and spends less time in the air.
+/* Launch angles that land at (tx,ty) from (px,py) at speed s under gravity g.
+   BOTH solutions are returned. The flat one is the better shot — less time in
+   the air to answer — but it is also the one that hits the net, and which of
+   those matters depends on geometry the solver cannot see. The caller decides.
    Returns null when the target is out of range at that speed. */
 function aiLaunchAngle(px, py, tx, ty, s, g) {
   const dx = tx - px, dy = ty - py;
@@ -112,8 +116,45 @@ function aiLaunchAngle(px, py, tx, ty, s, g) {
   const s2 = s * s;
   const disc = s2 * s2 - g * (g * x * x + 2 * dy * s2);
   if (disc < 0) return null;                       // cannot reach
-  const theta = Math.atan((s2 - Math.sqrt(disc)) / (g * x));
-  return { theta, sign: Math.sign(dx) };
+  const root = Math.sqrt(disc);
+  return { sign: Math.sign(dx),
+           low:  Math.atan((s2 - root) / (g * x)),
+           high: Math.atan((s2 + root) / (g * x)) };
+}
+
+/* Where a shot passes over the net, and whether that is above it. The net was
+   short relative to the court when the flat shot was chosen unconditionally;
+   it no longer is, so a shot picked purely for being fast now spends its life
+   thudding into the net from the AI's own half. */
+function aiClearsNet(px, py, theta, s, g, dx) {
+  const dxn = A.width / 2 - px;
+  if (dxn * dx <= 0 || Math.abs(dxn) > Math.abs(dx)) return true;   // not in the way
+  const X = Math.abs(dxn), c = Math.cos(theta);
+  if (Math.abs(c) < 1e-6) return true;                              // straight up
+  const y = py + X * Math.tan(theta) - g * X * X / (2 * s * s * c * c);
+  return y > A.netHeight + PHYS.ballR * 1.5;
+}
+
+/* Roughly how fast a paddle travels once it is up to speed. The position
+   spring clamps its error, so the pull is constant beyond that distance and
+   the paddle settles at a terminal velocity rather than accelerating without
+   limit. Derived from the tuning rather than measured, so it stays honest when
+   the feel is retuned. */
+function aiPaddleTopSpeed() {
+  const w = 2 * Math.PI * FEEL.posFreq;
+  const maxE = Math.min(FEEL.maxError, FEEL.reach);
+  return Math.max(0.5, w * maxE / (2 * FEEL.posDamp));
+}
+
+// Can either of this side's paddles actually be there in time?
+function aiCanReach(w, side, hit) {
+  const v = aiPaddleTopSpeed();
+  let near = Infinity;
+  for (let i = 0; i < (MATCH.paddles > 1 ? 2 : 1); i++) {
+    const p = w.p[idOf(side, i)];
+    near = Math.min(near, Math.hypot(hit.x - p.x, hit.y - p.y));
+  }
+  return near / v + 0.12 <= hit.t;      // the constant is the spring's ramp-up
 }
 
 /* The paddle angle that turns an incoming velocity into a desired outgoing
@@ -153,16 +194,25 @@ function aiPredict(w, side) {
     lo = Math.min(lo, bx.x0); hi = Math.max(hi, bx.x1);
   }
 
+  /* The ball is in reach for a stretch of its crossing, not an instant, so
+     there is a choice of where along it to meet the ball. Taking the earliest
+     point means committing to an intercept the paddle often cannot make — it
+     sets off, arrives late, and does it again next plan. Take the first point
+     it can actually be at instead, and fall back to the earliest only when
+     none of them is reachable, since arriving late still beats not going. */
+  let first = null;
   const steps = Math.floor(AI_PRED_MAX / AI_PRED_DT);
   for (let i = 0; i < steps; i++) {
     stepBall(pw, AI_PRED_DT, true, true);          // world collisions, no paddles
     const towardUs = side < 0 ? b.vx < 0 : b.vx > 0;
     if (towardUs && b.x >= lo && b.x <= hi) {
-      return { x: b.x, y: b.y, vx: b.vx, vy: b.vy, t: i * AI_PRED_DT };
+      const cand = { x: b.x, y: b.y, vx: b.vx, vy: b.vy, t: i * AI_PRED_DT };
+      if (!first) first = cand;
+      if (aiCanReach(w, side, cand)) return cand;
     }
     if (b.x < -A.goalDepth || b.x > A.width + A.goalDepth) break;
   }
-  return null;
+  return first;
 }
 
 // Station in front of our own goal, on the court.
@@ -189,12 +239,28 @@ function aiPlan(w, side) {
   const spread = (goalY1() - goalY0()) * 0.5 + 1.5;
   const aimY = goalMid + (Math.random() * 2 - 1) * spread * err;
 
-  const speed = Math.max(4, Math.hypot(hit.vx, hit.vy) * 1.15);
+  /* An estimate of how fast the ball will leave, not a speed the AI can pick —
+     it only chooses where the face points. The floor is the speed that carries
+     half the court at 45 degrees, so a slow ball still gets aimed at the goal
+     rather than at an impossible solution. */
+  const floor = Math.sqrt(Math.max(1, A.width * 0.5 * PHYS.gravity));
+  const speed = Math.max(floor, Math.hypot(hit.vx, hit.vy) * 1.15);
   const shot = aiLaunchAngle(hit.x, hit.y, goalX, aimY, speed, PHYS.gravity);
 
   let dirx, diry;
-  if (shot) { dirx = shot.sign * Math.cos(shot.theta); diry = Math.sin(shot.theta); }
-  else { dirx = side < 0 ? 1 : -1; diry = 0.35; }   // out of range: just clear it
+  if (shot) {
+    // Flat when it clears the net, lofted when it does not.
+    let theta = shot.low;
+    if (!aiClearsNet(hit.x, hit.y, theta, speed, PHYS.gravity, goalX - hit.x)) theta = shot.high;
+    dirx = shot.sign * Math.cos(theta);
+    diry = Math.sin(theta);
+  } else {
+    /* Nothing reaches the goal at this speed. Send it as far as it will go
+       instead of at a fixed shallow slope that dies in the net: 45 degrees is
+       the maximum-range launch, and clears comfortably. */
+    dirx = (side < 0 ? 1 : -1) * Math.SQRT1_2;
+    diry = Math.SQRT1_2;
+  }
 
   let ta = aiPaddleAngleFor(hit.vx, hit.vy, dirx, diry);
   if (ta === null) ta = 0;
