@@ -222,9 +222,9 @@
   </div>
 </div>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v12.2-dev"></script>
-<script src="ai.js?v=v12.2-dev"></script>
-<script src="tutorial.js?v=v12.2-dev"></script>
+<script src="audio.js?v=v12.3-dev"></script>
+<script src="ai.js?v=v12.3-dev"></script>
+<script src="tutorial.js?v=v12.3-dev"></script>
 <script>
 'use strict';
 
@@ -1999,6 +1999,17 @@ function startGame(asTutorial) {
      after the first has an id below the mark and is silently dropped. */
   lastEventSeen = 0;
 
+  /* Everything that outlives a match, cleared in one place. Each of these
+     lives somewhere sensible for the rest of the time — which is exactly why
+     they get missed: nothing about a fresh world touches them. */
+  frozen = false; stepOnce = false;        // the P and . debug keys
+  aiInit(-mySide);                         // ball history and plan from last time
+  for (const k of ['-1', '1']) liveInput[k].rdy = 0;
+  /* The input ring is allocated once and reused. Tick numbers restart at zero
+     with every match, so a stale record could in principle answer to a tick
+     number it never belonged to; marking them all unused costs nothing. */
+  if (client.inputs) for (let i = 0; i < client.inputs.length; i++) client.inputs[i].tick = -1;
+
   intent.sel = 0;
   intent.rdy = 0;
   const mine = paddles[idOf(mySide, 0)];
@@ -2150,7 +2161,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v12.2-dev';
+const BUILD = 'v12.3-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2278,6 +2289,7 @@ function serverStart(soloish) {
   for (const side of [-1, 1]) {
     const k = String(side), p = w.p[idOf(side, 0)];
     server.inputs[k].sel = 0;
+    server.inputs[k].rdy = 0;      // or the last match's click starts this one
     server.inputs[k].tx = p.x;
     server.inputs[k].ty = p.y;
     server.inputs[k].ta = p.a;

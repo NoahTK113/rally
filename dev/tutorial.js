@@ -80,6 +80,10 @@ function tutStart() {
   tut.step = 0;
   tut.held = tut.moved = tut.turned = tut.fine = 0;
   tut.switched = tut.hits = tut.goals = 0;
+  /* Quitting part-way leaves the step you were on marked as entered, and its
+     enter() would then be skipped next time round — for the hitting step that
+     means no ball is ever served. */
+  for (const s of STEPS) s.entered = false;
   document.body.classList.add('tutorial');
   paintTutorial();
 }
