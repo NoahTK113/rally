@@ -113,7 +113,6 @@
   #tutDots i.on{background:#22d3ee}
   #tutDots i.past{background:#2f5c6b}
   body.playing:not(.locked) #lockHint{display:block}
-  body.playing.waiting #lockHint{display:block}
 
   #setup .msg{margin-top:13px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:16px}
   #menu .card{width:340px;padding:26px 26px 22px;border:1px solid #1d2939;border-radius:14px;
@@ -157,7 +156,7 @@
   <input id="volPlay" type="range" min="0" max="1" step="0.05" value="0.7">
   <span class="v" id="volPlayVal">70</span>
 </div>
-<div id="lockHint"><span id="lockMain">CLICK TO START</span><small id="lockSub">&nbsp;</small></div>
+<div id="lockHint">CLICK TO CAPTURE THE MOUSE<small>controls are disabled until you do</small></div>
 <div id="tut">
   <div id="tutText"></div>
   <div id="tutHint"></div>
@@ -222,9 +221,9 @@
   </div>
 </div>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v12.0"></script>
-<script src="ai.js?v=v12.0"></script>
-<script src="tutorial.js?v=v12.0"></script>
+<script src="audio.js?v=v12.1"></script>
+<script src="ai.js?v=v12.1"></script>
+<script src="tutorial.js?v=v12.1"></script>
 <script>
 'use strict';
 
@@ -256,6 +255,7 @@ const FEEL = {
   posDamp   : 1.90,   // 1.0 = critically damped
   angFreq   : 9.0,    // Hz
   angDamp   : 1.65,
+  keyRate   : 220,    // degrees/sec for A and D
   maxError  : 0.75,   // metres. The proportional term is clamped to this, so
                       // the spring has the SAME authority everywhere — in open
                       // space a distant cursor no longer buys extra force that
@@ -277,6 +277,7 @@ const FEEL = {
    one, so switching between them never strands the paddle between grids. */
 const STEP_COARSE = 30.0 * Math.PI / 180;   // 90 / 3
 const STEP_FINE   =  7.5 * Math.PI / 180;   // 90 / 12, and exactly a quarter of coarse
+const FINE_DIV    = STEP_COARSE / STEP_FINE;
 
 /* Which paddle THIS browser drives. The host takes blue (+1) and the joining
    player takes red (-1); solo play is blue. Everything else keys off the side
@@ -568,9 +569,9 @@ const USE_POINTER_LOCK = true;
 const MOUSE = { sens: 1 };
 let pointerLocked = false;
 
-const intent = { sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 };  // what the player wants, live
-const liveInput = { '-1': { sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 },
-                    '1':  { sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 } };
+const intent = { sel: 0, tx: 0, ty: 0, ta: 0 };  // what the player wants, live
+const liveInput = { '-1': { sel: 0, tx: 0, ty: 0, ta: 0 },
+                    '1':  { sel: 0, tx: 0, ty: 0, ta: 0 } };
 
 /* The paddle the player is holding RIGHT NOW, per their intent — not per the
    simulation, which only learns about a switch on the next tick. Anything on
@@ -595,20 +596,15 @@ function clampCursor() {
 }
 
 function captureInto(dst, dt) {
-  /* Before the whistle the cursor is pinned to the paddle rather than merely
-     ignored. Letting it wander while the count runs would mean the paddle
-     lunges for wherever it ended up the instant control returns — the player
-     would start the round already out of position, through no action of
-     their own. */
-  if (world.phase === PHASE.READY || world.phase === PHASE.COUNT) {
-    const p = heldPaddle();
-    placeCursor(p.x, p.y);
-    intent.tx = p.x; intent.ty = p.y; intent.ta = p.a;
-  } else if (controlsLive()) {
+  if (controlsLive()) {
     clampCursor();
     intent.tx = cursor.x; intent.ty = cursor.y;
+    let rot = 0;
+    if (keys.has('a')) rot += 1;
+    if (keys.has('d')) rot -= 1;
+    if (rot) intent.ta += rot * FEEL.keyRate * (fineRotate ? 1 / FINE_DIV : 1) * DEG * dt;
   }
-  dst.sel = intent.sel; dst.rdy = intent.rdy;
+  dst.sel = intent.sel;
   dst.tx = intent.tx; dst.ty = intent.ty; dst.ta = intent.ta;
 }
 
@@ -765,7 +761,7 @@ function makeBall() {
      announce  "<TEAM> TEAM SCORED" for two seconds
      count     3 - 2 - 1, then the tip-off drops */
 const PHASE = { PLAY: 'play', EXIT: 'exit', ANNOUNCE: 'announce',
-                COUNT: 'count', WIN: 'win', HOLD: 'hold', READY: 'ready' };
+                COUNT: 'count', WIN: 'win', HOLD: 'hold' };
 const ANNOUNCE_T = 2.0;
 const WIN_T      = 4.0;          // how long the result stands before the lobby
 const COUNT_T    = 3.0;
@@ -1543,34 +1539,6 @@ function drawHud() {
   }
 
   drawAnnouncement();
-  paintLockHint();
-}
-
-/* The banner says what the click will actually do, which changes: before the
-   match it starts it, and mid-match it only takes the mouse back. Once ready
-   it stays up to say who is being waited on, so a player who has done their
-   part is not left looking at a still screen wondering. */
-function paintLockHint() {
-  if (!running) { document.body.classList.remove('waiting'); return; }
-  const twoPlayer = net.role === 'host' || net.role === 'guest';
-  const ready = world.phase === PHASE.READY;
-  const waiting = ready && intent.rdy === 1;
-  document.body.classList.toggle('waiting', waiting);
-
-  let main, sub;
-  if (waiting) {
-    main = 'WAITING FOR THE OTHER PLAYER';
-    sub  = 'they still have to click in';
-  } else if (ready) {
-    main = twoPlayer ? 'CLICK TO READY UP' : 'CLICK TO START';
-    sub  = twoPlayer ? 'the match starts once you both have'
-                     : 'the countdown starts when you do';
-  } else {
-    main = 'CLICK TO CAPTURE THE MOUSE';
-    sub  = 'controls are disabled until you do';
-  }
-  if ($('lockMain').textContent !== main) $('lockMain').textContent = main;
-  if ($('lockSub').textContent !== sub)   $('lockSub').textContent = sub;
 }
 
 function drawAnnouncement() {
@@ -1689,11 +1657,7 @@ document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === canvas;
   document.body.classList.toggle('locked', pointerLocked);
   // Take hold starting from the paddle, so control can never begin adrift.
-  if (pointerLocked && running) {
-    const np = heldPaddle();
-    placeCursor(np.x, np.y);
-    intent.rdy = 1;          // the click that captures the mouse is the ready
-  }
+  if (pointerLocked && running) { const np = heldPaddle(); placeCursor(np.x, np.y); }
 });
 document.addEventListener('pointerlockerror', () => { pointerLocked = false; });
 let fineRotate = false;   // right mouse button held
@@ -1727,7 +1691,7 @@ addEventListener('keydown', e => {
      through transport ends and each end is tagged with the side it drives, so
      switching means retagging our end — the simulation needs no notion of a
      player changing seats. */
-  if (!controlsLive() && (k === ' ' || k === 'tab')) return;
+  if (!controlsLive() && (k === ' ' || k === 's' || k === 'tab')) return;
 
   if (k === 'tab' && net.role === 'solo') {
     mySide = -mySide;
@@ -1756,6 +1720,7 @@ addEventListener('keydown', e => {
     intent.tx = np.x; intent.ty = np.y; intent.ta = np.a;
     tutOnSwitch();
   }
+  if (k === 's') intent.ta = 0;
   if (k === '[') setSens(MOUSE.sens - 0.05);   // capture blocks the slider,
   if (k === ']') setSens(MOUSE.sens + 0.05);   // so keys work mid-match too
   if (k === 'escape') { leaveGame(); return; }
@@ -1778,6 +1743,7 @@ const KNOBS = [
   { o: FEEL, k: 'posDamp',    label: 'pos damp',   min: 0.2, max: 8,   step: 0.02, u: 'z'  },
   { o: FEEL, k: 'angFreq',    label: 'ang freq',   min: 1,   max: 30,  step: 0.1,  u: 'Hz' },
   { o: FEEL, k: 'angDamp',    label: 'ang damp',   min: 0.2, max: 8,   step: 0.02, u: 'z'  },
+  { o: FEEL, k: 'keyRate',    label: 'key rate',   min: 30,  max: 720, step: 10,   u: '°/s' },
   { o: FEEL, k: 'maxError',   label: 'max error',  min: 0.05,max: 3,   step: 0.05, u: 'm'   },
   { o: FEEL, k: 'reach',      label: 'reach',      min: 0,   max: 3,   step: 0.05, u: 'm'   },
   { o: A,    k: 'paddleLength', label: 'length',   min: 0.4, max: 3,   step: 0.05, u: 'm' },
@@ -1866,7 +1832,7 @@ function buildPanel() {
 
 document.getElementById('help').innerHTML =
   '<b>mouse</b> move &nbsp; <b>wheel</b> rotate &nbsp; ' +
-  '<b>hold right-click</b> fine rotate<br>' +
+  '<b>hold right-click</b> fine rotate &nbsp; <b>S</b> level<br>' +
   '<b>click</b> capture mouse &nbsp; <b>space</b> switch paddle &nbsp; ' +
   '<b>[</b> <b>]</b> sensitivity<br>' +
   '<b>F</b> serve &nbsp; <b>R</b> reset score &nbsp; ' +
@@ -1894,15 +1860,10 @@ function stepWorld(w, inp, dt) {
   w.tick++;
   for (const side of [-1, 1]) {
     const k = String(side);
-    /* Nobody steers until the count reaches zero. A null input is exactly
-       what an unheld paddle already gets, so the springs still run and the
-       paddle holds its place — it is unmanned, not suspended. */
-    const noCtl = w.phase === PHASE.READY || w.phase === PHASE.COUNT;
-    const sel = noCtl ? (w.sel[k] | 0)
-                      : (MATCH.paddles === 1 ? 0 : ((inp[k].sel | 0) & 1));
+    const sel = MATCH.paddles === 1 ? 0 : ((inp[k].sel | 0) & 1);
     w.sel[k] = sel;
-    stepPaddle(w.p[idOf(side, 0)], !noCtl && sel === 0 ? inp[k] : null, dt);
-    if (MATCH.paddles > 1) stepPaddle(w.p[idOf(side, 1)], !noCtl && sel === 1 ? inp[k] : null, dt);
+    stepPaddle(w.p[idOf(side, 0)], sel === 0 ? inp[k] : null, dt);
+    if (MATCH.paddles > 1) stepPaddle(w.p[idOf(side, 1)], sel === 1 ? inp[k] : null, dt);
   }
 
   if (w.phase === PHASE.PLAY) {
@@ -1966,11 +1927,6 @@ function startGame(asTutorial) {
      advantage. */
   const fresh = makeWorld();
   copyWorld(world, fresh);
-  /* Start the predicted world in the same phase the server will report. A
-     fresh world defaults to PLAY, and the first snapshot is a fraction of a
-     second away — long enough for the banner to read wrong and for a mouse
-     movement to reach a paddle that is supposed to be still. */
-  if (!asTutorial) world.phase = PHASE.READY;
 
   /* The audio marker is a high-water mark over world.evCount, and a new game
      restarts that counter at zero — so without this every event in every match
@@ -1978,7 +1934,6 @@ function startGame(asTutorial) {
   lastEventSeen = 0;
 
   intent.sel = 0;
-  intent.rdy = 0;
   const mine = paddles[idOf(mySide, 0)];
   placeCursor(mine.x, mine.y);
   intent.tx = mine.x; intent.ty = mine.y; intent.ta = mine.a;
@@ -2128,7 +2083,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v12.0';
+const BUILD = 'v12.1';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2171,7 +2126,7 @@ function pumpEvents() {
    the other side of the country. That is the whole point: the host gets no
    privileged path to its own server.
    ========================================================================== */
-const PHASES = ['play', 'exit', 'announce', 'count', 'win', 'hold', 'ready'];
+const PHASES = ['play', 'exit', 'announce', 'count', 'win', 'hold'];
 
 /* Inputs are filed by the tick they belong to and applied at THAT tick, not
    whenever they happen to arrive. Otherwise the server runs a coarsened
@@ -2179,15 +2134,15 @@ const PHASES = ['play', 'exit', 'announce', 'count', 'win', 'hold', 'ready'];
    two disagree by about a tick of paddle travel — centimetres, on a flick. */
 function makeInputRing() {
   const r = new Array(HIST);
-  for (let i = 0; i < HIST; i++) r[i] = { tick: -1, sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 };
+  for (let i = 0; i < HIST; i++) r[i] = { tick: -1, sel: 0, tx: 0, ty: 0, ta: 0 };
   return r;
 }
 
 const server = {
   active: false,
   world: makeWorld(),
-  inputs: { '-1': { sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 },   // what the current tick uses
-            '1':  { sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 } },
+  inputs: { '-1': { sel: 0, tx: 0, ty: 0, ta: 0 },   // what the current tick uses
+            '1':  { sel: 0, tx: 0, ty: 0, ta: 0 } },
   buf: null,                                     // filed by tick, per side
   links: [],
   sendTick: 0,
@@ -2240,18 +2195,10 @@ function serverStart(soloish) {
     w.phase = PHASE.HOLD;      // nothing runs until the tutorial says so
     w.phaseT = 0;
   } else {
-    w.phase = PHASE.READY;
-    w.phaseT = 0;
+    w.phase = PHASE.COUNT;
+    w.phaseT = soloish ? 3 : 5;
   }
   w.ballHidden = true;
-
-  /* Who has to click in before the match starts. An AI seat and an empty
-     practice seat are ready by definition: there is nobody to wait for. This
-     is session configuration rather than world state, so it lives on the
-     server and never goes near the snapshot. */
-  server.need = { '-1': 0, '1': 0 };
-  server.need[String(mySide)] = 1;
-  if (net.role === 'host') server.need[String(-mySide)] = 1;
 
   for (const side of [-1, 1]) {
     const k = String(side), p = w.p[idOf(side, 0)];
@@ -2314,7 +2261,7 @@ function serverReceive(end, m) {
     const cell = buf[slot(T)];
     if (T > cell.tick) {
       cell.tick = T; cell.tx = e[1]; cell.ty = e[2]; cell.ta = e[3];
-      cell.sel = e[4] | 0; cell.rdy = e[5] | 0;
+      cell.sel = e[4] | 0;
     }
   }
 
@@ -2345,24 +2292,8 @@ function serverStepOnce(dt) {
     const dst = server.inputs[k];
     if (cell.tick === T) {
       dst.tx = cell.tx; dst.ty = cell.ty; dst.ta = cell.ta; dst.sel = cell.sel;
-      dst.rdy = cell.rdy;
     }
     else if (net.up && k === String(-mySide)) server.missed++;
-  }
-
-  /* Nothing begins until everyone playing has clicked in. Readiness rides in
-     the ordinary input record, so it arrives by the same path as everything
-     else and needs no message of its own. The transition is made here rather
-     than in stepWorld because it depends on who is in the session, which is
-     the server's business and not something a client could replay. */
-  if (server.world.phase === PHASE.READY) {
-    let all = true;
-    for (const k of ['-1', '1']) if (server.need[k] && !server.inputs[k].rdy) all = false;
-    if (all) {
-      server.world.phase = PHASE.COUNT;
-      server.world.phaseT = COUNT_T;
-      pushEvent(server.world, 'count', 5, A.width / 2);
-    }
   }
 
   stepWorld(server.world, server.inputs, dt);
@@ -2423,7 +2354,7 @@ function clientInitHistory() {
   client.inputs = new Array(HIST);
   client.states = new Array(HIST);
   for (let i = 0; i < HIST; i++) {
-    client.inputs[i] = { tick: -1, sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 };
+    client.inputs[i] = { tick: -1, sel: 0, tx: 0, ty: 0, ta: 0 };
     client.states[i] = makeWorld();
   }
 }
@@ -2633,7 +2564,7 @@ function clientStepOnce(dt) {
     for (let t = client.tick - INPUT_WINDOW + 1; t <= client.tick; t++) {
       if (t < 1) continue;
       const r = client.inputs[slot(t)];
-      if (r.tick === t) batch.push([t, r.tx, r.ty, r.ta, r.sel, r.rdy]);
+      if (r.tick === t) batch.push([t, r.tx, r.ty, r.ta, r.sel]);
     }
     if (batch.length) client.link.send({ t: 'in', k: ++client.inputTick, b: batch });
   }
