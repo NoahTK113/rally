@@ -43,7 +43,7 @@
 
   #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
-  #menu.hidden,#setup.hidden,#setupOwner.hidden,#setupWait.hidden{display:none}
+  #menu.hidden,#setup.hidden,#setupOwner.hidden{display:none}
   #setup{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;
          background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
   #setup .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
@@ -113,7 +113,6 @@
   #tutDots i.on{background:#22d3ee}
   #tutDots i.past{background:#2f5c6b}
   body.playing:not(.locked) #lockHint{display:block}
-  body.playing.waiting #lockHint{display:block}
 
   #setup .msg{margin-top:13px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:16px}
   #menu .card{width:340px;padding:26px 26px 22px;border:1px solid #1d2939;border-radius:14px;
@@ -182,10 +181,6 @@
       <div class="hint" id="ptHint">first to 7 goals</div>
       <button class="go" id="btnStart">START MATCH</button>
     </div>
-    <div id="setupWait" class="hidden">
-      <h1>WAITING FOR HOST</h1>
-      <div class="hint">The host is choosing the settings.</div>
-    </div>
     <div class="sens">
       <span>MOUSE</span>
       <input id="sensSetup" type="range" min="0.2" max="3" step="0.05" value="1">
@@ -204,12 +199,6 @@
     <h1>BANJOBALL</h1>
     <button id="btnTutorial">HOW TO PLAY</button>
     <button id="btnSolo">PRACTICE ALONE</button>
-    <button id="btnHost">HOST A GAME</button>
-    <div class="join">
-      <input id="codeIn" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false">
-      <button id="btnJoin">JOIN</button>
-    </div>
-    <div class="msg" id="netMsg"></div>
   </div>
 </div>
 <script>
@@ -231,9 +220,8 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v14.1-local"></script>
-<script src="tutorial.js?v=v14.1-local"></script>
+<script src="audio.js?v=v15.0-local"></script>
+<script src="tutorial.js?v=v15.0-local"></script>
 <script>
 'use strict';
 
@@ -307,18 +295,8 @@ const lineW = () => VIS.linePx / view.sDev;
 // looking the same weight as a marking.
 const contourW = () => (VIS.linePx * 2) / view.sDev;
 
-/* Match rules. Synced with the rest of the config, because both simulations
-   must agree on when a match ends or they would disagree about the result. */
+// Match rules.
 const MATCH = { target: 7, paddles: 2 };   // target 0 = endless
-
-/* Latency injected into the HOST's own link to its own server. The whole
-   point of a listen server is that we can raise the host's delay but can never
-   lower the guest's, so fairness means levelling the host down to match. */
-const NET = {
-  hostDelay: 25,      // ms one-way, used when autoDelay is off
-  autoDelay: true,    // otherwise track half the measured round trip
-  floor: 15,          // never below this, so practice resembles a real match
-};
 
 const PHYS = {
   gravity      : 5.20,   // m/s^2
@@ -548,8 +526,8 @@ function makePaddle(side, index) {
 
 /* INPUT is captured once per tick and stored, never read from inside the
    simulation. That is the whole point: re-running tick 400 must use tick 400's
-   input, not whatever the mouse is doing now. Without this, replay — and
-   therefore rollback — is impossible by construction. */
+   input, not whatever the mouse is doing now. It is what keeps the physics
+   from ever reaching out and touching an input device. */
 /* A VIRTUAL cursor in world units. Clamped to the same box the paddle target
    is clamped to, which does two things: it can never leave the field, and
    overshooting stops accumulating dead travel you would have to drag back. */
@@ -788,7 +766,8 @@ const EXIT_MAX_T = 1.5;          // fallback if the ball never clears the back
    THE WORLD
    Every value the simulation reads or writes lives here, in one object that
    can be copied wholesale. That is what makes save, compare and restore
-   possible — the three things rollback is built out of. Tuning constants
+   possible — which is what any AI, replay or analysis will want. Tuning
+   constants
    (A, FEEL, PHYS) stay outside: they are settings, not state.
    ========================================================================== */
 function makeWorld() {
@@ -805,10 +784,8 @@ function makeWorld() {
     ballHidden: false,
 
     /* Contacts worth hearing, recorded by the simulation rather than played
-       from it. The client re-simulates the last several ticks on every
-       snapshot, so anything that made a noise at the moment of collision would
-       make it several times per hit; ids let the audio layer skip what it has
-       already heard. */
+       from it, so nothing in the physics ever has to know that sound exists.
+       Ids let the audio layer play each contact exactly once. */
     evCount: 0,
     ev: Array.from({ length: EV_SLOTS },
                    () => ({ id: 0, kind: '', mag: 0, x: 0, side: 0 })),
@@ -834,7 +811,7 @@ const PADDLE_F = ['x', 'y', 'a', 'vx', 'vy', 'w', 'tx', 'ty', 'ta', 'px', 'py', 
 const BALL_F   = ['x', 'y', 'a', 'vx', 'vy', 'w', 'px', 'py', 'pa'];
 
 // Copies INTO an existing world rather than returning a new one, so the
-// aliases below stay valid forever and rollback allocates nothing.
+// aliases below stay valid forever and a copy allocates nothing.
 function copyWorld(dst, src) {
   dst.tick = src.tick;
   for (const id of PIDS) {
@@ -1578,24 +1555,15 @@ function drawHud() {
   paintLockHint();
 }
 
-/* The banner says what the click will actually do, which changes: before the
-   match it starts it, and mid-match it only takes the mouse back. Once ready
-   it stays up to say who is being waited on, so a player who has done their
-   part is not left looking at a still screen wondering. */
+/* The banner says what the click will actually do: before the match it starts
+   it, mid-match it only takes the mouse back. The third case — ready, and
+   waiting on somebody else — cannot happen any more. */
 function paintLockHint() {
-  if (!running) { document.body.classList.remove('waiting'); return; }
-  const twoPlayer = net.role === 'host' || net.role === 'guest';
-  const ready = world.phase === PHASE.READY;
-  const waiting = ready && intent.rdy === 1;
-  document.body.classList.toggle('waiting', waiting);
-
+  if (!running) return;
   let main, sub;
-  if (waiting) {
-    main = 'WAITING FOR THE OTHER PLAYER';
-    sub  = 'they still have to click in';
-  } else if (ready) {
-    main = twoPlayer ? 'CLICK TO READY UP' : 'CLICK TO START';
-    sub  = twoPlayer ? 'the match starts once you both have' : '';
+  if (world.phase === PHASE.READY) {
+    main = 'CLICK TO START';
+    sub  = '';
   } else {
     main = 'CLICK TO CAPTURE THE MOUSE';
     sub  = 'controls are disabled until you do';
@@ -1674,13 +1642,7 @@ function buildReadout() {
     `omega ${f(p.w / DEG, 1)} &deg;/s<br>` +
     `tip   ${f(Math.hypot(tip.vx, tip.vy))} m/s<br>` +
     `ball  ${f(Math.hypot(ball.vx, ball.vy))} m/s   spin ${f(ball.w / DEG, 0)} °/s<br>` +
-    `tick  srv ${server.active ? server.world.tick : '-'}   shown ${world.tick}<br>` +
-    `pred  lead ${client.leadMin}-${client.leadMax} / want ${client.ahead}   ` +
-    `drift ${client.drift}   replay ${client.replayed}<br>` +
-    `err   ball ${(client.errBall * 1000).toFixed(0)}mm   ` +
-    `mine ${(client.errMine * 1000).toFixed(0)}mm   ` +
-    `missed ${server.active ? server.missed : '-'}`;
-  client.leadMin = client.leadMax = 0;      // start a fresh window
+    `tick  ${world.tick}`;
   return out;
 }
 
@@ -1757,25 +1719,19 @@ addEventListener('keydown', e => {
   keys.add(k);
   if (k === 'p') frozen = !frozen;      // space now switches paddles
   if (k === '.') { stepOnce = true; frozen = true; }
-  /* Practice only: take over the other team. The server reaches its clients
-     through transport ends and each end is tagged with the side it drives, so
-     switching means retagging our end — the simulation needs no notion of a
-     player changing seats. */
+  /* Take over the other team. The simulation has no notion of a player
+     changing seats: whichever side mySide names is the one the mouse writes a
+     setpoint for. */
   if (!controlsLive() && (k === ' ' || k === 'tab')) return;
 
-  if (k === 'tab' && net.role === 'solo') {
+  /* Take the other team's paddles. It used to have to retag the transport end
+     that drove this seat; with one world there is nothing to tell but us. */
+  if (k === 'tab') {
     mySide = -mySide;
-    for (const l of server.links) if (l.kind === 'loopback') l.side = mySide;
-
-    // Inputs already filed belong to the side we just left; replaying them
-    // onto the new one would drive the wrong paddle for a few ticks.
-    for (let i = 0; i < client.inputs.length; i++) client.inputs[i].tick = -1;
-
     intent.sel = (world.sel[String(mySide)] | 0) & 1;
     const np = heldPaddle();
     placeCursor(np.x, np.y);
     intent.tx = np.x; intent.ty = np.y; intent.ta = np.a;
-    updateStatus();
   }
 
   if (k === ' ' && MATCH.paddles > 1) {
@@ -1793,8 +1749,8 @@ addEventListener('keydown', e => {
   if (k === '[') setSens(MOUSE.sens - 0.05);   // capture blocks the slider,
   if (k === ']') setSens(MOUSE.sens + 0.05);   // so keys work mid-match too
   if (k === 'escape') { leaveGame(); return; }
-  if (k === 'f') { if (server.active) resetRound(server.world, false); }
-  if (k === 'r') { if (server.active) resetRound(server.world, true); }
+  if (k === 'f') resetRound(world, false);
+  if (k === 'r') resetRound(world, true);
   if (k === 'v') opts.showVectors = !opts.showVectors;
   if (k === 'g') opts.showTarget = !opts.showTarget;
   if (k === 'h') { document.body.classList.toggle('debug'); resize(); }
@@ -1839,10 +1795,6 @@ const KNOBS = [
   { o: PHYS, k: 'paddleFriction', label: 'paddle grip', min: 0, max: 1.5, step: 0.01, u: '' },
   { o: PHYS, k: 'goalPull',    label: 'goal pull',   min: 0,    max: 80,  step: 1,    u: 'm/s²' },
 
-  ['LINK'],
-  { o: NET, k: 'hostDelay', label: 'host delay', min: 0, max: 200, step: 5, u: 'ms' },
-  { o: NET, k: 'floor',     label: 'delay floor',min: 0, max: 100, step: 5, u: 'ms' },
-
 
   ['RENDER'],
   { o: VIS, k: 'linePx', label: 'line width', min: 1, max: 8, step: 1,    u: 'px' },
@@ -1879,7 +1831,6 @@ function buildPanel() {
       k.o[k.k] = parseFloat(input.value);
       show();
       if (k.refit) resize();
-      sendConfig();          // keep the guest's tuning identical to the host's
     });
     k._sync = () => { input.value = k.o[k.k]; show(); };
     el.appendChild(wrap);
@@ -1918,9 +1869,8 @@ let frozen = false, stepOnce = false;
 onNewGame(() => { frozen = false; stepOnce = false; });
 let fps = 60, fpsAcc = 0, fpsN = 0;
 
-/* One tick. Reads nothing but the world and the inputs handed to it, so
-   running it twice on the same arguments gives the same answer — which is
-   what replay, and therefore rollback, requires. */
+/* One tick. Reads nothing but the world and the setpoints handed to it, so
+   running it twice on the same arguments gives the same answer. */
 function stepWorld(w, inp, dt) {
   w.tick++;
   for (const side of [-1, 1]) {
@@ -1983,6 +1933,28 @@ function stepWorld(w, inp, dt) {
    sitting on top of a game that is already running. */
 let running = false;
 
+/* One local tick: write the setpoints, advance the world. That is the whole
+   loop now.
+
+   The published build runs this twice over — once as an authoritative server
+   and once as a predicted client — and reconciles the two across a
+   deliberately delayed link, so neither player has a shorter path to the truth
+   than the other. That machinery is what fairness between two machines costs,
+   and it buys nothing when the only player is at this keyboard. */
+function stepLocal(dt) {
+  captureInto(liveInput[String(mySide)], dt);
+
+  /* The ready gate. It used to ask the server which seats still had to click
+     in; with one player the question answers itself. */
+  if (world.phase === PHASE.READY && intent.rdy) {
+    world.phase = PHASE.COUNT;
+    world.phaseT = COUNT_T;
+    pushEvent(world, 'count', 5, A.width / 2);
+  }
+
+  stepWorld(world, liveInput, dt);
+}
+
 function startGame(asTutorial) {
   if (running) return;
   running = true;
@@ -1992,17 +1964,11 @@ function startGame(asTutorial) {
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   resize();
 
-  /* Wire up server and client. A guest has only a client; anyone else also
-     runs the server, and reaches it over a delayed loopback so their path to
-     it looks like the guest's path — same code, same latency, no home
-     advantage. */
   const fresh = makeWorld();
   copyWorld(world, fresh);
-  /* Start the predicted world in the same phase the server will report. A
-     fresh world defaults to PLAY, and the first snapshot is a fraction of a
-     second away — long enough for the banner to read wrong and for a mouse
-     movement to reach a paddle that is supposed to be still. */
-  if (!asTutorial) world.phase = PHASE.READY;
+  world.ballHidden = true;
+  if (asTutorial) { world.phase = PHASE.HOLD;  world.phaseT = 0; }
+  else            { world.phase = PHASE.READY; world.phaseT = 0; }
 
   /* The audio marker is a high-water mark over world.evCount, and a new game
      restarts that counter at zero — so without this every event in every match
@@ -2021,17 +1987,6 @@ function startGame(asTutorial) {
   }
 
   if (asTutorial) tutStart(); else tutStop();
-
-  if (net.role === 'guest') {
-    serverStop();
-    clientAttach(net.link);
-  } else {
-    serverStart(net.role === 'solo');
-    const pair = makeLoopbackPair();
-    serverAttach(pair[0], mySide);
-    clientAttach(pair[1]);
-    if (net.role === 'host' && net.link) serverAttach(net.link, -mySide);
-  }
 
   last = performance.now() / 1000;   // no giant first dt
   accumulator = 0;
@@ -2052,8 +2007,6 @@ function endMatch() {
   releaseMouse();
   running = false;
   document.body.classList.remove('playing');
-  serverStop();
-  client.link = null;
   showSetup();
 }
 
@@ -2061,8 +2014,6 @@ function stopGame() {
   releaseMouse();
   tutStop();
   running = false;
-  serverStop();
-  client.link = null;
   document.body.classList.remove('playing');
   showMenu();
 }
@@ -2070,16 +2021,8 @@ function stopGame() {
 // Tear everything down and go back to the menu. Destroying the peer also
 // releases the room code so it can be handed out again.
 function leaveGame() {
-  if (net.conn) { try { net.conn.close(); } catch (e) {} }
-  if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
-  net.conn = null;
-  net.peer = null;
-  net.up = false;
-  net.role = 'solo';
   mySide = 1;
-  updateStatus();
   stopGame();
-  setMsg('');
 }
 
 function frame(nowMs) {
@@ -2104,28 +2047,15 @@ function frame(nowMs) {
   if (!frozen) {
     accumulator += dt;
     while (accumulator >= FIXED_DT && steps < MAX_STEPS) {
-      simClock++;
-      pumpLinks();
-      serverStepOnce(FIXED_DT);
-      clientStepOnce(FIXED_DT);
+      stepLocal(FIXED_DT);
       accumulator -= FIXED_DT; steps++;
     }
     if (steps >= MAX_STEPS) accumulator = 0;
   } else if (stepOnce) {
-    simClock++;
-    pumpLinks();
-    serverStepOnce(FIXED_DT);
-    clientStepOnce(FIXED_DT);
+    stepLocal(FIXED_DT);
     steps = 1; stepOnce = false; accumulator = 0;
   }
   stepsLastFrame = steps;
-
-  // Config is re-sent periodically because the channel is unreliable by
-  // design; everything else is sent by the server and client modules.
-  if (net.up && net.role === 'host') {
-    netAcc += dt;
-    if (netAcc >= 1) { netAcc = 0; sendConfig(); }
-  }
 
   pumpEvents();
   pumpTutorial(dt);
@@ -2160,7 +2090,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v14.1-local';
+const BUILD = 'v15.0-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2194,625 +2124,7 @@ function pumpEvents() {
 }
 
 
-/* ==========================================================================
-   SERVER
-   Owns the authoritative world. Free-running: it ticks on its own clock and
-   never waits for a packet, because waiting is lockstep and lockstep is
-   hostage to the slowest connection. When a player's input has not arrived,
-   the last one is assumed to still be held.
-
-   It reaches its clients only through transport ends, so it cannot tell which
-   one is the loopback on this very machine and which is a WebRTC channel on
-   the other side of the country. That is the whole point: the host gets no
-   privileged path to its own server.
-   ========================================================================== */
-const PHASES = ['play', 'exit', 'announce', 'count', 'win', 'hold', 'ready'];
-
-/* Inputs are filed by the tick they belong to and applied at THAT tick, not
-   whenever they happen to arrive. Otherwise the server runs a coarsened
-   version of the player's movement that the client cannot reproduce, and the
-   two disagree by about a tick of paddle travel — centimetres, on a flick. */
-function makeInputRing() {
-  const r = new Array(HIST);
-  for (let i = 0; i < HIST; i++) r[i] = { tick: -1, sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 };
-  return r;
-}
-
-const server = {
-  active: false,
-  world: makeWorld(),
-  inputs: { '-1': { sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 },   // what the current tick uses
-            '1':  { sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 } },
-  buf: null,                                     // filed by tick, per side
-  links: [],
-  sendTick: 0,
-  missed: 0,                                     // ticks with nothing on file
-};
-
-// 31 numbers. Named packing rather than JSON of the world so the wire format
-// is explicit and cheap to widen later.
-function packWorld(w) {
-  const a = [w.tick, PHASES.indexOf(w.phase), w.phaseT, w.lastScorer,
-             w.ballHidden ? 1 : 0, w.scores['-1'], w.scores['1'],
-             w.sel['-1'], w.sel['1'], w.evCount,
-             w.ball.x, w.ball.y, w.ball.a, w.ball.vx, w.ball.vy, w.ball.w];
-  for (const id of PIDS) {
-    const p = w.p[id];
-    a.push(p.x, p.y, p.a, p.vx, p.vy, p.w, p.tx, p.ty, p.ta);
-  }
-  return a;
-}
-
-function unpackWorld(w, a) {
-  let i = 0;
-  w.tick = a[i++];
-  w.phase = PHASES[a[i++]];
-  w.phaseT = a[i++];
-  w.lastScorer = a[i++];
-  w.ballHidden = !!a[i++];
-  w.scores['-1'] = a[i++];
-  w.scores['1'] = a[i++];
-  w.sel['-1'] = a[i++];
-  w.sel['1'] = a[i++];
-  w.evCount = a[i++];
-  const b = w.ball;
-  b.x = a[i++]; b.y = a[i++]; b.a = a[i++];
-  b.vx = a[i++]; b.vy = a[i++]; b.w = a[i++];
-  b.px = b.x; b.py = b.y; b.pa = b.a;      // no render lerp across a snapshot
-  for (const id of PIDS) {
-    const p = w.p[id];
-    p.x = a[i++]; p.y = a[i++]; p.a = a[i++];
-    p.vx = a[i++]; p.vy = a[i++]; p.w = a[i++];
-    p.tx = a[i++]; p.ty = a[i++]; p.ta = a[i++];
-    p.px = p.x; p.py = p.y; p.pa = p.a;
-  }
-}
-
-function serverStart(soloish) {
-  const w = server.world;
-  copyWorld(w, makeWorld());
-  if (tut.active) {
-    w.phase = PHASE.HOLD;      // nothing runs until the tutorial says so
-    w.phaseT = 0;
-  } else {
-    w.phase = PHASE.READY;
-    w.phaseT = 0;
-  }
-  w.ballHidden = true;
-
-  /* Who has to click in before the match starts. An empty practice seat is
-     ready by definition: there is nobody to wait for. This
-     is session configuration rather than world state, so it lives on the
-     server and never goes near the snapshot. */
-  server.need = { '-1': 0, '1': 0 };
-  server.need[String(mySide)] = 1;
-  if (net.role === 'host') server.need[String(-mySide)] = 1;
-
-  for (const side of [-1, 1]) {
-    const k = String(side), p = w.p[idOf(side, 0)];
-    server.inputs[k].sel = 0;
-    server.inputs[k].rdy = 0;      // or the last match's click starts this one
-    server.inputs[k].tx = p.x;
-    server.inputs[k].ty = p.y;
-    server.inputs[k].ta = p.a;
-  }
-  server.buf = { '-1': makeInputRing(), '1': makeInputRing() };
-  server.links.length = 0;
-  server.sendTick = 0;
-  server.missed = 0;
-  server.active = true;
-}
-
-function serverStop() {
-  server.active = false;
-  server.links.length = 0;
-}
-
-// A client connected. `side` says which paddle it drives.
-function serverAttach(end, side) {
-  end.side = side;
-  // The channel also carries config and housekeeping, so anything that is not
-  // game input has to fall through to the general handler.
-  const forServer = { 'in': 1, 'png': 1, 'spong': 1 };
-  end.onMessage(m => (m && forServer[m.t]) ? serverReceive(end, m) : onData(m));
-  server.links.push(end);
-}
-
-/* Latency is measured with a dedicated ping that is answered IMMEDIATELY.
-   Timestamps piggybacked on the next scheduled packet pick up however long
-   that packet happened to wait for its 60Hz slot — up to 16.7ms of pure
-   cadence, averaging half that. Fine for a status readout, useless as the
-   input to the host's delay equalisation, which is what it was feeding. */
-function serverReceive(end, m) {
-  if (!m) return;
-
-  if (m.t === 'png') { end.send({ t: 'pog', c: m.c }); return; }
-
-  if (m.t === 'spong') {
-    end.rtt = performance.now() - m.s;
-    end.rttSmooth = end.rttSmooth ? end.rttSmooth + (end.rtt - end.rttSmooth) * 0.1
-                                  : end.rtt;
-    if (end.kind === 'channel') {
-      net.rtt = end.rtt;
-      net.rttSmooth = end.rttSmooth;
-    }
-    return;
-  }
-
-  if (m.t !== 'in' || !m.b) return;
-
-  // A batch of ticks, overlapping the previous packet. Never let an older
-  // entry overwrite a newer one that shares a ring slot.
-  const buf = server.buf && server.buf[end.side];
-  if (!buf) return;
-  for (let i = 0; i < m.b.length; i++) {
-    const e = m.b[i], T = e[0];
-    const cell = buf[slot(T)];
-    if (T > cell.tick) {
-      cell.tick = T; cell.tx = e[1]; cell.ty = e[2]; cell.ta = e[3];
-      cell.sel = e[4] | 0; cell.rdy = e[5] | 0;
-    }
-  }
-
-  // Only the remote client's trip is worth measuring; the loopback's delay is
-  // whatever we told it to be.
-  if (m.e && end.kind === 'channel') {
-    net.rtt = performance.now() - m.e;
-    net.rttSmooth += (net.rtt - net.rttSmooth) * 0.05;
-  }
-}
-
-// One authoritative tick. Called on the fixed clock, unconditionally.
-function serverStepOnce(dt) {
-  if (!server.active) return;
-
-  // Resolve each side's input for the tick about to run. Nothing on file means
-  // the packet has not arrived, so assume the last one is still held — never
-  // wait, because waiting is lockstep.
-  const T = server.world.tick + 1;
-  for (const k of ['-1', '1']) {
-    const cell = server.buf[k][slot(T)];
-    const dst = server.inputs[k];
-    if (cell.tick === T) {
-      dst.tx = cell.tx; dst.ty = cell.ty; dst.ta = cell.ta; dst.sel = cell.sel;
-      dst.rdy = cell.rdy;
-    }
-    else if (net.up && k === String(-mySide)) server.missed++;
-  }
-
-  /* Nothing begins until everyone playing has clicked in. Readiness rides in
-     the ordinary input record, so it arrives by the same path as everything
-     else and needs no message of its own. The transition is made here rather
-     than in stepWorld because it depends on who is in the session, which is
-     the server's business and not something a client could replay. */
-  if (server.world.phase === PHASE.READY) {
-    let all = true;
-    for (const k of ['-1', '1']) if (server.need[k] && !server.inputs[k].rdy) all = false;
-    if (all) {
-      server.world.phase = PHASE.COUNT;
-      server.world.phaseT = COUNT_T;
-      pushEvent(server.world, 'count', 5, A.width / 2);
-    }
-  }
-
-  stepWorld(server.world, server.inputs, dt);
-
-  // ping every 48 ticks, about five times a second
-  if (server.sendTick % 48 === 0) {
-    const s0 = { t: 'sping', s: performance.now() };
-    for (const l of server.links) l.send(s0);
-  }
-
-  // snapshots at NET_HZ, derived from the tick counter so the rate is exact
-  const every = Math.max(1, Math.round((1 / FIXED_DT) / NET_HZ));
-  if (++server.sendTick % every === 0) {
-    const snap = { t: 'snap', d: packWorld(server.world) };
-    for (const l of server.links) l.send(snap);
-  }
-}
-
-/* ==========================================================================
-   CLIENT
-   For now it does the naive thing: send input, display whatever the server
-   last said. That is deliberately laggy — your paddle does not move until a
-   snapshot comes back. Step 4 puts prediction on top of exactly this.
-   ========================================================================== */
-/* The client keeps its own tick counter, aligned to the server's and running
-   AHEAD of it. Ahead, because an input stamped for tick T has to reach the
-   server before the server simulates T; how far ahead is one trip plus a
-   margin for jitter.
-
-   HIST is a ring of past inputs and past states, both keyed by tick. Rollback
-   needs the states to know whether it was right, and the inputs to replay.
-   Sized to comfortably cover a bad connection: 128 ticks is 533ms. */
-const HIST = 128;
-const INPUT_WINDOW = 8;   // ticks of input per packet: two send intervals
-
-const client = {
-  link: null, sendTick: 0, inputTick: 0, lastSnap: -1,
-  rtt: 0, rttSmooth: 0,
-
-  tick: 0,              // our simulated present
-  serverTick: 0,        // newest tick the server has told us about
-  target: 0,            // where our tick ought to be
-  ahead: 0,             // how far in front of a snapshot we aim to run
-  drift: 0,             // measured (our tick - target); zero means locked on
-  pending: 0,           // a single-tick correction waiting to be applied
-  replayed: 0, errBall: 0, errMine: 0,
-  leadMin: 0, leadMax: 0,  // lead sampled per tick; it is a sawtooth, so the
-                           // readout shows its range rather than one frame's
-                           // arbitrary slice of it
-
-  inputs: null,         // ring of {tx,ty,ta} by tick
-  states: null,         // ring of Worlds by tick
-  filled: 0,
-};
-
-/* The ring is allocated once and reused, while tick numbers restart at zero
-   every match — so a stale record could answer to a tick number it never
-   belonged to. Marking them unused costs nothing and closes that off. */
-onNewGame(() => {
-  if (!client.inputs) return;
-  for (let i = 0; i < client.inputs.length; i++) client.inputs[i].tick = -1;
-});
-
-function clientInitHistory() {
-  if (client.inputs) return;
-  client.inputs = new Array(HIST);
-  client.states = new Array(HIST);
-  for (let i = 0; i < HIST; i++) {
-    client.inputs[i] = { tick: -1, sel: 0, tx: 0, ty: 0, ta: 0, rdy: 0 };
-    client.states[i] = makeWorld();
-  }
-}
-
-const slot = t => ((t % HIST) + HIST) % HIST;
-
-// Snapshots are unpacked here, never straight into the displayed world.
-const snapWorld = makeWorld();
-
-// Replay needs an input record per side; reused so replaying allocates nothing.
-const replayInput = { '-1': { sel: 0, tx: 0, ty: 0, ta: 0 },
-                      '1':  { sel: 0, tx: 0, ty: 0, ta: 0 } };
-
-/* How far ahead of a RECEIVED snapshot we must run.
-
-   A snapshot stamped tick S is already one one-way trip old when it lands, so
-   the server is at S + owd by then. An input we send now needs another
-   one-way trip to arrive — so for it to be in hand when the server simulates
-   tick C, we need C >= S + 2*owd. That is the FULL round trip, not half of it,
-   plus margin for jitter and the 60Hz send cadence. */
-const LEAD_MARGIN = 3;
-
-function desiredAhead() {
-  const tickMs = FIXED_DT * 1000;
-  return Math.max(1, Math.ceil(client.rttSmooth / tickMs) + LEAD_MARGIN);
-}
-
-function clientAttach(end) {
-  clientInitHistory();
-  client.link = end;
-  client.sendTick = 0;
-  client.lastSnap = -1;
-  client.tick = 0;
-  client.serverTick = 0;
-  client.target = 0;
-  client.pending = 0;
-  client.filled = 0;
-  const forClient = { 'snap': 1, 'pog': 1, 'sping': 1 };
-  end.onMessage(m => (m && forClient[m.t]) ? clientReceive(m) : onData(m));
-}
-
-function clientReceive(m) {
-  if (!m) return;
-
-  if (m.t === 'sping') { client.link.send({ t: 'spong', s: m.s }); return; }
-
-  if (m.t === 'pog') {
-    client.rtt = performance.now() - m.c;
-    client.rttSmooth = client.rttSmooth ? client.rttSmooth + (client.rtt - client.rttSmooth) * 0.1
-                                        : client.rtt;
-    return;
-  }
-
-  if (m.t !== 'snap') return;
-  if (m.d[0] <= client.lastSnap) return;   // stale snapshot
-  client.lastSnap = m.d[0];
-  client.serverTick = m.d[0];
-  unpackWorld(snapWorld, m.d);
-
-  // The opponent's target rides in the snapshot; hold it until told otherwise.
-  const o = String(-mySide);
-  const op = snapWorld.p[activeId(snapWorld, -mySide)];
-  liveInput[o].sel = snapWorld.sel[o];
-  liveInput[o].tx = op.tx;
-  liveInput[o].ty = op.ty;
-  liveInput[o].ta = op.ta;
-
-  /* Steer our clock onto the server's. The two counters started independently
-     and would otherwise drift apart forever; what matters is not that they
-     agree but that ours stays a known distance IN FRONT.
-
-     A long way off means we just connected or the link changed character, so
-     jump. Close in means nudge by a single tick, because snapping every
-     snapshot would make our clock jitter as badly as the measurement does. */
-  client.ahead = desiredAhead();
-  client.target = client.serverTick + client.ahead;
-  client.drift = client.tick - client.target;
-
-  // How wrong were we? Measured before the correction is applied, against our
-  // own saved state for that exact tick. This is the number that says whether
-  // prediction is working.
-  const saved = client.states[slot(client.serverTick)];
-  if (saved && saved.tick === client.serverTick) {
-    client.errBall = Math.hypot(saved.ball.x - snapWorld.ball.x,
-                                saved.ball.y - snapWorld.ball.y);
-    const k = activeId(snapWorld, mySide);
-    client.errMine = Math.hypot(saved.p[k].x - snapWorld.p[k].x,
-                                saved.p[k].y - snapWorld.p[k].y);
-  }
-
-  if (Math.abs(client.drift) > 8) client.tick = client.target;
-  else client.pending = Math.max(-2, Math.min(2, -client.drift));
-
-  clientReconcile();
-
-
-
-}
-
-/* Rewind and replay.
-
-   The snapshot describes a tick in the past — by however far we are running
-   ahead. Adopt it wholesale at that tick, then re-run every tick since using
-   the inputs we filed at the time, and arrive back at the present holding a
-   corrected version of it.
-
-   The opponent is assumed to have held their last known target throughout,
-   which is the only guess available and usually right; a paddle target does
-   not change much in ten milliseconds. Their target rides along in every
-   snapshot already, because a paddle's target IS its input. */
-function clientReconcile() {
-  const from = snapWorld.tick, to = client.tick;
-
-  // Too far apart to replay, or the server is somehow ahead of us: take the
-  // snapshot as the present and restart from there.
-  if (to <= from || to - from >= HIST - 2) {
-    copyWorld(world, snapWorld);
-    client.tick = snapWorld.tick;
-    client.replayed = 0;
-    return;
-  }
-
-  copyWorld(world, snapWorld);
-  const other = String(-mySide);
-  const mineKey = String(mySide);
-  const theirs = snapWorld.p[activeId(snapWorld, -mySide)];
-  replayInput[other].sel = snapWorld.sel[other];
-  replayInput[other].tx = theirs.tx;
-  replayInput[other].ty = theirs.ty;
-  replayInput[other].ta = theirs.ta;
-
-  // A slot whose tick does not match was never filed for this tick, so it
-  // still holds something from a previous lap of the ring. Hold the last good
-  // input rather than replaying a target from half a second ago.
-  let held = snapWorld.p[activeId(snapWorld, mySide)];
-
-  for (let t = from + 1; t <= to; t++) {
-    const rec = client.inputs[slot(t)];
-    if (rec.tick === t) held = rec;
-    replayInput[mineKey].sel = held.sel === undefined ? snapWorld.sel[mineKey] : held.sel;
-    replayInput[mineKey].tx = held.tx;
-    replayInput[mineKey].ty = held.ty;
-    replayInput[mineKey].ta = held.ta;
-    stepWorld(world, replayInput, FIXED_DT);
-    copyWorld(client.states[slot(t)], world);
-  }
-  client.replayed = to - from;
-}
-
-function clientStepOnce(dt) {
-  captureInto(liveInput[mySide], dt);
-  if (!client.link) return;
-
-  if (client.sendTick % 48 === 0) client.link.send({ t: 'png', c: performance.now() });
-
-  /* Quantise before using it locally, so what we simulate with is identical to
-     what goes on the wire. Stepping with an unrounded value and sending a
-     rounded one would guarantee a small permanent disagreement. */
-  const qi = liveInput[mySide];
-  qi.tx = Math.round(qi.tx * 1e4) / 1e4;
-  qi.ty = Math.round(qi.ty * 1e4) / 1e4;
-  qi.ta = Math.round(qi.ta * 1e5) / 1e5;
-
-  /* Advance by however many ticks the clock correction calls for, simulating
-     and filing input for EVERY one of them.
-
-     Landing on a tick without filing the ones jumped over leaves holes: the
-     server has nothing on file for them and repeats the last input, while
-     replay reads whatever occupied that ring slot 128 ticks ago. And an
-     advance of zero or less must skip the tick outright — a counter that
-     stalls is survivable, one that runs backwards corrupts the ring. */
-  let adv = 1 + client.pending;
-  client.pending = 0;
-  if (adv > 3) adv = 3;
-  if (adv < 0) adv = 0;
-
-  for (let i = 0; i < adv; i++) {
-    client.tick++;
-
-    const rec = client.inputs[slot(client.tick)];
-    rec.tick = client.tick;
-    rec.sel = qi.sel; rec.rdy = qi.rdy;
-    rec.tx = qi.tx; rec.ty = qi.ty; rec.ta = qi.ta;
-    if (client.filled < HIST) client.filled++;
-
-    /* Simulate the present immediately from our own input, with no network in
-       the path. The opponent's side of `liveInput` holds their last known
-       target, refreshed by each snapshot. */
-    stepWorld(world, liveInput, FIXED_DT);
-    world.tick = client.tick;
-    copyWorld(client.states[slot(client.tick)], world);
-  }
-
-  // The lead is a sawtooth; the readout reports its range, not one slice.
-  const lead = client.tick - client.serverTick;
-  if (client.leadMax === 0 && client.leadMin === 0) { client.leadMin = client.leadMax = lead; }
-  else {
-    if (lead < client.leadMin) client.leadMin = lead;
-    if (lead > client.leadMax) client.leadMax = lead;
-  }
-
-  const every = Math.max(1, Math.round((1 / FIXED_DT) / NET_HZ));
-  if (++client.sendTick % every === 0) {
-    // Overlapping batches: every tick rides in two consecutive packets, so a
-    // single dropped packet costs nothing.
-    const batch = [];
-    for (let t = client.tick - INPUT_WINDOW + 1; t <= client.tick; t++) {
-      if (t < 1) continue;
-      const r = client.inputs[slot(t)];
-      if (r.tick === t) batch.push([t, r.tx, r.ty, r.ta, r.sel, r.rdy]);
-    }
-    if (batch.length) client.link.send({ t: 'in', k: ++client.inputTick, b: batch });
-  }
-}
-
-// Every wire this machine holds, pumped on the physics clock rather than the
-// render clock — a frame of quantisation is latency we would be adding for
-// nothing on a design whose whole purpose is controlling latency.
-function pumpLinks() {
-  if (client.link) client.link.pump();
-  for (const l of server.links) l.pump();
-}
-
-/* ==========================================================================
-   TRANSPORT
-   A link has two ends. Each end has send / onMessage / pump / close, and
-   nothing above this layer is allowed to know which kind it holds.
-
-   Two implementations:
-     channel   the real WebRTC data channel to the other machine
-     loopback  an in-process queue that holds messages for a set delay
-
-   The loopback is what lets the host's own client talk to the host's server
-   over a simulated wire. Give it half the guest's round trip and the host
-   plays under the same latency the guest does — which is the only way to make
-   a listen server fair, since we can lift the host's delay but can never
-   lower the guest's.
-   ========================================================================== */
-/* Ticks since boot. The loopback schedules in TICKS, not milliseconds: the
-   fixed-step loop runs several ticks back to back inside a single frame, so
-   wall-clock time barely moves across the burst. A message due in 2ms could
-   not be delivered by any remaining tick in that frame and had to wait for the
-   next one — the simulated wire was quietly charging a frame per hop, while
-   the real data channel, which delivers on arrival, charged nothing. */
-let simClock = 0;
-
-// Messages are cloned on send. The real channel serialises, so the receiver
-// can never share an object with the sender; the loopback must behave the same
-// or we would get aliasing bugs that only appear on the host.
-const cloneMsg = m => JSON.parse(JSON.stringify(m));
-
-function makeEnd() {
-  return {
-    kind: 'loopback',
-    other: null,
-    inbox: [],
-    handler: null,
-    onMessage(fn) { this.handler = fn; },
-    send(m) {
-      if (!this.other) return;
-      const ticks = Math.max(1, Math.round(linkDelayMs() / (FIXED_DT * 1000)));
-      this.other.inbox.push({ due: simClock + ticks, m: cloneMsg(m) });
-    },
-    pump() {
-      while (this.inbox.length && this.inbox[0].due <= simClock) {
-        const item = this.inbox.shift();
-        if (this.handler) this.handler(item.m);
-      }
-    },
-    close() { this.inbox.length = 0; this.handler = null; this.other = null; },
-  };
-}
-
-function makeLoopbackPair() {
-  const a = makeEnd(), b = makeEnd();
-  a.other = b; b.other = a;
-  return [a, b];
-}
-
-// One-way delay applied to the host's own link. Half the round trip, because
-// the guest's packets traverse the wire once in each direction.
-function linkDelayMs() {
-  if (!NET.autoDelay) return Math.max(0, NET.hostDelay);
-  // Connected: match the guest's one-way trip exactly. Taking max() with the
-  // floor here would penalise the host beyond the guest on a fast link, which
-  // is the opposite of the point. The floor is only for practice, where there
-  // is no measurement and we still want a match-like feel.
-  if (net.up && net.role === 'host' && net.rttSmooth > 0) return net.rttSmooth / 2;
-  return NET.floor;
-}
-
-function makeChannelEnd(conn) {
-  const end = {
-    kind: 'channel',
-    handler: null,
-    onMessage(fn) { end.handler = fn; },
-    send(m) { try { conn.send(m); } catch (e) {} },
-    pump() {},                      // the channel delivers on its own
-    close() { try { conn.close(); } catch (e) {} end.handler = null; },
-  };
-  conn.on('data', d => { if (end.handler) end.handler(d); });
-  return end;
-}
-
-const NET_HZ = 60;                 // packets/sec each way; they are tiny
-const PEER_PREFIX = 'rallyxz-';
-const CODE_CHARS = 'ACDEFGHJKLMNPQRTUVWXY34679';   // no look-alike characters
-
-/* Two browsers behind ordinary home routers usually reach each other directly
-   once STUN tells each what its public address is. When both sit behind
-   symmetric NAT, no direct path exists at all, and the only way through is a
-   TURN server relaying the traffic. Without one, PeerJS emits no error — the
-   connection simply never opens, which looks exactly like hanging.
-
-   TURN means the game traffic passes through a third party and gains a hop of
-   latency, so it is a fallback: WebRTC uses it only when nothing direct works. */
-const ICE = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:global.stun.twilio.com:3478' },
-    { urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject', credential: 'openrelayproject' },
-  ],
-};
-const PEER_OPTS = { config: ICE };
-
-const JOIN_TIMEOUT = 15000;   // ms before we admit it is not going to connect
-let joinTimer = null;
-
-const net = { role: 'solo', peer: null, conn: null, link: null,
-              up: false, code: '', rtt: 0, rttSmooth: 0, synced: false };
-let netAcc = 0;
-let cfgTick = 0;
-let lastStamp = 0;                 // most recent host timestamp seen by the guest
-
-/* The data channel is unordered as well as unreliable — that is the right
-   trade for realtime traffic, but it means a packet can arrive after a newer
-   one. Applying a stale target yanks the paddle backwards for a frame, so
-   anything older than what we have already seen is dropped. */
-let outSeq = 0;
-let inSeq = -1;
-
 const $ = id => document.getElementById(id);
-const randomCode = () => Array.from({ length: 4 },
-  () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
-
-function setMsg(html) { $('netMsg').innerHTML = html; }
 function hideMenu() { $('menu').classList.add('hidden'); }
 function showMenu() { $('menu').classList.remove('hidden'); hideSetup(); }
 function hideSetup() { $('setup').classList.add('hidden'); }
@@ -2824,13 +2136,9 @@ function hideSetup() { $('setup').classList.add('hidden'); }
 function showSetup() {
   hideMenu();
   $('setup').classList.remove('hidden');
-  // A guest cannot change anything here, and showing a stale copy of a number
-  // it neither controls nor reliably receives is worse than showing nothing.
-  const owner = net.role !== 'guest';
-  $('setupOwner').classList.toggle('hidden', !owner);
-  $('setupWait').classList.toggle('hidden', owner);
   $('setupMsg').innerHTML = '';
-  if (owner) { paintTarget(); paintPaddles(); }
+  paintTarget();
+  paintPaddles();
 }
 
 function paintSens() {
@@ -2855,6 +2163,11 @@ function setSens(v) {
   paintSens();
 }
 
+function paintPaddles() {
+  $('pd1').classList.toggle('on', MATCH.paddles === 1);
+  $('pd2').classList.toggle('on', MATCH.paddles === 2);
+}
+
 function setPaddles(n) {
   MATCH.paddles = n === 1 ? 1 : 2;
   try { localStorage.setItem('banjoball.paddles', MATCH.paddles); } catch (e) {}
@@ -2876,187 +2189,23 @@ function setTarget(v) {
 }
 
 function beginMatch() {
-  if (net.role === 'guest') return;             // only the host may start
-  if (net.role === 'host') send({ t: 'start', m: MATCH });
   hideSetup();
   startGame();
 }
 
+/* Nothing left to report but which team you are on: no role, no room code, no
+   ping, no injected link delay. */
 function updateStatus() {
-  const el = $('status');
-  const ping = client.rttSmooth ? Math.round(client.rttSmooth) + 'ms' : '--';
-  // `link` is the delay injected into our own loopback, so it only means
-  // anything on a machine that is actually running a server.
-  // the loopback schedules in whole ticks, so report what it can deliver
-  const q = Math.max(1, Math.round(linkDelayMs() / (FIXED_DT * 1000)));
-  const link = server.active
-    ? ' &nbsp; link ' + (q * FIXED_DT * 1000).toFixed(1) + 'ms'
-    : '';
-
-  if (net.role === 'solo') {
-    el.innerHTML = 'PRACTICE &nbsp; ' + teamName(mySide) + '<br>ping ' + ping + link;
-    return;
-  }
-  el.innerHTML = net.role.toUpperCase() + ' &nbsp; <b>' + net.code + '</b><br>' +
-                 'you are ' + teamName(mySide) +
-                 (net.up ? ' &nbsp; ping ' + ping : ' &nbsp;(waiting)') + link;
+  $('status').innerHTML = teamName(mySide);
 }
-
-function peerAvailable() {
-  if (typeof Peer !== 'undefined') return true;
-  setMsg('Could not load the networking library.<br>Check your connection and reload.');
-  return false;
-}
-
-function wireConn(conn) {
-  net.conn = conn;
-  conn.on('open', function () {
-    clearTimeout(joinTimer);
-    net.link = makeChannelEnd(conn);
-    net.link.onMessage(onData);   // replaced by serverAttach/clientAttach on start
-    net.up = true;
-    updateStatus();
-    if (net.role === 'host') sendConfig();
-    showSetup();
-  });
-  conn.on('close', function () { dropped('Opponent disconnected.'); });
-  conn.on('error', function () { dropped('Connection error.'); });
-}
-
-function dropped(why) {
-  net.up = false;
-  if (net.link) { net.link.close(); net.link = null; }
-  net.conn = null;
-  net.role = 'solo';
-  net.synced = false;
-  outSeq = 0; inSeq = -1;
-  mySide = 1;
-  updateStatus();
-  stopGame();
-  setMsg(why + '<br>Start a new game when you are ready.');
-}
-
-function hostGame() {
-  if (!peerAvailable()) return;
-  net.role = 'host';
-  mySide = 1;
-  net.code = randomCode();
-  setMsg('Opening room&hellip;');
-  net.peer = new Peer(PEER_PREFIX + net.code, PEER_OPTS);
-  net.peer.on('open', function () {
-    setMsg('Give your opponent this code:<span class="code">' + net.code + '</span>');
-    updateStatus();
-  });
-  net.peer.on('connection', wireConn);
-  net.peer.on('error', function (e) {
-    // an ID collision just means someone else is holding that code right now
-    setMsg('Could not open a room (' + e.type + '). Try again.');
-    net.role = 'solo';
-    updateStatus();
-  });
-  updateStatus();
-}
-
-function joinGame() {
-  if (!peerAvailable()) return;
-  const code = ($('codeIn').value || '').trim().toUpperCase();
-  if (code.length !== 4) { setMsg('Enter the four-character room code.'); return; }
-  net.role = 'guest';
-  mySide = -1;
-  net.code = code;
-  setMsg('Connecting to ' + code + '&hellip;');
-  net.peer = new Peer(undefined, PEER_OPTS);
-  net.peer.on('open', function () {
-    const conn = net.peer.connect(PEER_PREFIX + code, { reliable: false });
-    if (!conn) { setMsg('Could not start the connection. Try again.'); return; }
-    wireConn(conn);
-
-    /* Give up out loud. A failed negotiation produces no error event at all,
-       so without this the guest sits on "connecting" indefinitely with nothing
-       to act on — the worst kind of failure, because it looks like a hang
-       rather than a problem with a cause. */
-    clearTimeout(joinTimer);
-    joinTimer = setTimeout(function () {
-      if (net.up) return;
-      const pc = conn.peerConnection;
-      const state = pc ? pc.iceConnectionState : 'unknown';
-      setMsg('Could not reach that room.<br>' +
-             'The connection stalled while negotiating (' + state + ').<br>' +
-             'One of you may be on a network that blocks direct connections.');
-      try { net.peer.destroy(); } catch (err) {}
-      net.role = 'solo';
-      mySide = 1;
-      updateStatus();
-    }, JOIN_TIMEOUT);
-  });
-  net.peer.on('error', function (e) {
-    setMsg(e.type === 'peer-unavailable'
-      ? 'No room with that code. Check it and try again.'
-      : 'Connection failed (' + e.type + ').');
-    net.role = 'solo';
-    mySide = 1;
-    updateStatus();
-  });
-  updateStatus();
-}
-
-function send(obj) {
-  if (!net.up || !net.link) return;
-  obj.n = ++outSeq;
-  net.link.send(obj);
-}
-
-/* The host owns the tuning. Both sides must run identical numbers or their
-   simulations drift apart and the corrections become visible. */
-function sendConfig() {
-  if (net.role !== 'host') return;
-  send({ t: 'c', A: A, FEEL: FEEL, PHYS: PHYS, M: MATCH });
-}
-
-
-
-// Absorb part of an error now and the rest over the next few packets, unless
-// the gap is so wide that something desynced, in which case just jump.
-/* Step 1 of the netcode rebuild: the simulation is now replayable, but the
-   client/server split does not exist yet. Connection, room codes and config
-   sync still work; nothing yet drives the simulation from the wire. Restored
-   in step 3, on top of prediction and reconciliation rather than the blending
-   that made the paddle oscillate. */
-function onData(d) {
-  if (!d || !d.t) return;
-  if (d.n !== undefined) {
-    if (d.n <= inSeq) return;      // stale, a newer one already landed
-    inSeq = d.n;
-  }
-
-  if (d.t === 'start' && net.role === 'guest') {
-    if (d.m) { Object.assign(MATCH, d.m); paintTarget(); paintPaddles(); }
-    hideSetup();
-    startGame();
-    return;
-  }
-
-  if (d.t === 'c' && net.role === 'guest') {
-    Object.assign(A, d.A);
-    Object.assign(FEEL, d.FEEL);
-    Object.assign(PHYS, d.PHYS);
-    if (d.M) { Object.assign(MATCH, d.M); paintTarget(); paintPaddles(); }
-    _feat = null;
-    _featKey.length = 0;
-    buildPanel();
-    resize();
-  }
-}
-
-$('build').textContent = BUILD;
 
 $('btnSolo').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; updateStatus(); showSetup();
+  mySide = 1; showSetup();
 });
 $('btnTutorial').addEventListener('click', function () {
   // Straight in: a lobby would be one more thing to explain before explaining
   // anything.
-  net.role = 'solo'; mySide = 1; updateStatus();
+  mySide = 1;
   hideMenu();
   startGame(true);
 });
@@ -3113,9 +2262,6 @@ paintVolume();
 paintTarget();
 paintPaddles();
 paintSens();
-$('btnHost').addEventListener('click', hostGame);
-$('btnJoin').addEventListener('click', joinGame);
-$('codeIn').addEventListener('keydown', function (e) { if (e.key === 'Enter') joinGame(); });
 updateStatus();
 
 buildPanel();

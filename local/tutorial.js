@@ -60,7 +60,7 @@ const STEPS = [
   {
     text: 'Now <b>hit the ball</b>.',
     hint: 'swing into it — a moving paddle adds pace, a still one only returns it',
-    enter: () => { const w = server.world; w.phase = PHASE.PLAY; w.ballHidden = false; serve(w); },
+    enter: () => { world.phase = PHASE.PLAY; world.ballHidden = false; serve(world); },
     done: () => tut.hits >= 3,
   },
   {
