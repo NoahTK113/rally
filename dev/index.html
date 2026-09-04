@@ -222,9 +222,9 @@
   </div>
 </div>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v12.1-dev"></script>
-<script src="ai.js?v=v12.1-dev"></script>
-<script src="tutorial.js?v=v12.1-dev"></script>
+<script src="audio.js?v=v12.2-dev"></script>
+<script src="ai.js?v=v12.2-dev"></script>
+<script src="tutorial.js?v=v12.2-dev"></script>
 <script>
 'use strict';
 
@@ -888,6 +888,25 @@ function resetRound(w, clearScore) {
 }
 
 // Tip-off: dropped dead centre from the ceiling with no velocity.
+/* Back to the tip-off pose. Pose, spring target and render history all move
+   together, and each for its own reason: leaving the target behind would have
+   the spring haul the paddle straight back out again, and leaving the previous
+   pose behind would draw one frame of it streaking across the court.
+
+   Positions come from makePaddle rather than a stored copy, so they still
+   follow the arena if its dimensions are retuned mid-session. */
+function resetPaddles(w) {
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 2; i++) {
+      const p = w.p[idOf(side, i)], home = makePaddle(side, i);
+      p.x = p.tx = p.px = home.x;
+      p.y = p.ty = p.py = home.y;
+      p.a = p.ta = p.pa = 0;
+      p.vx = p.vy = p.w = 0;
+    }
+  }
+}
+
 function serve(w) {
   const b = w.ball;
   b.x = A.width / 2;
@@ -1563,14 +1582,16 @@ function paintLockHint() {
     sub  = 'they still have to click in';
   } else if (ready) {
     main = twoPlayer ? 'CLICK TO READY UP' : 'CLICK TO START';
-    sub  = twoPlayer ? 'the match starts once you both have'
-                     : 'the countdown starts when you do';
+    sub  = twoPlayer ? 'the match starts once you both have' : '';
   } else {
     main = 'CLICK TO CAPTURE THE MOUSE';
     sub  = 'controls are disabled until you do';
   }
   if ($('lockMain').textContent !== main) $('lockMain').textContent = main;
-  if ($('lockSub').textContent !== sub)   $('lockSub').textContent = sub;
+  if ($('lockSub').textContent !== sub) {
+    $('lockSub').textContent = sub;
+    $('lockSub').style.display = sub ? '' : 'none';   // no empty gap below
+  }
 }
 
 function drawAnnouncement() {
@@ -1927,6 +1948,7 @@ function stepWorld(w, inp, dt) {
       // follows differs.
       if (matchOver(w)) { w.phase = PHASE.WIN; w.phaseT = WIN_T; }
       else { w.phase = PHASE.COUNT; w.phaseT = COUNT_T;
+             resetPaddles(w);                            // everyone back on their mark
              pushEvent(w, 'count', 5, A.width / 2); }    // the first number
     }
 
@@ -2128,7 +2150,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v12.1-dev';
+const BUILD = 'v12.2-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
