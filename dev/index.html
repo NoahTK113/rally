@@ -242,18 +242,18 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v12.4-dev"></script>
-<script src="ai.js?v=v12.4-dev"></script>
-<script src="tutorial.js?v=v12.4-dev"></script>
+<script src="audio.js?v=v12.5-dev"></script>
+<script src="ai.js?v=v12.5-dev"></script>
+<script src="tutorial.js?v=v12.5-dev"></script>
 <script>
 'use strict';
 
 // ---- arena, all in metres -------------------------------------------------
 const A = {
-  width: 12, height: 7,     // inner playing area
-  netHeight: 2.25, netT: 0.10,
-  goalLip: 0.50,            // gap between the floor and the bottom of the opening
-  goalHeight: 2.50,         // size of the opening
+  width: 20, height: 12,    // inner playing area
+  netHeight: 2.95, netT: 0.10,
+  goalLip: 3.00,            // gap between the floor and the bottom of the opening
+  goalHeight: 3.00,         // size of the opening
   goalDepth: 0.70,          // how far the box extends outside the field
   cornerR: 0.11,            // rounding on the arena contour. WORLD units, not
                             // derived from the hairline, so collision geometry
@@ -262,7 +262,7 @@ const A = {
                             // half, as a fraction of that half's width
   defFrac: 0.65,            // share of a player's own half reserved for defence
   paddleLength: 0.85,
-  paddleT: 0.10,
+  paddleT: 0.05,
   margin: 0.9,
 };
 
@@ -272,10 +272,10 @@ const A = {
    the cursor — it CHASES it, which is what gives it real linear and angular
    velocity for the ball impulse to read later. */
 const FEEL = {
-  posFreq   : 10.0,   // Hz
-  posDamp   : 1.90,   // 1.0 = critically damped
-  angFreq   : 9.0,    // Hz
-  angDamp   : 1.65,
+  posFreq   :  4.9,   // Hz
+  posDamp   : 1.10,   // 1.0 = critically damped
+  angFreq   : 11.0,   // Hz
+  angDamp   : 1.60,
   maxError  : 0.75,   // metres. The proportional term is clamped to this, so
                       // the spring has the SAME authority everywhere — in open
                       // space a distant cursor no longer buys extra force that
@@ -332,11 +332,11 @@ const NET = {
 };
 
 const PHYS = {
-  gravity      : 5.50,   // m/s^2
+  gravity      : 5.20,   // m/s^2
   ballR        : 0.15,   // m
   restitution  : 0.66,   // bounciness against arena and net
   friction     : 0.35,   // tangential -> this is what generates spin
-  paddleRest   : 0.30,   // paddles are livelier than walls
+  paddleRest   : 0.18,   // paddles are livelier than walls
   paddleFriction: 0.60,  // and grippier, so slicing actually bites
   goalPull     : 28.0,   // outward pull inside a goal box, so a ball that
                          // trickles in is always drawn out through the back
@@ -2175,7 +2175,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v12.4-dev';
+const BUILD = 'v12.5-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
