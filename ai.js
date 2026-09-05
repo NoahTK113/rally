@@ -271,6 +271,7 @@ function aiMoveToward(wantX, wantY, dt) {
    The carry is capped so a still period cannot bank notches and spend them as
    a burst, which would reproduce the unbounded spin in a subtler form. */
 function aiWheelToward(wantA, dt) {
+  if (wantA === null) return;     // no opinion about the angle: leave it alone
   ai.notches = Math.min(ai.notches + AI.wheelSpeed * dt, 2);
   const budget = Math.floor(ai.notches);
   if (budget < 1) return;
@@ -290,25 +291,46 @@ function aiWheelToward(wantA, dt) {
 
    `sel` is left alone: choosing which paddle to hold is a decision, not
    something a hand does, and there is nothing making that decision yet. */
-function aiEmit(w, side, dst, wantX, wantY, wantA, dt) {
+function aiEmit(w, side, dst, want, dt) {
   const self = aiSelf(w, side);
   const p = self.sel ? self.p1 : self.p0;
   if (!ai.outSet) {
     ai.outX = p.x; ai.outY = p.y; ai.outA = p.a;
     ai.outSet = true;
   }
-  aiMoveToward(wantX, wantY, dt);
-  aiWheelToward(wantA, dt);
+  aiMoveToward(want.x, want.y, dt);
+  aiWheelToward(want.a, dt);
   dst.tx = ai.outX; dst.ty = ai.outY; dst.ta = ai.outA;
 }
 
 /* ==========================================================================
-   PER TICK
+   DECISION
 
-   Observe, and stop. There is no decision layer yet, so the opponent's
-   setpoint is left exactly as it was — which is what an unheld paddle already
-   receives, so it simply holds its place. Nothing here writes to `dst`.
+   Returns what the AI WANTS: a position, and an angle or null for "no opinion
+   about the angle". What a hand can do about that want is aiEmit's business,
+   and the two are kept apart deliberately — a decision that also knew about
+   hand limits would be tempted to compromise its intent to suit them.
+
+   The default sits at the BOTTOM. A new state is an early return above it,
+   which is why there is no scaffolding here for states that do not exist:
+   adding one means adding its own condition and its own return, not filling in
+   a slot. The default is what happens when nothing else claims the tick, and
+   every state that ends falls back to it without having to say so.
+   ========================================================================== */
+function aiDecide(w, side) {
+  // ---- future states go here, each returning early ----
+
+  // Default: hold the defensive position. Angle is not yet anyone's business.
+  const d = aiDefensivePosition(side);
+  return { x: d.x, y: d.y, a: null };
+}
+
+/* ==========================================================================
+   PER TICK
    ========================================================================== */
 function aiStep(w, side, dst, dt) {
-  aiObserve(w);
+  aiObserve(w);            // always: a ring that only filled while the AI
+                           // played would start every match blind
+  if (!AI.on) return;      // practice leaves the opposing paddle inert
+  aiEmit(w, side, dst, aiDecide(w, side), dt);
 }
