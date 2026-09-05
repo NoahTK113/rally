@@ -28,6 +28,13 @@
 const AI = {
   on: false,
   reaction: 0.12,     // s — how stale our view of the OUTSIDE WORLD is
+
+  /* The hand. Not derived from the player's mouse settings on purpose: their
+     cursor speed depends on their own sensitivity slider and window size, so
+     borrowing it would make the AI's hand change speed whenever the player
+     adjusted their mouse. This is the AI's hand, in world units. */
+  mouseSpeed: 25,     // m/s — furthest the emitted position may travel per second
+  wheelSpeed: 12,     // notches/s — how fast the wheel can be turned
 };
 
 /* Long enough to cover the largest reaction the panel allows (0.6s) at the
@@ -50,11 +57,20 @@ const ai = {
   hist: null,      // ring of observations
   head: 0,         // next slot to write
   filled: 0,       // how many are valid — matters only for the first moments
+
+  // The hand's own position, carried between ticks. What was last EMITTED,
+  // not where the paddle got to.
+  outSet: false,
+  outX: 0, outY: 0, outA: 0,
+  notches: 0,      // fractional wheel allowance carried between ticks
 };
 
 function aiInit() {
   ai.head = 0;
   ai.filled = 0;
+  ai.outSet = false;
+  ai.outX = ai.outY = ai.outA = 0;
+  ai.notches = 0;
   if (!ai.hist) {
     ai.hist = new Array(AI_HIST);
     for (let i = 0; i < AI_HIST; i++) ai.hist[i] = makeObservation();
@@ -215,6 +231,75 @@ function aiDefensivePosition(aiSide) {
   const goalX = aiSide < 0 ? 0 : arena.width;
   const goalY = (arena.goalLip + arena.goalLip + arena.goalHeight) / 2;
   return { x: (ball.x + goalX) / 2, y: (ball.y + goalY) / 2 };
+}
+
+/* ==========================================================================
+   OUTPUT — THE HAND
+
+   A decision says where it wants the paddle; this says what a hand can
+   actually do about it. Both limits act on what is EMITTED, not on where the
+   paddle ends up, because the paddle is the spring's business and the hand
+   only holds the mouse.
+
+   The two need different treatment for a reason in stepPaddle. Position error
+   is clamped to maxError before the spring sees it, so a target fifty metres
+   away pulls exactly as hard as one at the clamp — acceleration saturates and
+   there is a terminal speed whatever we emit. Rotation has no such clamp:
+   torque is proportional to the whole angular error, so a distant target spins
+   the paddle arbitrarily fast. Nothing downstream will stop that. Any limit on
+   rotation has to be here.
+   ========================================================================== */
+
+/* What an unconstrained position would really buy is not speed — the clamp
+   already caps that — but the ability to REVERSE instantly at full force,
+   which no hand can do. That is what this removes. */
+function aiMoveToward(wantX, wantY, dt) {
+  const lim = AI.mouseSpeed * dt;
+  let dx = wantX - ai.outX, dy = wantY - ai.outY;
+  const d = Math.hypot(dx, dy);
+  if (d > lim && d > 0) { const k = lim / d; dx *= k; dy *= k; }
+  ai.outX += dx;
+  ai.outY += dy;
+}
+
+/* The wheel, in notches. The grid snap is copied from the player's own wheel
+   handler rather than approximated — same rounding, same one-notch advance —
+   so the AI can only ever rest on an angle a player could also have reached.
+   Coarse while far, fine for the last stretch, which is the choice a player
+   makes without thinking about it.
+
+   The carry is capped so a still period cannot bank notches and spend them as
+   a burst, which would reproduce the unbounded spin in a subtler form. */
+function aiWheelToward(wantA, dt) {
+  ai.notches = Math.min(ai.notches + AI.wheelSpeed * dt, 2);
+  const budget = Math.floor(ai.notches);
+  if (budget < 1) return;
+
+  const err = wantA - ai.outA;
+  const step = Math.abs(err) >= STEP_COARSE ? STEP_COARSE : STEP_FINE;
+  const n = Math.round(err / step);
+  if (n === 0) return;
+
+  const use = Math.min(budget, Math.abs(n));
+  ai.notches -= use;
+  ai.outA = (Math.round(ai.outA / step) + Math.sign(n) * use) * step;
+}
+
+/* Writes the setpoint. Seeded from the paddle's live pose the first time, or
+   the hand would start at the origin and drag the paddle across the court.
+
+   `sel` is left alone: choosing which paddle to hold is a decision, not
+   something a hand does, and there is nothing making that decision yet. */
+function aiEmit(w, side, dst, wantX, wantY, wantA, dt) {
+  const self = aiSelf(w, side);
+  const p = self.sel ? self.p1 : self.p0;
+  if (!ai.outSet) {
+    ai.outX = p.x; ai.outY = p.y; ai.outA = p.a;
+    ai.outSet = true;
+  }
+  aiMoveToward(wantX, wantY, dt);
+  aiWheelToward(wantA, dt);
+  dst.tx = ai.outX; dst.ty = ai.outY; dst.ta = ai.outA;
 }
 
 /* ==========================================================================
