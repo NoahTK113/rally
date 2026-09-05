@@ -14,14 +14,11 @@
   body.playing canvas{cursor:none}
   /* Diagnostics live behind H, together with the tuning panel: one key, one
      view. Controls and connection state stay up, since a player needs those. */
-  #tag,#help,#status{display:none}
-  body.playing #help,body.playing #status{display:block}
+  #tag,#status{display:none}
+  body.playing #status{display:block}
   body.playing.debug #tag{display:block}
   #tag{position:fixed;bottom:66px;left:16px;font-size:11px;line-height:1.65;color:#66788f;
        pointer-events:none;text-shadow:0 1px 3px #000}
-  #help{position:fixed;bottom:14px;left:16px;font-size:10.5px;line-height:1.8;color:#4d5c72;
-        pointer-events:none;text-shadow:0 1px 3px #000}
-  #help b{color:#8fa3bd;font-weight:600}
 
   #panel{position:fixed;top:0;left:0;right:0;z-index:10;display:none;flex-wrap:wrap;
          align-items:flex-end;gap:9px 13px;padding:9px 14px 10px;font-size:10px;
@@ -112,8 +109,34 @@
   #tutDots i{width:7px;height:7px;border-radius:50%;background:#24344a;display:block}
   #tutDots i.on{background:#22d3ee}
   #tutDots i.past{background:#2f5c6b}
-  body.playing:not(.locked) #lockHint{display:block}
+  body.playing:not(.locked):not(.paused) #lockHint{display:block}
   body.playing.waiting #lockHint{display:block}
+
+  #pause{position:fixed;inset:0;z-index:12;display:none;align-items:center;
+         justify-content:center;background:rgba(6,10,16,.74)}
+  body.playing.paused #pause{display:flex}
+  #pause .pcard{width:360px;padding:26px;border:1px solid #1d2939;border-radius:14px;
+                background:rgba(12,17,26,.98);box-shadow:0 24px 70px rgba(0,0,0,.6);
+                text-align:center}
+  #pause .pcard.hidden{display:none}
+  #pause h2{margin:0 0 18px;font-size:14px;letter-spacing:.2em;color:#e6edf6;font-weight:600}
+  #pause button{width:100%;padding:12px;margin-bottom:9px;font:inherit;font-size:11px;
+                letter-spacing:.13em;border-radius:8px;cursor:pointer;
+                background:#151d2b;color:#c9d4e2;border:1px solid #263449}
+  #pause button:hover{border-color:#22d3ee;color:#e6edf6}
+  #pause .row{display:flex;gap:9px}
+  #pause .row button{flex:1}
+  #pauseControls{width:440px;text-align:left}
+  #pauseControls h2{text-align:center}
+  #pauseControls dl{display:grid;grid-template-columns:auto 1fr;gap:10px 18px;
+                    margin:0 0 20px;font-size:13.5px;line-height:1.45}
+  #pauseControls dt{color:#22d3ee;font-weight:600;white-space:nowrap}
+  #pauseControls dd{margin:0;color:#c9d4e2}
+  #pause .sl{display:flex;align-items:center;gap:11px;margin-bottom:11px;font-size:10.5px;
+             letter-spacing:.14em;color:#66788f}
+  #pause .sl input{flex:1}
+  #pause .sl .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:41px;text-align:right}
+  #pause p{margin:0 0 20px;font-size:13.5px;line-height:1.6;color:#c9d4e2}
 
   #setup .msg{margin-top:13px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:16px}
   #menu .card{width:340px;padding:26px 26px 22px;border:1px solid #1d2939;border-radius:14px;
@@ -146,7 +169,6 @@
 <canvas id="c"></canvas>
 <div id="panel"></div>
 <div id="tag"></div>
-<div id="help"></div>
 <div id="build"></div>
 <div id="status"></div>
 <div id="sensBar">
@@ -158,6 +180,45 @@
   <span class="v" id="volPlayVal">70</span>
 </div>
 <div id="lockHint"><span id="lockMain">CLICK TO START</span><small id="lockSub">&nbsp;</small></div>
+<div id="pause">
+  <div class="pcard" id="pauseMain">
+    <h2>PAUSED</h2>
+    <button id="pResume">RESUME GAME</button>
+    <button id="pControls">CONTROLS</button>
+    <button id="pExit">EXIT GAME</button>
+  </div>
+
+  <div class="pcard hidden" id="pauseControls">
+    <h2>CONTROLS</h2>
+    <dl>
+      <dt>Mouse</dt><dd>Move your paddle</dd>
+      <dt>Wheel</dt><dd>Rotate your paddle</dd>
+      <dt>Hold right-click</dt><dd>Finer rotation steps</dd>
+      <dt>Space</dt><dd>Switch to your other paddle</dd>
+      <dt>F</dt><dd>Serve</dd>
+      <dt>R</dt><dd>Reset the score</dd>
+      <dt>H</dt><dd>Settings panel</dd>
+      <dt>Tab</dt><dd>Swap teams (practice only)</dd>
+      <dt>Esc</dt><dd>Pause</dd>
+    </dl>
+    <div class="sl"><span>MOUSE</span>
+      <input id="sensPause" type="range" min="0.2" max="3" step="0.05" value="1">
+      <span class="v" id="sensPauseVal">1.00</span></div>
+    <div class="sl"><span>SOUND</span>
+      <input id="volPause" type="range" min="0" max="1" step="0.05" value="0.7">
+      <span class="v" id="volPauseVal">70</span></div>
+    <button id="pBack">BACK</button>
+  </div>
+
+  <div class="pcard hidden" id="pauseExit">
+    <h2>EXIT GAME</h2>
+    <p>Are you sure you want to exit the game?</p>
+    <div class="row">
+      <button id="pExitYes">YES</button>
+      <button id="pExitNo">NO</button>
+    </div>
+  </div>
+</div>
 <div id="tut">
   <div id="tutText"></div>
   <div id="tutHint"></div>
@@ -242,9 +303,9 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v14.1"></script>
-<script src="ai.js?v=v14.1"></script>
-<script src="tutorial.js?v=v14.1"></script>
+<script src="audio.js?v=v14.2"></script>
+<script src="ai.js?v=v14.2"></script>
+<script src="tutorial.js?v=v14.2"></script>
 <script>
 'use strict';
 
@@ -1739,6 +1800,13 @@ document.addEventListener('pointerlockchange', () => {
     placeCursor(np.x, np.y);
     intent.rdy = 1;          // the click that captures the mouse is the ready
   }
+  /* Only once the player has actually started. Before that, losing the lock
+     just means they have not clicked in yet, and the CLICK TO START banner is
+     the right thing to show rather than a menu offering to resume. */
+  if (running && intent.rdy) {
+    if (pointerLocked) { paused = false; document.body.classList.remove('paused'); }
+    else openPause();
+  }
 });
 document.addEventListener('pointerlockerror', () => { pointerLocked = false; });
 let fineRotate = false;   // right mouse button held
@@ -1803,7 +1871,7 @@ addEventListener('keydown', e => {
   }
   if (k === '[') setSens(MOUSE.sens - 0.05);   // capture blocks the slider,
   if (k === ']') setSens(MOUSE.sens + 0.05);   // so keys work mid-match too
-  if (k === 'escape') { leaveGame(); return; }
+  if (k === 'escape') { if (paused) resumeGame(); else leaveGame(); return; }
   if (k === 'f') { if (server.active) resetRound(server.world, false); }
   if (k === 'r') { if (server.active) resetRound(server.world, true); }
   if (k === 'v') opts.showVectors = !opts.showVectors;
@@ -1914,14 +1982,6 @@ function buildPanel() {
   el.appendChild(reset);
 }
 
-document.getElementById('help').innerHTML =
-  '<b>mouse</b> move &nbsp; <b>wheel</b> rotate &nbsp; ' +
-  '<b>hold right-click</b> fine rotate<br>' +
-  '<b>click</b> capture mouse &nbsp; <b>space</b> switch paddle &nbsp; ' +
-  '<b>[</b> <b>]</b> sensitivity<br>' +
-  '<b>F</b> serve &nbsp; <b>R</b> reset score &nbsp; ' +
-  '<b>H</b> settings &nbsp; <b>tab</b> swap team (practice) &nbsp; ' +
-  '<b>esc</b> release mouse, again for menu';
 
 /* ---- loop -----------------------------------------------------------------
    Physics runs at a fixed rate, decoupled from the display, and the renderer
@@ -2121,7 +2181,10 @@ function frame(nowMs) {
   if (fpsAcc > 0.25) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
 
   let steps = 0;
-  if (!frozen) {
+  const holdSim = paused && !net.up;   // a local match stops; an online one cannot
+  if (holdSim) {
+    accumulator = 0;
+  } else if (!frozen) {
     accumulator += dt;
     while (accumulator >= FIXED_DT && steps < MAX_STEPS) {
       simClock++;
@@ -2150,7 +2213,7 @@ function frame(nowMs) {
   pumpEvents();
   pumpTutorial(dt);
 
-  renderAlpha = frozen ? 1 : accumulator / FIXED_DT;
+  renderAlpha = (frozen || holdSim) ? 1 : accumulator / FIXED_DT;
   render();
 
   if (world.phase === PHASE.WIN && world.phaseT <= 0) { endMatch(); return; }
@@ -2180,7 +2243,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v14.1';
+const BUILD = 'v14.2';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2859,20 +2922,70 @@ function showSetup() {
   if (owner) { paintTarget(); paintPaddles(); paintAI(); }
 }
 
+/* ==========================================================================
+   PAUSE
+
+   Opened by LOSING POINTER LOCK rather than by the escape key, because while
+   the mouse is captured the browser swallows escape and our handler never sees
+   it — which is why escape used to need pressing twice, once for the browser
+   and once for us. Alt-tabbing therefore opens it too, which is right: you
+   have stopped playing either way.
+
+   ONLINE IT DOES NOT STOP TIME. The other machine keeps simulating whatever we
+   do, so freezing here would only put us behind and make the reconciliation
+   worse. The menu is the same; the one button admits the difference by saying
+   RETURN rather than RESUME.
+   ========================================================================== */
+let paused = false;
+onNewGame(() => { paused = false; document.body.classList.remove('paused'); });
+
+function pausePanel(which) {
+  $('pauseMain').classList.toggle('hidden', which !== 'main');
+  $('pauseControls').classList.toggle('hidden', which !== 'controls');
+  $('pauseExit').classList.toggle('hidden', which !== 'exit');
+}
+
+function openPause() {
+  if (paused) return;
+  paused = true;
+  document.body.classList.add('paused');
+  pausePanel('main');
+  $('pResume').textContent = net.up ? 'RETURN TO GAME' : 'RESUME GAME';
+}
+
+/* Asks for the mouse back and lets pointerlockchange close the menu on
+   success. Closing it here instead would leave a player with no menu and no
+   control on the browser's brief refusal to re-lock right after an escape. */
+function resumeGame() {
+  if (canvas.requestPointerLock) canvas.requestPointerLock();
+}
+
+$('pResume').addEventListener('click', resumeGame);
+$('pControls').addEventListener('click', () => pausePanel('controls'));
+$('pBack').addEventListener('click', () => pausePanel('main'));
+$('pExit').addEventListener('click', () => pausePanel('exit'));
+$('pExitNo').addEventListener('click', () => pausePanel('main'));
+$('pExitYes').addEventListener('click', () => { paused = false;
+  document.body.classList.remove('paused'); leaveGame(); });
+
 function paintSens() {
   const v = MOUSE.sens.toFixed(2);
   $('sensSetup').value = MOUSE.sens;
   $('sensPlay').value = MOUSE.sens;
+  $('sensPause').value = MOUSE.sens;
   $('sensSetupVal').textContent = v;
   $('sensPlayVal').textContent = v;
+  $('sensPauseVal').textContent = v;
 }
 
 function paintVolume() {
   const pct = Math.round(AUDIO.vol * 100);
   $('volSetup').value = AUDIO.vol;
   $('volPlay').value = AUDIO.vol;
+  $('volPause').value = AUDIO.vol;
   $('volSetupVal').textContent = pct;
   $('volPlayVal').textContent = pct;
+  $('volPauseVal').textContent = pct;
 }
 
 function setSens(v) {
@@ -3127,6 +3240,8 @@ $('sensSetup').addEventListener('input', e => setSens(parseFloat(e.target.value)
 $('sensPlay').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 $('volSetup').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
 $('volPlay').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
+$('sensPause').addEventListener('input', e => setSens(parseFloat(e.target.value)));
+$('volPause').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
 
 /* Stored preferences carry the format version they were written under. Bump
    PREFS_VERSION when a stored value's MEANING changes — a rescaled
