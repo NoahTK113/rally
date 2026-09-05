@@ -166,6 +166,27 @@ function aiBox(p) {
   return paddleBoxes(p)[0];
 }
 
+/* The line the player cannot reach past — the x at which their paddle's
+   leading edge stops, on our side of the net.
+
+   Rotation-independent, which the box maths disguises. paddleBoxes insets the
+   limit by the rotated half-extent (`fx0 = reachAcross + hx`), so the box edge
+   moves as the paddle turns — but that limit applies to the paddle's CENTRE,
+   and the body reaches hx beyond it. The extremity therefore lands on
+   reachAcross at any angle. The inset exists to make that true.
+
+   Only offence may cross the net, and a solo paddle inherits the same reach,
+   so this one line binds in either paddle mode.
+
+   All the AI needs to know about where the player can be. Their full box would
+   need their paddle's identity and angle, and the perception ring carries
+   neither. */
+function aiPlayerReach(aiSide) {
+  const arena = aiCfg().arena;
+  const mid = arena.width / 2;
+  return mid - (-aiSide) * mid * arena.crossFrac;
+}
+
 /* ==========================================================================
    PER TICK
 
