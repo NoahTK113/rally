@@ -198,6 +198,7 @@
   <div class="card">
     <h1>BANJOBALL</h1>
     <button id="btnTutorial">HOW TO PLAY</button>
+    <button id="btnAI">PLAY THE COMPUTER</button>
     <button id="btnSolo">PRACTICE ALONE</button>
   </div>
 </div>
@@ -220,9 +221,9 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="ai.js?v=v16.0-local"></script>
-<script src="audio.js?v=v16.0-local"></script>
-<script src="tutorial.js?v=v16.0-local"></script>
+<script src="ai.js?v=v16.1-local"></script>
+<script src="audio.js?v=v16.1-local"></script>
+<script src="tutorial.js?v=v16.1-local"></script>
 <script>
 'use strict';
 
@@ -1506,8 +1507,28 @@ function drawCursor() {
   ctx.globalAlpha = 1;
 }
 
+/* A red cross where the AI believes its defensive position is. Computer match
+   only — practice is untouched.
+
+   Drawn from the same call the AI would read, not from a copy of the maths, so
+   the cross cannot show one thing while the AI acts on another. And because
+   the position comes from the PERCEIVED ball, the cross sits where the AI
+   thinks the ball is, which is a little behind where you can see it. */
+function drawDefensivePosition() {
+  if (!AI.on) return;
+  const d = aiDefensivePosition(-mySide);
+  const r = 0.35;
+  ctx.strokeStyle = '#f87171';
+  ctx.lineWidth = lineW();
+  ctx.beginPath();
+  ctx.moveTo(d.x - r, d.y); ctx.lineTo(d.x + r, d.y);
+  ctx.moveTo(d.x, d.y - r); ctx.lineTo(d.x, d.y + r);
+  ctx.stroke();
+}
+
 function drawEffects() {
   drawCursor();
+  drawDefensivePosition();
   if (!opts.showVectors) return;
   const p0 = me();
   arrow(p0.x, p0.y, p0.vx * VEL_SCALE, p0.vy * VEL_SCALE, 'rgba(125,211,252,.9)');
@@ -2100,7 +2121,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v16.0-local';
+const BUILD = 'v16.1-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2209,10 +2230,18 @@ function updateStatus() {
   $('status').innerHTML = teamName(mySide);
 }
 
+/* AI.on selects the mode and is deliberately NOT reset per match: finishing a
+   match returns to the lobby, and starting another there should keep you
+   playing whoever you chose to play. The menu handlers are the only thing that
+   changes it. */
+$('btnAI').addEventListener('click', function () {
+  AI.on = true; mySide = 1; showSetup();
+});
 $('btnSolo').addEventListener('click', function () {
-  mySide = 1; showSetup();
+  AI.on = false; mySide = 1; showSetup();
 });
 $('btnTutorial').addEventListener('click', function () {
+  AI.on = false;
   // Straight in: a lobby would be one more thing to explain before explaining
   // anything.
   mySide = 1;
