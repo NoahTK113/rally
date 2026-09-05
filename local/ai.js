@@ -131,14 +131,19 @@ function aiSelf(w, side) {
   return { p0: w.p[idOf(side, 0)], p1: w.p[idOf(side, 1)], sel: w.sel[String(side)] | 0 };
 }
 
-/* The paddles belonging to whoever `side` is playing against, as perceived —
-   same delay as the ball. Note the argument is OUR side, not theirs: callers
-   ask "who am I", not "who are they", because getting that backwards silently
-   returns your own paddles and reads as a channel that never updates. */
-function aiOpponent(side) {
+/* The PLAYER's paddles, as perceived — same delay as the ball.
+
+   Named for who they belong to rather than for their relationship to us.
+   "opponent" is relative: from here it means the player, from the player's
+   seat it means this AI, and a reader has to hold a perspective in their head
+   to know which. "player" means the same thing from either chair.
+
+   The argument is the AI's OWN side, because that is the fact the caller
+   reliably knows about itself. */
+function aiPlayerPaddles(aiSide) {
   const o = aiPerceived();
-  const opp = -side;
-  return { p0: o.p[idOf(opp, 0)], p1: o.p[idOf(opp, 1)], sel: o.sel[String(opp)] | 0 };
+  const ps = -aiSide;
+  return { p0: o.p[idOf(ps, 0)], p1: o.p[idOf(ps, 1)], sel: o.sel[String(ps)] | 0 };
 }
 
 /* ==========================================================================
