@@ -146,6 +146,26 @@ function aiPlayerPaddles(aiSide) {
   return { p0: o.p[idOf(ps, 0)], p1: o.p[idOf(ps, 1)], sel: o.sel[String(ps)] | 0 };
 }
 
+/* Where one of our paddles is allowed to be, right now.
+
+   Taken from the game's own paddleBoxes rather than re-deriving the zone
+   maths here. The same numbers computed in two places drift apart the moment
+   the zone rules change, and the AI would then be aiming at ground the clamp
+   will not let it reach — which is how the previous one ended up fighting the
+   boundary it could not see.
+
+   Index [0] is the court box. paddleBoxes also offers a second, disjoint box
+   for the goal pocket; we ignore it. There is nothing the AI wants inside its
+   own net, and a legal region in two pieces with a gap between them is a
+   source of trouble out of all proportion to its use.
+
+   NOT constant. The box shrinks by the paddle's rotated footprint, so it
+   changes as the paddle turns and as paddleLength or paddleT are retuned —
+   which is why this is a call, not a value. */
+function aiBox(p) {
+  return paddleBoxes(p)[0];
+}
+
 /* ==========================================================================
    PER TICK
 
