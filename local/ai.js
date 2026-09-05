@@ -131,11 +131,14 @@ function aiSelf(w, side) {
   return { p0: w.p[idOf(side, 0)], p1: w.p[idOf(side, 1)], sel: w.sel[String(side)] | 0 };
 }
 
-// The opponent's paddles, as perceived — same delay as the ball.
-function aiThem(side) {
+/* The paddles belonging to whoever `side` is playing against, as perceived —
+   same delay as the ball. Note the argument is OUR side, not theirs: callers
+   ask "who am I", not "who are they", because getting that backwards silently
+   returns your own paddles and reads as a channel that never updates. */
+function aiOpponent(side) {
   const o = aiPerceived();
-  const them = -side;
-  return { p0: o.p[idOf(them, 0)], p1: o.p[idOf(them, 1)], sel: o.sel[String(them)] | 0 };
+  const opp = -side;
+  return { p0: o.p[idOf(opp, 0)], p1: o.p[idOf(opp, 1)], sel: o.sel[String(opp)] | 0 };
 }
 
 /* ==========================================================================
