@@ -35,6 +35,8 @@ const AI = {
      adjusted their mouse. This is the AI's hand, in world units. */
   mouseSpeed: 25,     // m/s — furthest the emitted position may travel per second
   wheelSpeed: 12,     // notches/s — how fast the wheel can be turned
+
+  saveRate: 5,        // m/s — closing on our own goal faster than this is a save
 };
 
 /* Long enough to cover the largest reaction the panel allows (0.6s) at the
@@ -240,6 +242,34 @@ function aiDefensivePosition(aiSide) {
   const lo = arena.goalLip, hi = arena.goalLip + arena.goalHeight;
   const goalY = ball.y < lo ? lo : ball.y > hi ? hi : ball.y;
   return { x: (ball.x + goalX) / 2, y: (ball.y + goalY) / 2 };
+}
+
+/* How fast the ball is closing on our own goal: the rate at which the shortest
+   line from the ball to the goal mouth is shrinking.
+
+   That line ends at the nearest point on the mouth, so the rate is the ball's
+   velocity projected onto the unit vector pointing along it. Positive means
+   approaching; negative means the gap is opening.
+
+   Taken from the velocity we can see rather than by differencing positions.
+   The observation already carries velocity exactly, and differencing would
+   only add noise to a number we already have.
+
+   One property of the definition worth knowing: while the ball is level with
+   the mouth the line is horizontal, so vertical motion contributes nothing. A
+   ball flying straight up across the face of the goal is closing at zero,
+   which is right — it is getting no nearer. */
+function aiClosingRate(aiSide) {
+  const arena = aiCfg().arena;
+  const ball = aiPerceived().ball;
+  const goalX = aiSide < 0 ? 0 : arena.width;
+  const lo = arena.goalLip, hi = arena.goalLip + arena.goalHeight;
+  const goalY = ball.y < lo ? lo : ball.y > hi ? hi : ball.y;
+
+  const dx = goalX - ball.x, dy = goalY - ball.y;
+  const l = Math.hypot(dx, dy);
+  if (l < 1e-6) return 0;           // already there; nothing left to close
+  return (ball.vx * dx + ball.vy * dy) / l;
 }
 
 /* The angle that points the paddle's FACE at the ball.
