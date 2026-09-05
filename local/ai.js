@@ -188,6 +188,36 @@ function aiPlayerReach(aiSide) {
 }
 
 /* ==========================================================================
+   TIER 1 — DERIVED FROM PERCEPTION
+
+   Facts about the situation, computed from what we can see. Nothing here
+   simulates anything forward; every value is arithmetic on the present.
+   ========================================================================== */
+
+/* The ideal defensive position: the midpoint of the line from the ball to the
+   centre of our own goal mouth.
+
+   Standing on that line is what blocking means — anything travelling from the
+   ball to the goal has to pass through it — and the midpoint is the point on
+   it that stays useful as the ball moves, rather than committing to either
+   crowding the ball or sitting on the line.
+
+   Computed from the PERCEIVED ball, like everything the AI believes about the
+   world. Using the true ball here would give it a blocking position better
+   than its own eyes.
+
+   Not clamped to the box: this is where the AI would ideally stand, which is
+   not always somewhere it may legally be. Whether it can get there, and
+   whether it should try, are separate questions. */
+function aiDefensivePosition(aiSide) {
+  const arena = aiCfg().arena;
+  const ball = aiPerceived().ball;
+  const goalX = aiSide < 0 ? 0 : arena.width;
+  const goalY = (arena.goalLip + arena.goalLip + arena.goalHeight) / 2;
+  return { x: (ball.x + goalX) / 2, y: (ball.y + goalY) / 2 };
+}
+
+/* ==========================================================================
    PER TICK
 
    Observe, and stop. There is no decision layer yet, so the opponent's
