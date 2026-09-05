@@ -233,6 +233,26 @@ function aiDefensivePosition(aiSide) {
   return { x: (ball.x + goalX) / 2, y: (ball.y + goalY) / 2 };
 }
 
+/* The angle that points the paddle's FACE at the ball.
+
+   collidePaddle puts the paddle's spine along its local x, so for angle a the
+   spine runs along (cos a, sin a) and the face normal is perpendicular to it,
+   (-sin a, cos a). Wanting that normal to point along a unit vector (nx, ny)
+   therefore means -sin a = nx and cos a = ny, which is atan2(-nx, ny).
+
+   Facing the ball squarely is what presents the paddle's full width to it,
+   rather than an edge it can slide past. Measured from our own paddle, which
+   we know exactly, to the PERCEIVED ball, which we do not. */
+function aiFaceBall(w, side) {
+  const self = aiSelf(w, side);
+  const p = self.sel ? self.p1 : self.p0;
+  const b = aiPerceived().ball;
+  const nx = b.x - p.x, ny = b.y - p.y;
+  const l = Math.hypot(nx, ny);
+  if (l < 1e-6) return null;        // sitting on the ball: no opinion to have
+  return Math.atan2(-nx / l, ny / l);
+}
+
 /* ==========================================================================
    OUTPUT — THE HAND
 
@@ -276,7 +296,19 @@ function aiWheelToward(wantA, dt) {
   const budget = Math.floor(ai.notches);
   if (budget < 1) return;
 
-  const err = wantA - ai.outA;
+  /* Take the short way round. The wheel's angle accumulates without bound,
+     exactly as a player's does, while a decision naturally hands us something
+     from atan2 in (-pi, pi]. Turning to the literal number would mean winding
+     a full turn to reach an angle already underfoot.
+
+     This belongs to the HAND, not to whoever decided: it is the wheel that
+     knows where it currently sits, and putting it here means no future
+     decision can get it wrong. A whole turn is 12 coarse notches or 48 fine
+     ones, so shifting by one leaves the grid alignment untouched. */
+  const TAU = Math.PI * 2;
+  const target = wantA + TAU * Math.round((ai.outA - wantA) / TAU);
+
+  const err = target - ai.outA;
   const step = Math.abs(err) >= STEP_COARSE ? STEP_COARSE : STEP_FINE;
   const n = Math.round(err / step);
   if (n === 0) return;
@@ -320,9 +352,9 @@ function aiEmit(w, side, dst, want, dt) {
 function aiDecide(w, side) {
   // ---- future states go here, each returning early ----
 
-  // Default: hold the defensive position. Angle is not yet anyone's business.
+  // Default: hold the defensive position, face square to the ball.
   const d = aiDefensivePosition(side);
-  return { x: d.x, y: d.y, a: null };
+  return { x: d.x, y: d.y, a: aiFaceBall(w, side) };
 }
 
 /* ==========================================================================
