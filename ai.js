@@ -39,9 +39,6 @@ const AI = {
   saveRate: 5,        // m/s — closing on our own goal faster than this is a save
   saveDist: 3.0,      // m — this near the mouth is a save whatever the speed
   strikeDist: 1.75,   // m — inside this, commit and drive through the ball
-  lineFrac: 0.35,     // offset/range at which we are too far off the line to
-                      //   drive straight at the ball. It is sin of the angle,
-                      //   so 0.35 is about twenty degrees.
 };
 
 /* Long enough to cover the largest reaction the panel allows (0.6s) at the
@@ -293,40 +290,6 @@ function aiBallDistance(w, side) {
   return Math.hypot(ball.x - p.x, ball.y - p.y);
 }
 
-/* How far off the defensive line we are, as a FRACTION of our distance to the
-   ball rather than in metres.
-
-   That ratio is the sine of the angle at the ball between the line and our
-   approach, so a single number expresses "no more than this many degrees off"
-   at any range. Metres would be too strict far away and far too loose up
-   close, and being a metre off the line matters enormously at two metres from
-   the ball and barely at all at ten. */
-function aiLineOffset(w, side) {
-  const p = aiPaddle(w, side), ball = aiPerceived().ball;
-  const g = aiGoalPoint(side);
-  const lx = ball.x - g.x, ly = ball.y - g.y;
-  const l = Math.hypot(lx, ly);
-  const d = Math.hypot(ball.x - p.x, ball.y - p.y);
-  if (l < 1e-6 || d < 1e-6) return 0;
-  const cross = Math.abs(lx * (p.y - g.y) - ly * (p.x - g.x)) / l;
-  return cross / d;
-}
-
-/* The point on the line closest to us, clamped to the segment. Beyond the ball
-   that is the ball itself, and behind the goal point it is the goal point:
-   there is no sense chasing a projection that lies outside the line we care
-   about. */
-function aiNearestOnLine(w, side) {
-  const p = aiPaddle(w, side), ball = aiPerceived().ball;
-  const g = aiGoalPoint(side);
-  const lx = ball.x - g.x, ly = ball.y - g.y;
-  const ll = lx * lx + ly * ly;
-  if (ll < 1e-12) return { x: g.x, y: g.y };
-  let t = ((p.x - g.x) * lx + (p.y - g.y) * ly) / ll;
-  t = t < 0 ? 0 : t > 1 ? 1 : t;
-  return { x: g.x + lx * t, y: g.y + ly * t };
-}
-
 /* The angle that points the paddle's FACE at the ball.
 
    collidePaddle puts the paddle's spine along its local x, so for angle a the
@@ -469,37 +432,39 @@ function aiUpdateSave(side) {
   return ai.saving;
 }
 
-/* SAVE. Three cases, and the order matters more than any of them.
+/* SAVE. Hold the defensive position until the ball is within reach, then
+   drive through it.
 
-   Range is tested FIRST. Once inside strike distance the AI commits and stops
-   asking whether it is on the line — because the offset is a fraction of range,
-   and as range shrinks any fixed distance off the line becomes a large
-   fraction of it. Asking the line question up close would send the paddle back
-   to reposition at the exact moment it should be driving through the ball.
+   There is no need to advance on the ball before that. The defensive position
+   is the midpoint of the ball-to-goal line, so waiting there keeps the paddle
+   ON the line the whole time the ball is closing — and the line is where a
+   block has to happen. Setting off early would only mean meeting the ball
+   further from goal with less certainty about where it is going.
 
-   Then: too far off the line, get back on it. Otherwise drive at the ball.
+   The strike target sits one maxError PAST the ball, along that same line
+   extended away from the goal. One maxError because that is exactly where the
+   spring saturates: nearer gives less than full force, further gives no more.
+   Full power, least overshoot. The paddle therefore arrives still accelerating
+   and drives through the ball rather than settling onto it, and the direction
+   sends the ball straight out from our goal.
 
-   The strike target sits one maxError PAST the ball, along the line extended
-   away from the goal. One maxError because that is precisely where the spring
-   saturates — nearer gives less than full force, further gives no more — so it
-   is full power with the least overshoot. The paddle therefore arrives still
-   accelerating and drives through the ball instead of settling onto it, and
-   the direction sends the ball straight out from our goal. */
+   Note the target is already ON the line — it is the line, extended — so there
+   is no sideways error left to correct while striking. Blending it toward the
+   line would only drag it back along the line: at strike range the halfway
+   point lands behind the ball, and the paddle would stop short of the thing it
+   came to hit. */
 function aiSaveTarget(w, side) {
+  if (aiBallDistance(w, side) > AI.strikeDist) return aiDefensivePosition(side);
+
   const ball = aiPerceived().ball;
+  const g = aiGoalPoint(side);
+  const ux = ball.x - g.x, uy = ball.y - g.y;
+  const l = Math.hypot(ux, uy);
+  if (l < 1e-6) return { x: ball.x, y: ball.y };
 
-  if (aiBallDistance(w, side) <= AI.strikeDist) {
-    const g = aiGoalPoint(side);
-    const ux = ball.x - g.x, uy = ball.y - g.y;
-    const l = Math.hypot(ux, uy);
-    const reach = Math.min(aiCfg().feel.maxError, aiCfg().feel.reach);
-    if (l < 1e-6) return { x: ball.x, y: ball.y };
-    return { x: ball.x + (ux / l) * reach, y: ball.y + (uy / l) * reach };
-  }
-
-  if (aiLineOffset(w, side) > AI.lineFrac) return aiNearestOnLine(w, side);
-
-  return { x: ball.x, y: ball.y };
+  const feel = aiCfg().feel;
+  const past = Math.min(feel.maxError, feel.reach);
+  return { x: ball.x + (ux / l) * past, y: ball.y + (uy / l) * past };
 }
 
 function aiDecide(w, side) {
