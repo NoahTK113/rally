@@ -220,9 +220,9 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="ai.js?v=v15.4-local"></script>
-<script src="audio.js?v=v15.4-local"></script>
-<script src="tutorial.js?v=v15.4-local"></script>
+<script src="ai.js?v=v15.5-local"></script>
+<script src="audio.js?v=v15.5-local"></script>
+<script src="tutorial.js?v=v15.5-local"></script>
 <script>
 'use strict';
 
@@ -1640,20 +1640,20 @@ function aiReadout() {
   const f = (n, d = 2) => n.toFixed(d).padStart(6);
   const lag = Math.hypot(ball.x - o.ball.x, ball.y - o.ball.y);
   const expect = Math.hypot(ball.vx, ball.vy) * AI.reaction;
-  /* The AI plays -mySide, so ITS opponent is you. Asking aiThem for mySide's
-     opponent returned the AI's own paddle, which nothing drives in a local
-     game — two columns of identical numbers that could never disagree.
+  /* The AI plays -mySide, so ITS opponent is you. Asking aiOpponent for
+     mySide's opponent returns the AI's own paddle, which nothing drives in a
+     local game — two columns of identical numbers that could never disagree.
      Indexed by the paddle you are actually holding, or in two-paddle mode it
      would report the one you left parked. */
   const i = world.sel[String(mySide)] | 0;
-  const you = aiThem(-mySide);
-  const seen = i ? you.p1 : you.p0;
+  const opp = aiOpponent(-mySide);
+  const seen = i ? opp.p1 : opp.p0;
   const now = paddles[idOf(mySide, i)];
-  const yLag = Math.hypot(now.x - seen.x, now.y - seen.y);
+  const oLag = Math.hypot(now.x - seen.x, now.y - seen.y);
   return `see   ball ${f(o.ball.x)}, ${f(o.ball.y)}   now ${f(ball.x)}, ${f(ball.y)}<br>` +
          `lag   ${f(lag)} m   expect ${f(expect)}   @ ${AI.reaction.toFixed(2)}s<br>` +
-         `you   ${f(seen.x)}, ${f(seen.y)}   now ${f(now.x)}, ${f(now.y)}<br>` +
-         `ylag  ${f(yLag)} m   expect ${f(Math.hypot(now.vx, now.vy) * AI.reaction)}`;
+         `opp   ${f(seen.x)}, ${f(seen.y)}   now ${f(now.x)}, ${f(now.y)}<br>` +
+         `oplag ${f(oLag)} m   expect ${f(Math.hypot(now.vx, now.vy) * AI.reaction)}`;
 }
 
 function buildReadout() {
@@ -2127,7 +2127,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v15.4-local';
+const BUILD = 'v15.5-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
