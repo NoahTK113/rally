@@ -37,6 +37,11 @@ const AI = {
   wheelSpeed: 12,     // notches/s — how fast the wheel can be turned
 
   saveRate: 5,        // m/s — closing on our own goal faster than this is a save
+  saveDist: 3.0,      // m — this near the mouth is a save whatever the speed
+  strikeDist: 1.75,   // m — inside this, commit and drive through the ball
+  lineFrac: 0.35,     // offset/range at which we are too far off the line to
+                      //   drive straight at the ball. It is sin of the angle,
+                      //   so 0.35 is about twenty degrees.
 };
 
 /* Long enough to cover the largest reaction the panel allows (0.6s) at the
@@ -65,6 +70,8 @@ const ai = {
   outSet: false,
   outX: 0, outY: 0, outA: 0,
   notches: 0,      // fractional wheel allowance carried between ticks
+
+  saving: false,   // latched: see aiUpdateSave
 };
 
 function aiInit() {
@@ -73,6 +80,7 @@ function aiInit() {
   ai.outSet = false;
   ai.outX = ai.outY = ai.outA = 0;
   ai.notches = 0;
+  ai.saving = false;
   if (!ai.hist) {
     ai.hist = new Array(AI_HIST);
     for (let i = 0; i < AI_HIST; i++) ai.hist[i] = makeObservation();
@@ -212,64 +220,111 @@ function aiPlayerReach(aiSide) {
    simulates anything forward; every value is arithmetic on the present.
    ========================================================================== */
 
-/* The ideal defensive position: the midpoint of the SHORTEST line from the
-   ball to our own goal mouth.
-
-   The mouth is a vertical segment, not a point, so the shortest line to it
-   ends wherever the ball is level with — the ball's height clamped between
-   the lip and the crossbar. Above the goal that lands on the top corner,
-   below it on the bottom corner, and anywhere in between it runs flat along
-   x. Aiming at the mouth's CENTRE instead put the AI below the threat when
-   the ball was high in the opening and above it when the ball was low, which
-   is off the line it is supposed to be standing on.
-
-   Standing on that line is what blocking means — anything travelling from the
-   ball to the goal has to cross it — and the midpoint is the point on it that
-   stays useful as the ball moves, rather than committing to crowding the ball
-   or sitting on the line.
-
-   Computed from the PERCEIVED ball, like everything the AI believes about the
-   world. Using the true ball would give it a blocking position better than its
-   own eyes.
-
-   Not clamped to the box: this is where the AI would ideally stand, which is
-   not always somewhere it may legally be. Whether it can get there, and
-   whether it should try, are separate questions. */
-function aiDefensivePosition(aiSide) {
-  const arena = aiCfg().arena;
-  const ball = aiPerceived().ball;
-  const goalX = aiSide < 0 ? 0 : arena.width;
-  const lo = arena.goalLip, hi = arena.goalLip + arena.goalHeight;
-  const goalY = ball.y < lo ? lo : ball.y > hi ? hi : ball.y;
-  return { x: (ball.x + goalX) / 2, y: (ball.y + goalY) / 2 };
+// The held paddle. Ours, so exact and current.
+function aiPaddle(w, side) {
+  const self = aiSelf(w, side);
+  return self.sel ? self.p1 : self.p0;
 }
 
-/* How fast the ball is closing on our own goal: the rate at which the shortest
-   line from the ball to the goal mouth is shrinking.
+/* The nearest point on our own goal mouth to the ball. The mouth is a vertical
+   segment, so that is the ball's height clamped between the lip and the
+   crossbar: the top corner when the ball is above, the bottom corner when it
+   is below, and straight along x in between.
 
-   That line ends at the nearest point on the mouth, so the rate is the ball's
-   velocity projected onto the unit vector pointing along it. Positive means
-   approaching; negative means the gap is opening.
-
-   Taken from the velocity we can see rather than by differencing positions.
-   The observation already carries velocity exactly, and differencing would
-   only add noise to a number we already have.
-
-   One property of the definition worth knowing: while the ball is level with
-   the mouth the line is horizontal, so vertical motion contributes nothing. A
-   ball flying straight up across the face of the goal is closing at zero,
-   which is right — it is getting no nearer. */
-function aiClosingRate(aiSide) {
+   One definition, used by everything downstream. It was written out three
+   separate times before this and the copies would have drifted the first time
+   the goal geometry changed. */
+function aiGoalPoint(aiSide) {
   const arena = aiCfg().arena;
   const ball = aiPerceived().ball;
-  const goalX = aiSide < 0 ? 0 : arena.width;
   const lo = arena.goalLip, hi = arena.goalLip + arena.goalHeight;
-  const goalY = ball.y < lo ? lo : ball.y > hi ? hi : ball.y;
+  return { x: aiSide < 0 ? 0 : arena.width,
+           y: ball.y < lo ? lo : ball.y > hi ? hi : ball.y };
+}
 
-  const dx = goalX - ball.x, dy = goalY - ball.y;
+/* THE DEFENSIVE LINE runs from that point to the ball. Everything about
+   defending is expressed against it: where to stand, how fast the danger is
+   growing, and how far out of position we are. */
+
+/* The ideal defensive position: the midpoint of the line.
+
+   Standing on the line is what blocking means — anything travelling from the
+   ball to the goal has to cross it — and the midpoint is the point on it that
+   stays useful as the ball moves, rather than committing to crowding the ball
+   or sitting on the goal.
+
+   Not clamped to the box: this is where the AI would ideally stand, which is
+   not always somewhere it may legally be. */
+function aiDefensivePosition(aiSide) {
+  const ball = aiPerceived().ball;
+  const g = aiGoalPoint(aiSide);
+  return { x: (ball.x + g.x) / 2, y: (ball.y + g.y) / 2 };
+}
+
+// How long the line is: the ball's distance from our goal mouth.
+function aiBallGoalDistance(aiSide) {
+  const ball = aiPerceived().ball;
+  const g = aiGoalPoint(aiSide);
+  return Math.hypot(g.x - ball.x, g.y - ball.y);
+}
+
+/* How fast the line is shrinking — the ball's velocity projected along it.
+   Positive approaching, negative opening.
+
+   Taken from the velocity the observation already carries rather than by
+   differencing positions, which would only add noise to a number we have
+   exactly.
+
+   While the ball is level with the mouth the line is horizontal, so vertical
+   motion contributes nothing. A ball flying straight up across the face of the
+   goal closes at zero, which is right: it is getting no nearer. */
+function aiClosingRate(aiSide) {
+  const ball = aiPerceived().ball;
+  const g = aiGoalPoint(aiSide);
+  const dx = g.x - ball.x, dy = g.y - ball.y;
   const l = Math.hypot(dx, dy);
-  if (l < 1e-6) return 0;           // already there; nothing left to close
+  if (l < 1e-6) return 0;
   return (ball.vx * dx + ball.vy * dy) / l;
+}
+
+// Our paddle's distance from the ball.
+function aiBallDistance(w, side) {
+  const p = aiPaddle(w, side), ball = aiPerceived().ball;
+  return Math.hypot(ball.x - p.x, ball.y - p.y);
+}
+
+/* How far off the defensive line we are, as a FRACTION of our distance to the
+   ball rather than in metres.
+
+   That ratio is the sine of the angle at the ball between the line and our
+   approach, so a single number expresses "no more than this many degrees off"
+   at any range. Metres would be too strict far away and far too loose up
+   close, and being a metre off the line matters enormously at two metres from
+   the ball and barely at all at ten. */
+function aiLineOffset(w, side) {
+  const p = aiPaddle(w, side), ball = aiPerceived().ball;
+  const g = aiGoalPoint(side);
+  const lx = ball.x - g.x, ly = ball.y - g.y;
+  const l = Math.hypot(lx, ly);
+  const d = Math.hypot(ball.x - p.x, ball.y - p.y);
+  if (l < 1e-6 || d < 1e-6) return 0;
+  const cross = Math.abs(lx * (p.y - g.y) - ly * (p.x - g.x)) / l;
+  return cross / d;
+}
+
+/* The point on the line closest to us, clamped to the segment. Beyond the ball
+   that is the ball itself, and behind the goal point it is the goal point:
+   there is no sense chasing a projection that lies outside the line we care
+   about. */
+function aiNearestOnLine(w, side) {
+  const p = aiPaddle(w, side), ball = aiPerceived().ball;
+  const g = aiGoalPoint(side);
+  const lx = ball.x - g.x, ly = ball.y - g.y;
+  const ll = lx * lx + ly * ly;
+  if (ll < 1e-12) return { x: g.x, y: g.y };
+  let t = ((p.x - g.x) * lx + (p.y - g.y) * ly) / ll;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return { x: g.x + lx * t, y: g.y + ly * t };
 }
 
 /* The angle that points the paddle's FACE at the ball.
@@ -279,12 +334,11 @@ function aiClosingRate(aiSide) {
    (-sin a, cos a). Wanting that normal to point along a unit vector (nx, ny)
    therefore means -sin a = nx and cos a = ny, which is atan2(-nx, ny).
 
-   Facing the ball squarely is what presents the paddle's full width to it,
-   rather than an edge it can slide past. Measured from our own paddle, which
-   we know exactly, to the PERCEIVED ball, which we do not. */
+   Facing the ball squarely presents the paddle's full width to it rather than
+   an edge it can slide past. Measured from our own paddle, which we know
+   exactly, to the PERCEIVED ball, which we do not. */
 function aiFaceBall(w, side) {
-  const self = aiSelf(w, side);
-  const p = self.sel ? self.p1 : self.p0;
+  const p = aiPaddle(w, side);
   const b = aiPerceived().ball;
   const nx = b.x - p.x, ny = b.y - p.y;
   const l = Math.hypot(nx, ny);
@@ -388,12 +442,77 @@ function aiEmit(w, side, dst, want, dt) {
    a slot. The default is what happens when nothing else claims the tick, and
    every state that ends falls back to it without having to say so.
    ========================================================================== */
-function aiDecide(w, side) {
-  // ---- future states go here, each returning early ----
+/* Is the ball a threat we have to deal with now?
 
-  // Default: hold the defensive position, face square to the ball.
+   Entering takes EITHER alarm; leaving takes BOTH to be clear. That asymmetry
+   is the whole hysteresis — no extra thresholds needed. Between "closing at
+   saveRate" and "actually receding" lies a wide band in which the state simply
+   holds, so a ball that merely slows down does not release it.
+
+   Exit deliberately does not fire on contact. After a good touch the ball
+   flies off, the rate goes negative and the distance grows, so the triggers
+   release within a tick or two anyway — contact buys nothing there. After a
+   BAD touch, one that leaves the ball trickling goalward, contact would say
+   "done" while the ball is still going in. It is a proxy for success that is
+   wrong in exactly the case that matters.
+
+   A stationary ball in front of the mouth can never satisfy the exit, because
+   zero is not less than zero. That is correct: it still has to be dealt with. */
+function aiUpdateSave(side) {
+  const closing = aiClosingRate(side);
+  const dist = aiBallGoalDistance(side);
+  if (ai.saving) {
+    if (closing < 0 && dist > AI.saveDist) ai.saving = false;
+  } else if (closing > AI.saveRate || dist < AI.saveDist) {
+    ai.saving = true;
+  }
+  return ai.saving;
+}
+
+/* SAVE. Three cases, and the order matters more than any of them.
+
+   Range is tested FIRST. Once inside strike distance the AI commits and stops
+   asking whether it is on the line — because the offset is a fraction of range,
+   and as range shrinks any fixed distance off the line becomes a large
+   fraction of it. Asking the line question up close would send the paddle back
+   to reposition at the exact moment it should be driving through the ball.
+
+   Then: too far off the line, get back on it. Otherwise drive at the ball.
+
+   The strike target sits one maxError PAST the ball, along the line extended
+   away from the goal. One maxError because that is precisely where the spring
+   saturates — nearer gives less than full force, further gives no more — so it
+   is full power with the least overshoot. The paddle therefore arrives still
+   accelerating and drives through the ball instead of settling onto it, and
+   the direction sends the ball straight out from our goal. */
+function aiSaveTarget(w, side) {
+  const ball = aiPerceived().ball;
+
+  if (aiBallDistance(w, side) <= AI.strikeDist) {
+    const g = aiGoalPoint(side);
+    const ux = ball.x - g.x, uy = ball.y - g.y;
+    const l = Math.hypot(ux, uy);
+    const reach = Math.min(aiCfg().feel.maxError, aiCfg().feel.reach);
+    if (l < 1e-6) return { x: ball.x, y: ball.y };
+    return { x: ball.x + (ux / l) * reach, y: ball.y + (uy / l) * reach };
+  }
+
+  if (aiLineOffset(w, side) > AI.lineFrac) return aiNearestOnLine(w, side);
+
+  return { x: ball.x, y: ball.y };
+}
+
+function aiDecide(w, side) {
+  const face = aiFaceBall(w, side);   // the same in every state
+
+  if (aiUpdateSave(side)) {
+    const t = aiSaveTarget(w, side);
+    return { x: t.x, y: t.y, a: face };
+  }
+
+  // Default: hold the defensive position.
   const d = aiDefensivePosition(side);
-  return { x: d.x, y: d.y, a: aiFaceBall(w, side) };
+  return { x: d.x, y: d.y, a: face };
 }
 
 /* ==========================================================================
