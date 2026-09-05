@@ -210,17 +210,25 @@ function aiPlayerReach(aiSide) {
    simulates anything forward; every value is arithmetic on the present.
    ========================================================================== */
 
-/* The ideal defensive position: the midpoint of the line from the ball to the
-   centre of our own goal mouth.
+/* The ideal defensive position: the midpoint of the SHORTEST line from the
+   ball to our own goal mouth.
+
+   The mouth is a vertical segment, not a point, so the shortest line to it
+   ends wherever the ball is level with — the ball's height clamped between
+   the lip and the crossbar. Above the goal that lands on the top corner,
+   below it on the bottom corner, and anywhere in between it runs flat along
+   x. Aiming at the mouth's CENTRE instead put the AI below the threat when
+   the ball was high in the opening and above it when the ball was low, which
+   is off the line it is supposed to be standing on.
 
    Standing on that line is what blocking means — anything travelling from the
-   ball to the goal has to pass through it — and the midpoint is the point on
-   it that stays useful as the ball moves, rather than committing to either
-   crowding the ball or sitting on the line.
+   ball to the goal has to cross it — and the midpoint is the point on it that
+   stays useful as the ball moves, rather than committing to crowding the ball
+   or sitting on the line.
 
    Computed from the PERCEIVED ball, like everything the AI believes about the
-   world. Using the true ball here would give it a blocking position better
-   than its own eyes.
+   world. Using the true ball would give it a blocking position better than its
+   own eyes.
 
    Not clamped to the box: this is where the AI would ideally stand, which is
    not always somewhere it may legally be. Whether it can get there, and
@@ -229,7 +237,8 @@ function aiDefensivePosition(aiSide) {
   const arena = aiCfg().arena;
   const ball = aiPerceived().ball;
   const goalX = aiSide < 0 ? 0 : arena.width;
-  const goalY = (arena.goalLip + arena.goalLip + arena.goalHeight) / 2;
+  const lo = arena.goalLip, hi = arena.goalLip + arena.goalHeight;
+  const goalY = ball.y < lo ? lo : ball.y > hi ? hi : ball.y;
   return { x: (ball.x + goalX) / 2, y: (ball.y + goalY) / 2 };
 }
 
