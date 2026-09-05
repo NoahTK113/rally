@@ -39,6 +39,8 @@ const AI = {
   saveRate: 5,        // m/s — closing on our own goal faster than this is a save
   saveDist: 3.0,      // m — this near the mouth is a save whatever the speed
   strikeDist: 1.75,   // m — inside this, commit and drive through the ball
+  strikeAngle: 25,    // deg — how far our approach may sit off the line before
+                      //   the strike is abandoned and we get back on it
 };
 
 /* Long enough to cover the largest reaction the panel allows (0.6s) at the
@@ -69,6 +71,7 @@ const ai = {
   notches: 0,      // fractional wheel allowance carried between ticks
 
   saving: false,   // latched: see aiUpdateSave
+  lined: true,     // latched: are we square enough behind the ball to strike?
 };
 
 function aiInit() {
@@ -78,6 +81,7 @@ function aiInit() {
   ai.outX = ai.outY = ai.outA = 0;
   ai.notches = 0;
   ai.saving = false;
+  ai.lined = true;
   if (!ai.hist) {
     ai.hist = new Array(AI_HIST);
     for (let i = 0; i < AI_HIST; i++) ai.hist[i] = makeObservation();
@@ -290,6 +294,45 @@ function aiBallDistance(w, side) {
   return Math.hypot(ball.x - p.x, ball.y - p.y);
 }
 
+/* The point on the line closest to us, clamped to the segment. Beyond the ball
+   that is the ball itself; behind the goal point it is the goal point. */
+function aiNearestOnLine(w, side) {
+  const p = aiPaddle(w, side), ball = aiPerceived().ball;
+  const g = aiGoalPoint(side);
+  const lx = ball.x - g.x, ly = ball.y - g.y;
+  const ll = lx * lx + ly * ly;
+  if (ll < 1e-12) return { x: g.x, y: g.y };
+  let t = ((p.x - g.x) * lx + (p.y - g.y) * ly) / ll;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return { x: g.x + lx * t, y: g.y + ly * t };
+}
+
+/* How far our approach sits off the defensive line, in DEGREES: the angle
+   between the direction we would drive (paddle to ball) and the direction the
+   ball should leave in (goal to ball, extended).
+
+   Degrees rather than the perpendicular offset over range we first reached
+   for. That ratio is sin of this angle, and sine FOLDS BACK past ninety
+   degrees — a paddle a hundred and seventy degrees off, sitting almost
+   directly beyond the ball and about to knock it homeward, scores 0.17 on it,
+   better than a harmless twenty. The cosine behind this is monotonic all the
+   way to a hundred and eighty, so being on the wrong side of the ball reads as
+   what it is: the worst case, not a good one.
+
+   Which is the failure this exists to catch. Contact sends the ball roughly
+   along paddle-to-ball extended, so this angle is very nearly the angle the
+   ball leaves at, measured from straight out of our own goal. */
+function aiStrikeOffAngle(w, side) {
+  const p = aiPaddle(w, side), ball = aiPerceived().ball, g = aiGoalPoint(side);
+  const ux = ball.x - g.x, uy = ball.y - g.y;      // where the ball should go
+  const ax = ball.x - p.x, ay = ball.y - p.y;      // where we would send it
+  const ul = Math.hypot(ux, uy), al = Math.hypot(ax, ay);
+  if (ul < 1e-6 || al < 1e-6) return 0;
+  let c = (ux * ax + uy * ay) / (ul * al);
+  c = c < -1 ? -1 : c > 1 ? 1 : c;
+  return Math.acos(c) * 180 / Math.PI;
+}
+
 /* The angle that points the paddle's FACE at the ball.
 
    collidePaddle puts the paddle's spine along its local x, so for angle a the
@@ -454,7 +497,24 @@ function aiUpdateSave(side) {
    point lands behind the ball, and the paddle would stop short of the thing it
    came to hit. */
 function aiSaveTarget(w, side) {
-  if (aiBallDistance(w, side) > AI.strikeDist) return aiDefensivePosition(side);
+  if (aiBallDistance(w, side) > AI.strikeDist) {
+    ai.lined = true;                 // each new strike starts with a clean slate
+    return aiDefensivePosition(side);
+  }
+
+  /* Guard the strike while it is happening, not only when it begins. Driving
+     through the ball from the wrong angle sends it sideways, and from behind it
+     sends it at our own goal — worse than not striking at all. If the approach
+     drifts too far off, abandon the strike and get back on the line first.
+
+     Latched with room between the thresholds: leaving takes the full angle,
+     returning takes well under it. Identical ones would have the paddle
+     flicking between striking and repositioning while it sat on the boundary,
+     and those two want it in quite different places. */
+  const off = aiStrikeOffAngle(w, side);
+  if (ai.lined) { if (off > AI.strikeAngle) ai.lined = false; }
+  else if (off < AI.strikeAngle * 0.6) ai.lined = true;
+  if (!ai.lined) return aiNearestOnLine(w, side);
 
   const ball = aiPerceived().ball;
   const g = aiGoalPoint(side);
