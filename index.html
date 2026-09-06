@@ -1558,7 +1558,7 @@ function drawShotPlan() {
 
   // the flight afterwards, solved
   const g = PHYS.gravity;
-  const vx = sh.dirx * sh.speed, vy = sh.diry * sh.speed;
+  const vx = sh.vx, vy = sh.vy;   // NOT dir*speed: the outgoing is off the normal
   ctx.strokeStyle = '#4ade80';
   ctx.beginPath();
   const N = 48;
@@ -2211,7 +2211,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v18.7-local';
+const BUILD = 'v18.8-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
