@@ -102,15 +102,6 @@
               border-radius:50%;background:#22d3ee;cursor:pointer}
   .sens .v{color:#ffffff;font-variant-numeric:tabular-nums;min-width:45px;text-align:right}
 
-  #sensBar{position:fixed;bottom:14px;right:16px;z-index:9;display:none;align-items:center;
-           gap:10px;font-size:14px;letter-spacing:.12em;color:#ffffff;
-           text-shadow:0 1px 3px #000}
-  body.playing #sensBar{display:flex}
-  #sensBar input{-webkit-appearance:none;appearance:none;width:120px;height:3px;
-                 border-radius:2px;background:#22303f;outline:none;cursor:pointer}
-  #sensBar input::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
-                 border-radius:50%;background:#22d3ee;cursor:pointer}
-  #sensBar .v{color:#ffffff;font-variant-numeric:tabular-nums;min-width:41px}
 
   #lockHint{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9;
             display:none;padding:22px 38px;border-radius:14px;font-size:30px;
@@ -119,11 +110,23 @@
   #lockHint small{display:block;margin-top:12px;font-size:15px;letter-spacing:.1em;
                   color:#ffffff}
 
-  #tut{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:9;
+  /* Two positions, one box. Centred while an instruction is being read, and on
+     the top rail once it is being carried out - the bottom is inside the field
+     of play and the box was covering it. 34px clears the build watermark and
+     the developer flag. */
+  #tut{position:fixed;left:50%;z-index:9;
        display:none;min-width:420px;max-width:70vw;padding:18px 26px;text-align:center;
        border-radius:12px;background:rgba(10,14,22,.92);border:1px solid #24344a;
        pointer-events:none}
   body.tutorial #tut{display:block}
+  #tut.mid{top:50%;transform:translate(-50%,-50%)}
+  #tut.top{top:34px;transform:translateX(-50%)}
+  #tutReady{margin-top:14px;font-size:14px;color:#ffffff;letter-spacing:.08em}
+  #tutReady b{color:#22d3ee;font-weight:600}
+  /* The tutorial says CLICK ANYWHERE ON THE FIELD itself. Two cards asking for
+     the same click, one centred and one below, was the first thing a new
+     player saw. */
+  body.tutorial #lockHint{display:none!important}
   #tutText{font-size:20px;line-height:1.45;color:#ffffff;letter-spacing:.04em}
   #tutText b{color:#22d3ee;font-weight:600}
   #tutHint{margin-top:8px;font-size:14px;color:#ffffff;letter-spacing:.08em}
@@ -203,14 +206,6 @@
 <div id="build"></div>
 <div id="devFlag" class="hidden">DEVELOPER MODE</div>
 <div id="status"></div>
-<div id="sensBar">
-  <span>MOUSE SENSITIVITY</span>
-  <input id="sensPlay" type="range" min="0.2" max="3" step="0.05" value="1">
-  <span class="v" id="sensPlayVal">1.00</span>
-  <span>VOLUME</span>
-  <input id="volPlay" type="range" min="0" max="1" step="0.05" value="0.7">
-  <span class="v" id="volPlayVal">70</span>
-</div>
 <div id="lockHint"><span id="lockMain">CLICK TO START</span><small id="lockSub">&nbsp;</small></div>
 <div id="pause">
   <div class="pcard" id="pauseMain">
@@ -218,6 +213,12 @@
     <button id="pResume">RESUME GAME</button>
     <button id="pControls">CONTROLS</button>
     <button id="pExit">EXIT GAME</button>
+    <div class="sl"><span>MOUSE SENSITIVITY</span>
+      <input id="sensPause" type="range" min="0.2" max="3" step="0.05" value="1">
+      <span class="v" id="sensPauseVal">1.00</span></div>
+    <div class="sl"><span>VOLUME</span>
+      <input id="volPause" type="range" min="0" max="1" step="0.05" value="0.7">
+      <span class="v" id="volPauseVal">70</span></div>
   </div>
 
   <div class="pcard hidden" id="pauseControls">
@@ -236,12 +237,6 @@
       <dt>H</dt><dd>Developer settings</dd>
       <dt>Tab</dt><dd>Swap teams</dd>
     </dl>
-    <div class="sl"><span>MOUSE SENSITIVITY</span>
-      <input id="sensPause" type="range" min="0.2" max="3" step="0.05" value="1">
-      <span class="v" id="sensPauseVal">1.00</span></div>
-    <div class="sl"><span>VOLUME</span>
-      <input id="volPause" type="range" min="0" max="1" step="0.05" value="0.7">
-      <span class="v" id="volPauseVal">70</span></div>
     <button id="pBack">BACK</button>
   </div>
 
@@ -257,6 +252,7 @@
 <div id="tut">
   <div id="tutText"></div>
   <div id="tutHint"></div>
+  <div id="tutReady"></div>
   <div id="tutDots"></div>
 </div>
 <div id="setup" class="hidden">
@@ -344,10 +340,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v17.3-dev"></script>
-<script src="ai.js?v=v17.3-dev"></script>
-<script src="audio.js?v=v17.3-dev"></script>
-<script src="tutorial.js?v=v17.3-dev"></script>
+<script src="shot.js?v=v17.4-dev"></script>
+<script src="ai.js?v=v17.4-dev"></script>
+<script src="audio.js?v=v17.4-dev"></script>
+<script src="tutorial.js?v=v17.4-dev"></script>
 <script>
 'use strict';
 
@@ -2072,6 +2068,10 @@ addEventListener('keydown', e => {
     updateStatus();
   }
 
+  // A brief takes the space bar first, or the press that starts the
+  // switch-paddles step would also switch the paddles.
+  if (k === ' ' && tutSpace()) return;
+
   if (k === ' ' && MATCH.paddles > 1) {
     /* Take hold of the other paddle. The cursor moves to it rather than the
        paddle flying to the cursor — you pick up the handle where it is, which
@@ -2441,7 +2441,9 @@ function frame(nowMs) {
   if (fpsAcc > 0.25) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
 
   let steps = 0;
-  const holdSim = paused && !net.up;   // a local match stops; an online one cannot
+  // A local match stops; an online one cannot. A tutorial brief stops too:
+  // it is always solo, and reading is not something to do against a clock.
+  const holdSim = (paused && !net.up) || tutHold();
 
   /* Read through devTools rather than the flag itself. opts.freezeOnShot sets
      `frozen` from inside ai.js on every shot the AI commits to, and it is
@@ -2510,7 +2512,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v17.3-dev';
+const BUILD = 'v17.4-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3273,20 +3275,16 @@ $('pExitYes').addEventListener('click', () => { paused = false;
 function paintSens() {
   const v = MOUSE.sens.toFixed(2);
   $('sensSetup').value = MOUSE.sens;
-  $('sensPlay').value = MOUSE.sens;
   $('sensPause').value = MOUSE.sens;
   $('sensSetupVal').textContent = v;
-  $('sensPlayVal').textContent = v;
   $('sensPauseVal').textContent = v;
 }
 
 function paintVolume() {
   const pct = Math.round(AUDIO.vol * 100);
   $('volSetup').value = AUDIO.vol;
-  $('volPlay').value = AUDIO.vol;
   $('volPause').value = AUDIO.vol;
   $('volSetupVal').textContent = pct;
-  $('volPlayVal').textContent = pct;
   $('volPauseVal').textContent = pct;
 }
 
@@ -3599,9 +3597,7 @@ $('diffRange').addEventListener('input', e => setDifficulty(parseInt(e.target.va
 $('tuneNo').addEventListener('click', () => setKeepTuning(false));
 $('tuneYes').addEventListener('click', () => setKeepTuning(true));
 $('sensSetup').addEventListener('input', e => setSens(parseFloat(e.target.value)));
-$('sensPlay').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 $('volSetup').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
-$('volPlay').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
 $('sensPause').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 $('volPause').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
 
