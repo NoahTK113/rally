@@ -92,12 +92,14 @@ const AI_STAND_FULL = 2.0;
 
    Anything not listed is shared by both levels and lives on the sliders. */
 const AI_LEVELS = {
-  1:  { AI:   { reaction: 0.17, raceMargin: 1.15, aimError: 72,
-                touchError: 50, standError: 50,   standPeriod: 1.15 },
+  1:  { AI:   { reaction: 0.17, saveRate: 4.5, saveDist: 4.4, raceMargin: 2.00,
+                aimError: 90,   touchError: 50, standError: 100,
+                standPeriod: 1.15 },
         SHOT: { swingTime: 0.30 } },
 
-  10: { AI:   { reaction: 0.00, raceMargin: 1.40, aimError: 0,
-                touchError: 0,  standError: 0,    standPeriod: 1.00 },
+  10: { AI:   { reaction: 0.00, saveRate: 7.0, saveDist: 1.5, raceMargin: 1.40,
+                aimError: 0,    touchError: 0,  standError: 0,
+                standPeriod: 1.00 },
         SHOT: { swingTime: 0.20 } },
 };
 
