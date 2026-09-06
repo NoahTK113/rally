@@ -221,10 +221,10 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="shot.js?v=v18.7-local"></script>
-<script src="ai.js?v=v18.7-local"></script>
-<script src="audio.js?v=v18.7-local"></script>
-<script src="tutorial.js?v=v18.7-local"></script>
+<script src="shot.js?v=v19.0-local"></script>
+<script src="ai.js?v=v19.0-local"></script>
+<script src="audio.js?v=v19.0-local"></script>
+<script src="tutorial.js?v=v19.0-local"></script>
 <script>
 'use strict';
 
@@ -1906,6 +1906,10 @@ const KNOBS = [
   { o: AI, k: 'clearDist', label: 'clear at' , min: 0.2,  max: 6,   step: 0.05, u: 'm' },
   { o: AI, k: 'clearAngle',label: 'clear ang',min: 5,   max: 90,  step: 1,    u: '°' },
   { o: AI, k: 'raceMargin', label: 'race margin', min: 0.3, max: 2, step: 0.05, u: '×' },
+  { o: AI, k: 'aimError',   label: 'aim err',   min: 0,    max: 100, step: 1,   u: '%' },
+  { o: AI, k: 'touchError', label: 'touch err', min: 0,    max: 100, step: 1,   u: '%' },
+  { o: AI, k: 'standError', label: 'stand err', min: 0,    max: 100, step: 1,   u: '%' },
+  { o: AI, k: 'standPeriod',label: 'stand every',min: 0.05, max: 4,  step: 0.05, u: 's' },
   { o: SHOT, k: 'swingTime', label: 'swing time', min: 0.05, max: 0.5, step: 0.01, u: 's' },
   { o: AI, k: 'followThrough', label: 'follow thru', min: 0, max: 2.5, step: 0.05, u: 'm' },
   { o: SHOT, k: 'minWindow', label: 'min window', min: 0, max: 0.4, step: 0.005, u: 's' },
@@ -2211,7 +2215,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v18.9-local';
+const BUILD = 'v19.0-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
