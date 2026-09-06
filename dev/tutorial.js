@@ -31,9 +31,11 @@
    ========================================================================== */
 const tut = {
   active: false,
-  phase: 'start',   // 'start' waiting for the click | 'brief' reading | 'active' doing
+  phase: 'start',   // 'start' click | 'brief' reading | 'active' doing | 'praise' well done
   step: 0,
   held: 0,          // seconds the current step has been satisfied
+  praiseT: 0,       // seconds the WELL DONE card has been up
+  activeT: 0,       // seconds this step has been under way, for steps with nothing to do
   moved: 0,         // metres the held paddle has travelled
   turned: 0,        // radians of commanded rotation
   fine: 0,          // radians commanded while the fine modifier was held
@@ -48,22 +50,55 @@ const tut = {
    thing a new player saw. */
 const TUT_START = 'First, <b>click anywhere on the field</b> to start the game.';
 const TUT_READY = 'Press the <b>space bar</b> when you are ready.';
+const TUT_PRAISE = 'Well done.';
+const TUT_PRAISE_T = 3.0;            // seconds the card holds before fading
+const TUT_FADE_T   = 0.3;            // and how long the fade itself takes
+
+/* The wheel turns in 30 degree steps, so 90 is three of them and 45 is not
+   reachable at all without the fine modifier. A tolerance under half a fine
+   step keeps the neighbours out: at 3.5 degrees, 37.5 and 52.5 both miss. */
+const TUT_ANGLE_TOL = 3.5 * Math.PI / 180;
+
+/* A paddle is a rectangle, so it looks the same at a and a+180. Fold the
+   commanded angle into [0,180) and both ways up count as the same answer -
+   otherwise "make it vertical" would have a right and a wrong 90. */
+function tutAngleIs(deg) {
+  const target = deg * Math.PI / 180;
+  let a = intent.ta % Math.PI;
+  if (a < 0) a += Math.PI;
+  return Math.abs(a - target) < TUT_ANGLE_TOL ||
+         Math.abs(a - target - Math.PI) < TUT_ANGLE_TOL ||
+         Math.abs(a - target + Math.PI) < TUT_ANGLE_TOL;
+}
 
 const STEPS = [
   {
     text: 'Move your mouse to <b>control your paddle</b>.',
     hint: 'the paddle chases the cursor; the line between them is the pull',
-    done: () => tut.moved > 8,
+    done: () => tut.moved > 25,
   },
   {
-    text: '<b>Roll the mouse wheel</b> to turn the paddle.',
-    hint: 'it turns in fixed steps, so flat and upright are always reachable',
-    done: () => tut.turned > Math.PI * 1.5,
+    text: 'You can also <b>roll the mouse wheel</b> to tilt and spin your paddle. ' +
+          'Try rotating the paddle so that it is <b>vertical</b>.',
+    hint: 'the wheel turns in 30° steps, so upright is exactly three of them',
+    done: () => tutAngleIs(90),
   },
   {
-    text: 'Hold <b>right-click</b> and roll the wheel for finer turns.',
-    hint: 'smaller steps, for angles the coarse ones skip',
-    done: () => tut.fine > Math.PI * 0.4,
+    text: 'Now try <b>tilting your paddle at an angle</b>. ' +
+          'This is often a good angle for hitting the ball.',
+    /* 30 or 60, both one coarse step from flat or upright. An earlier draft
+       asked for 45, which the 30° wheel cannot reach at all without the fine
+       modifier - a step the player could not finish with what they had been
+       taught so far. */
+    hint: 'a tilted face sends the ball away at an angle instead of straight back',
+    done: () => tutAngleIs(30) || tutAngleIs(60),
+  },
+  {
+    text: 'The goal of the game is simply to <b>score on your opponent</b> ' +
+          'and <b>defend your own goal</b>.',
+    hint: 'nothing to do here — read the field',
+    goals: true,                       // draw the two labels while this one runs
+    done: () => tut.activeT > 5,
   },
   {
     text: 'Press <b>space</b> to take hold of your other paddle.',
@@ -117,6 +152,7 @@ function tutStop() {
 function tutResetCounters() {
   tut.moved = tut.turned = tut.fine = 0;
   tut.switched = tut.hits = tut.goals = 0;
+  tut.activeT = 0;
 }
 
 /* The world stands still for anything that is being read. Asked by the frame
@@ -137,19 +173,23 @@ function tutSpace() {
 
 function paintTutorial() {
   const box = $('tut');
-  const start = tut.phase === 'start';
-  const brief = tut.phase === 'brief';
-  const s = start ? null : STEPS[tut.step];
-  if (!start && !s) return;
+  box.classList.remove('fade');       // a repaint is always something to see
+  const start  = tut.phase === 'start';
+  const brief  = tut.phase === 'brief';
+  const praise = tut.phase === 'praise';
+  const s = (start || praise) ? null : STEPS[tut.step];
+  if (!start && !praise && !s) return;
 
-  $('tutText').innerHTML = start ? TUT_START : s.text;
-  $('tutHint').textContent = start ? '' : (s.hint || '');
+  $('tutText').innerHTML = start ? TUT_START : praise ? TUT_PRAISE : s.text;
+  // innerHTML, not textContent: hints carry <b> now.
+  $('tutHint').innerHTML = (start || praise) ? '' : (s.hint || '');
   $('tutReady').innerHTML = brief ? TUT_READY : '';
   $('tutReady').style.display = brief ? '' : 'none';
 
-  // Centred while reading, on the top rail while playing.
-  box.classList.toggle('mid', start || brief);
-  box.classList.toggle('top', !start && !brief);
+  // Centred for anything being read; on the top rail only while playing.
+  const reading = start || brief || praise;
+  box.classList.toggle('mid', reading);
+  box.classList.toggle('top', !reading);
 
   let dots = '';
   for (let i = 0; i < STEPS.length; i++) {
@@ -171,21 +211,43 @@ function pumpTutorial(dt) {
     return;
   }
 
+  /* WELL DONE, then out. The card holds, fades over its last moments, and the
+     next brief is painted as it disappears - so the two never overlap and the
+     new instruction arrives on a clean screen. The world stays held throughout,
+     since tutHold only lets 'active' run. */
+  if (tut.phase === 'praise') {
+    tut.praiseT += dt;
+    if (tut.praiseT > TUT_PRAISE_T - TUT_FADE_T) $('tut').classList.add('fade');
+    if (tut.praiseT >= TUT_PRAISE_T) tutAdvance();
+    return;
+  }
+
   const s = STEPS[tut.step];
   if (!s) return;
   if (s.skip && s.skip()) { tutAdvance(); return; }
   if (tut.phase !== 'active') return;     // reading; nothing counts yet
 
   if (!s.entered) { s.entered = true; if (s.enter) s.enter(); }
+  tut.activeT += dt;
 
   // A beat after the predicate holds, so a completed instruction is visibly
   // acknowledged rather than vanishing under the player's hands.
   if (s.done()) {
     tut.held += dt;
-    if (tut.held > 0.45) tutAdvance();
+    if (tut.held > 0.45) tutPraise();
   } else {
     tut.held = 0;
   }
+}
+
+/* Every gate earns a WELL DONE - except the last step, which is the sign-off
+   and has nothing to congratulate. */
+function tutPraise() {
+  if (tut.step >= STEPS.length - 1) { tutAdvance(); return; }
+  tut.phase = 'praise';
+  tut.praiseT = 0;
+  tut.held = 0;
+  paintTutorial();
 }
 
 function tutAdvance() {
@@ -195,6 +257,65 @@ function tutAdvance() {
   if (tut.step >= STEPS.length) { tutStop(); leaveGame(); return; }
   tut.phase = 'brief';                    // every step is read before it is done
   paintTutorial();
+}
+
+/* THE TWO GOALS, labelled, while the step that explains them runs.
+
+   Drawn in screen space off the same view mapping the scoreboard uses, so the
+   labels sit beside the goals at any zoom without needing the world transform.
+
+   Side +1 scores into x = 0 - checkGoal awards +1 when the ball crosses there -
+   so the goal you attack is the one at the far end from the one you defend, and
+   both follow mySide rather than being written down. */
+function tutShowsGoals() {
+  const s = STEPS[tut.step];
+  return tut.active && tut.phase === 'active' && s && s.goals;
+}
+
+function drawTutorialGoals(ctx) {
+  if (!tutShowsGoals()) return;
+  const sx = wx => view.ox + wx * view.scale;
+  const sy = wy => view.oy - wy * view.scale;
+  const midY = (goalY0() + goalY1()) / 2;
+
+  const marks = [
+    { x: mySide > 0 ? 0 : A.width, text: 'THEIR GOAL — SCORE HERE' },
+    { x: mySide > 0 ? A.width : 0, text: 'YOUR GOAL — DEFEND IT'   },
+  ];
+
+  ctx.save();
+  ctx.font = `700 ${Math.max(11, Math.round(view.scale * 0.30))}px ui-monospace, Consolas, monospace`;
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = Math.max(1.5, view.scale * 0.035);
+
+  for (const m of marks) {
+    const inward = m.x === 0 ? 1 : -1;              // into the field, whichever end
+    const tipX = sx(m.x + inward * 0.25);
+    const tipY = sy(midY);
+    const labX = sx(m.x + inward * 2.6);
+    const labY = sy(goalY1() + 1.6);
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(labX, labY + view.scale * 0.18);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+
+    // arrowhead, pointing at the mouth
+    const ang = Math.atan2(tipY - (labY + view.scale * 0.18), tipX - labX);
+    const h = Math.max(6, view.scale * 0.16);
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(tipX - h * Math.cos(ang - 0.4), tipY - h * Math.sin(ang - 0.4));
+    ctx.lineTo(tipX - h * Math.cos(ang + 0.4), tipY - h * Math.sin(ang + 0.4));
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.textAlign = inward > 0 ? 'left' : 'right';
+    ctx.fillText(m.text, labX, labY);
+  }
+  ctx.restore();
 }
 
 /* The counters below are fed from the ordinary input path and from the

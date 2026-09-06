@@ -114,13 +114,17 @@
      the top rail once it is being carried out - the bottom is inside the field
      of play and the box was covering it. 34px clears the build watermark and
      the developer flag. */
-  #tut{position:fixed;left:50%;z-index:9;
+  /* One transition serves both directions: adding .fade takes the WELL DONE
+     card out, and removing it on the next repaint brings the new
+     instruction in. */
+  #tut{position:fixed;left:50%;z-index:9;transition:opacity .3s ease;
        display:none;min-width:420px;max-width:70vw;padding:18px 26px;text-align:center;
        border-radius:12px;background:rgba(10,14,22,.92);border:1px solid #24344a;
        pointer-events:none}
   body.tutorial #tut{display:block}
   #tut.mid{top:50%;transform:translate(-50%,-50%)}
   #tut.top{top:34px;transform:translateX(-50%)}
+  #tut.fade{opacity:0}
   #tutReady{margin-top:14px;font-size:14px;color:#ffffff;letter-spacing:.08em}
   #tutReady b{color:#22d3ee;font-weight:600}
   /* The tutorial says CLICK ANYWHERE ON THE FIELD itself. Two cards asking for
@@ -340,10 +344,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v17.4-dev"></script>
-<script src="ai.js?v=v17.4-dev"></script>
-<script src="audio.js?v=v17.4-dev"></script>
-<script src="tutorial.js?v=v17.4-dev"></script>
+<script src="shot.js?v=v17.5-dev"></script>
+<script src="ai.js?v=v17.5-dev"></script>
+<script src="audio.js?v=v17.5-dev"></script>
+<script src="tutorial.js?v=v17.5-dev"></script>
 <script>
 'use strict';
 
@@ -1803,6 +1807,7 @@ function drawHud() {
   }
 
   drawAnnouncement();
+  drawTutorialGoals(ctx);
   paintLockHint();
 }
 
@@ -2512,7 +2517,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v17.4-dev';
+const BUILD = 'v17.5-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
