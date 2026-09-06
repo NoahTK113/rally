@@ -38,7 +38,17 @@ const AI = {
 
   saveRate: 7,        // m/s — closing on our own goal faster than this is a save
   saveDist: 1.5,      // m — this near the mouth is a save whatever the speed
-  throughDist: 1.75,   // m — inside this, commit and drive through the ball
+  clearDist: 1.75,    // m — inside this, the clear commits and drives through
+  followThrough: 0.75,// m of target held BEYOND the clamp distance.
+
+                      /* Not extra force — the error clamp forbids that. Extra
+                         DURATION of full force. At exactly maxError the paddle
+                         sits on the clamp boundary the instant it reaches the
+                         ball, so arriving a moment early drops the error below
+                         the clamp and it is already decelerating when the ball
+                         turns up. Holding the target further out keeps the
+                         error above the clamp until well past the contact, so
+                         full pace is still on when it matters. */
   clearAngle: 25,    // deg — how far our approach may sit off the line before
                       //   the clear is abandoned and we get back on it
   shotHold: 0.15,     // s to keep a shot alive past its contact time, so a hit
@@ -768,7 +778,7 @@ function aiShotTarget(w, side) {
      closed form. Capped at maxError, beyond which the clamp gives nothing. */
   const omega = 2 * Math.PI * feel.posFreq;
   const cap = Math.min(feel.maxError, feel.reach);
-  const past = Math.min(cap, 2 * feel.posDamp * sh.swing / omega);
+  const past = Math.min(cap, 2 * feel.posDamp * sh.swing / omega) + AI.followThrough;
   return { x: sh.x + sh.dirx * past, y: sh.y + sh.diry * past };
 }
 
@@ -835,7 +845,7 @@ function aiUpdateSave(side) {
    point lands behind the ball, and the paddle would stop short of the thing it
    came to hit. */
 function aiSaveTarget(w, side) {
-  if (aiBallDistance(w, side) > AI.throughDist) {
+  if (aiBallDistance(w, side) > AI.clearDist) {
     ai.lined = true;                 // each new clear starts with a clean slate
     return aiDefensivePosition(side);
   }
@@ -869,7 +879,7 @@ function aiSaveTarget(w, side) {
   if (l < 1e-6) return { x: ball.x, y: ball.y };
 
   const feel = aiCfg().feel;
-  const past = Math.min(feel.maxError, feel.reach);
+  const past = Math.min(feel.maxError, feel.reach) + AI.followThrough;
   return { x: ball.x + (ux / l) * past, y: ball.y + (uy / l) * past };
 }
 
