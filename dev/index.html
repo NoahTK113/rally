@@ -294,8 +294,8 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v15.0-dev"></script>
-<script src="tutorial.js?v=v15.0-dev"></script>
+<script src="audio.js?v=v15.1-dev"></script>
+<script src="tutorial.js?v=v15.1-dev"></script>
 <script>
 'use strict';
 
@@ -2223,7 +2223,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v15.0-dev';
+const BUILD = 'v15.1-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2807,6 +2807,17 @@ function makeLoopbackPair() {
 // One-way delay applied to the host's own link. Half the round trip, because
 // the guest's packets traverse the wire once in each direction.
 function linkDelayMs() {
+  /* Practice and the computer are one machine talking to itself. There is no
+     trip to simulate, so none is simulated: solo runs at whatever the loopback
+     can deliver, which is one tick.
+
+     This overrides NET.floor deliberately. The floor existed so practice would
+     feel like a real match rather than teaching a timing you could not
+     reproduce online — a defensible idea, and the cost of dropping it is that
+     practice is now the snappier of the two. Against the computer that is the
+     right trade: the opponent is not on a wire, and pretending it is only
+     makes the game worse to play. */
+  if (net.role === 'solo') return 0;
   if (!NET.autoDelay) return Math.max(0, NET.hostDelay);
   // Connected: match the guest's one-way trip exactly. Taking max() with the
   // floor here would penalise the host beyond the guest on a fast link, which
