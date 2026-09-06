@@ -60,11 +60,11 @@
   .stepper button:hover:not(:disabled){border-color:#22d3ee}
   .stepper button:disabled{opacity:.3;cursor:default}
   #ptVal{min-width:74px;font-size:30px;font-weight:700;color:#e6edf6;font-variant-numeric:tabular-nums}
-  #ptRange{-webkit-appearance:none;appearance:none;width:100%;height:3px;border-radius:2px;
+  #ptRange,#diffRange{-webkit-appearance:none;appearance:none;width:100%;height:3px;border-radius:2px;
            background:#22303f;outline:none;margin:0 0 10px;cursor:pointer}
-  #ptRange::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+  #ptRange::-webkit-slider-thumb,#diffRange::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
            background:#22d3ee;cursor:pointer}
-  #ptRange:disabled::-webkit-slider-thumb{background:#3f4d61;cursor:default}
+  #ptRange:disabled::-webkit-slider-thumb,#diffRange:disabled::-webkit-slider-thumb{background:#3f4d61;cursor:default}
   .hint{font-size:10px;color:#66788f;margin-bottom:22px}
   #setup .go{width:100%;padding:12px;font:inherit;font-size:11px;letter-spacing:.14em;
              border-radius:8px;cursor:pointer;background:#151d2b;color:#c9d4e2;
@@ -169,6 +169,11 @@
   <div class="card">
     <div id="setupOwner">
       <h1>SETUP</h1>
+      <div id="diffRow" class="hidden">
+        <div class="lab">DIFFICULTY</div>
+        <input id="diffRange" type="range" min="1" max="10" step="1" value="10">
+        <div class="hint" id="diffHint">level 10</div>
+      </div>
       <div class="lab">PADDLES PER PLAYER</div>
       <div class="seg">
         <button id="pd1">1</button>
@@ -224,10 +229,10 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="shot.js?v=v19.6-local"></script>
-<script src="ai.js?v=v19.6-local"></script>
-<script src="audio.js?v=v19.6-local"></script>
-<script src="tutorial.js?v=v19.6-local"></script>
+<script src="shot.js?v=v19.7-local"></script>
+<script src="ai.js?v=v19.7-local"></script>
+<script src="audio.js?v=v19.7-local"></script>
+<script src="tutorial.js?v=v19.7-local"></script>
 <script>
 'use strict';
 
@@ -2298,7 +2303,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.6-local';
+const BUILD = 'v19.7-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2347,6 +2352,7 @@ function showSetup() {
   $('setupMsg').innerHTML = '';
   paintTarget();
   paintPaddles();
+  paintDifficulty();
 }
 
 function paintSens() {
@@ -2369,6 +2375,24 @@ function setSens(v) {
   MOUSE.sens = Math.max(0.2, Math.min(3, Math.round(v * 100) / 100));
   try { localStorage.setItem('banjoball.sens', MOUSE.sens); } catch (e) {}
   paintSens();
+}
+
+/* Only meaningful against the computer, so it is hidden the rest of the time
+   rather than shown greyed out — there is no version of a two-human match
+   where a difficulty setting means anything. */
+function paintDifficulty() {
+  $('diffRow').classList.toggle('hidden', !AI.on);
+  $('diffRange').value = aiLevel;
+  $('diffHint').textContent = aiLevel === 10 ? 'level 10 — as hard as it plays'
+                            : aiLevel === 1  ? 'level 1 — slow, and misses a lot'
+                            : 'level ' + aiLevel;
+}
+
+function setDifficulty(n) {
+  aiSetLevel(n);
+  try { localStorage.setItem('banjoball.ai', aiLevel); } catch (e) {}
+  paintDifficulty();
+  syncPanel();          // the tuning panel must not go on showing the old set
 }
 
 function paintPaddles() {
@@ -2431,6 +2455,7 @@ $('pd2').addEventListener('click', () => setPaddles(2));
 $('ptMinus').addEventListener('click', () => setTarget(MATCH.target - 1));
 $('ptPlus').addEventListener('click', () => setTarget(MATCH.target + 1));
 $('ptRange').addEventListener('input', e => setTarget(parseInt(e.target.value, 10)));
+$('diffRange').addEventListener('input', e => setDifficulty(parseInt(e.target.value, 10)));
 $('sensSetup').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 $('sensPlay').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 $('volSetup').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
@@ -2447,7 +2472,7 @@ $('volPlay').addEventListener('input', e => setVolume(parseFloat(e.target.value)
    it when a value would be MISREAD, not merely when a default moves. */
 const PREFS_VERSION = 1;
 const PREFS_KEYS = ['banjoball.target', 'banjoball.sens',
-                    'banjoball.paddles', 'banjoball.vol'];
+                    'banjoball.paddles', 'banjoball.vol', 'banjoball.ai'];
 
 function prefsCheck() {
   try {
@@ -2469,6 +2494,8 @@ try {
   if (!isNaN(saved)) MATCH.target = Math.max(0, Math.min(100, saved));
   const ms = parseFloat(localStorage.getItem('banjoball.sens'));
   if (!isNaN(ms)) MOUSE.sens = Math.max(0.2, Math.min(3, ms));
+  const lv = parseInt(localStorage.getItem('banjoball.ai'), 10);
+  if (lv >= 1 && lv <= 10) aiSetLevel(lv);
   const pc = parseInt(localStorage.getItem('banjoball.paddles'), 10);
   if (pc === 1 || pc === 2) MATCH.paddles = pc;
   const vv = parseFloat(localStorage.getItem('banjoball.vol'));
@@ -2482,6 +2509,7 @@ updateStatus();
 
 $('build').textContent = BUILD;   // the watermark, top-left
 
+paintDifficulty();
 buildPanel();
 serve(world);
 resize();
