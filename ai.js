@@ -425,6 +425,15 @@ function aiBallEscapeRate(aiSide) {
   return aiBallRecession(p.x, p.y);
 }
 
+/* Is the ball already beyond the player's reach?
+
+   The threshold is a MULTIPLE of the player's top speed rather than a figure
+   in metres per second, so retuning the spring cannot quietly invalidate it.
+   Above 1 is cautious, below 1 optimistic. */
+function aiBallEscaped(aiSide) {
+  return aiBallEscapeRate(aiSide) > AI.opportunityVelMargin * maxPaddleSpeed();
+}
+
 /* Is the ball past the furthest the player could ever touch?
 
    Their box is not computable from here — the perception ring stores pose and
