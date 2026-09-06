@@ -1,0 +1,1096 @@
+/* Classic script, not a module — see tutorial.js for why.
+
+   ==========================================================================
+   AI — TIER 0: PERCEPTION AND CONFIGURATION
+
+   This file currently decides NOTHING. It establishes the channels the
+   opponent receives information through, and nothing else. Behaviour is a
+   later layer that reads from here.
+
+   Three channels, and they differ in ways that matter:
+
+     PERCEPTION   everything outside us — the ball and both players' paddles —
+                  recorded every tick and read back `reaction` seconds stale.
+                  One uniform rule, no per-item exceptions: a person cannot
+                  see an opponent's hand any sooner than they can see the ball.
+
+     PROPRIOCEPTION  our own paddles, exact and current. Knowing where your own
+                  hand is, is not perception and carries no delay.
+
+     CONFIGURATION  the arena, the physics, our own spring response. It looks
+                  constant and is not: a slider can move mid-match. So it is
+                  READ, never captured — see aiCfg below.
+
+   Match state — phase, timers, score — is deliberately outside perception. It
+   is not something you see across the court and mistime; it is announced.
+   ========================================================================== */
+
+const AI = {
+  on: false,
+  reaction: 0,     // s — how stale our view of the OUTSIDE WORLD is
+
+  /* The hand. Not derived from the player's mouse settings on purpose: their
+     cursor speed depends on their own sensitivity slider and window size, so
+     borrowing it would make the AI's hand change speed whenever the player
+     adjusted their mouse. This is the AI's hand, in world units. */
+  mouseSpeed: 25,     // m/s — furthest the emitted position may travel per second
+  wheelSpeed: 12,     // notches/s — how fast the wheel can be turned
+
+  saveRate: 7,        // m/s — closing on our own goal faster than this is a save
+  saveDist: 1.5,      // m — this near the mouth is a save whatever the speed
+  clearDist: 1.75,    // m — inside this, the clear commits and drives through
+  followThrough: 1.0, // m of target held BEYOND the clamp distance.
+
+                      /* Not extra force — the error clamp forbids that. Extra
+                         DURATION of full force. At exactly maxError the paddle
+                         sits on the clamp boundary the instant it reaches the
+                         ball, so arriving a moment early drops the error below
+                         the clamp and it is already decelerating when the ball
+                         turns up. Holding the target further out keeps the
+                         error above the clamp until well past the contact, so
+                         full pace is still on when it matters. */
+  clearAngle: 25,    // deg — how far our approach may sit off the line before
+                      //   the clear is abandoned and we get back on it
+  shotHold: 0.15,     // s to keep a shot alive past its contact time, so a hit
+                      //   and a miss both end it the same way
+
+  raceMargin: 1.4,    // head start insisted on before attacking, as a fraction
+                      //   of the player's time to the ball. Under 1 is cautious,
+                      //   over 1 contests balls we are slightly behind on.
+
+  /* ERROR. Everything above describes an AI playing as well as it can; these
+     say how far short of that it falls. All are percentages of a stated 100%,
+     so a difficulty level can ask for "a third of a bad human's miss" without
+     knowing the units underneath.
+
+     Aim and touch are separate on purpose. They are not two sizes of the same
+     mistake: a misaim is struck cleanly and goes to the wrong place, a bad
+     touch is aimed right and hit off the end of the paddle. They look nothing
+     alike in play, so they tune apart. */
+  aimError: 0,        // % — 100% is 45 deg of face-angle error
+  touchError: 0,      // % — 100% is half a paddle plus a ball: a clean miss
+  standError: 0,      // % — 100% is 2m out of defensive position
+  standPeriod: 1.0,   // s — how often the standing error is re-drawn
+};
+
+/* 100% of a standing error, in metres. Aim and touch measure themselves
+   against the geometry they act on; this one has nothing to measure against,
+   so it is simply stated. */
+const AI_STAND_FULL = 2.0;
+
+/* ==========================================================================
+   DIFFICULTY
+
+   Two ENDPOINTS, and everything between them is interpolated. Both ends state
+   every key rather than one being "the defaults" — a level has to be able to
+   put back what another one changed, or moving down and back up would leave
+   the low level's values sitting there.
+
+   SHOT is in here too: swingTime belongs to the search, but how long the AI
+   winds up is difficulty, not geometry. shot.js loads first, so the object is
+   already there to write into.
+
+   Anything not listed is shared by every level and lives on the sliders. */
+const AI_LEVELS = {
+  1:  { AI:   { reaction: 0.17, saveRate: 4.5, saveDist: 4.4, raceMargin: 2.00,
+                aimError: 90,   touchError: 50, standError: 100,
+                standPeriod: 1.15 },
+        SHOT: { swingTime: 0.30 } },
+
+  10: { AI:   { reaction: 0.00, saveRate: 7.0, saveDist: 1.5, raceMargin: 1.40,
+                aimError: 0,    touchError: 0,  standError: 0,
+                standPeriod: 1.00 },
+        SHOT: { swingTime: 0.20 } },
+};
+
+let aiLevel = 10;             // what the defaults already are, so nothing to apply
+
+/* Straight line between the two ends. Every key is a number and every one of
+   them wants the same treatment, so there is nothing to special-case — which
+   is the argument for keeping the endpoints as plain value tables rather than
+   as code. Adding a parameter to the ladder means adding it to both ends and
+   nothing else.
+
+   Whether linear is RIGHT is a separate question and a tuning one: reaction in
+   particular has outsized effect and may want a curve, which would go here as
+   a per-key easing rather than as a different structure. */
+function aiSetLevel(n) {
+  const lvl = Math.max(1, Math.min(10, Math.round(n)));
+  const t = (lvl - 1) / 9;
+  const lo = AI_LEVELS[1], hi = AI_LEVELS[10];
+  for (const [name, obj] of [['AI', AI], ['SHOT', SHOT]]) {
+    const a = lo[name], b = hi[name];
+    for (const k in a) obj[k] = a[k] + (b[k] - a[k]) * t;
+  }
+  aiLevel = lvl;
+}
+
+/* Long enough to cover the largest reaction the panel allows (0.6s) at the
+   simulation rate, with room to spare. Sized from the constants rather than
+   guessed, so a faster tick or a slower slider cannot quietly overrun it. */
+const AI_HIST = 256;
+
+/* One observation: the whole world except our own paddles. All four paddles
+   are recorded rather than "the opponent's two", so the ring does not care
+   which side we are playing — Tab swaps sides mid-match, and a ring that had
+   baked in a side would then be holding the wrong paddles. The reader decides
+   which of these are theirs; see aiPerceived. */
+function makeObservation() {
+  const o = { ball: { x: 0, y: 0, vx: 0, vy: 0, w: 0 }, p: {}, sel: { '-1': 0, '1': 0 } };
+  for (const id of PIDS) o.p[id] = { x: 0, y: 0, a: 0, vx: 0, vy: 0, w: 0 };
+  return o;
+}
+
+const ai = {
+  hist: null,      // ring of observations
+  head: 0,         // next slot to write
+  filled: 0,       // how many are valid — matters only for the first moments
+
+  // The hand's own position, carried between ticks. What was last EMITTED,
+  // not where the paddle got to.
+  outSet: false,
+  outX: 0, outY: 0, outA: 0,
+  notches: 0,      // fractional wheel allowance carried between ticks
+
+  blind: 0,        // s of blackout left after a serve; see aiLiveBall
+  lastPhase: null, // to notice the moment play begins
+  saving: false,   // latched: see aiUpdateSave
+  lined: true,     // latched: are we square enough behind the ball to clear?
+  shot: null,      // the shot being executed, from shot.js
+  shotAge: 0,      // s since it was chosen
+  evSeen: 0,       // event id watermark, for spotting a contact
+
+  standU: 0,       // 0..1 phase between the two drift waypoints
+  stand0X: 0, stand0Y: 0, // the waypoint drifted FROM, in units of the amplitude
+  stand1X: 0, stand1Y: 0, // and the one drifted TO
+  standX: 0, standY: 0,   // the offset itself, in metres
+};
+
+function aiInit() {
+  ai.head = 0;
+  ai.filled = 0;
+  ai.outSet = false;
+  ai.outX = ai.outY = ai.outA = 0;
+  ai.notches = 0;
+  ai.saving = false;
+  ai.lined = true;
+  ai.shot = null;
+  ai.shotAge = 0;
+  ai.evSeen = 0;
+  ai.blind = 0;
+  ai.lastPhase = null;
+  ai.standU = 0;
+  ai.stand0X = ai.stand0Y = 0;     // start centred and drift out of it
+  ai.stand1X = Math.random() * 2 - 1;
+  ai.stand1Y = Math.random() * 2 - 1;
+  ai.standX = ai.standY = 0;
+  if (!ai.hist) {
+    ai.hist = new Array(AI_HIST);
+    for (let i = 0; i < AI_HIST; i++) ai.hist[i] = makeObservation();
+  }
+}
+
+/* Registered rather than called from startGame: this state belongs to the AI,
+   so the knowledge that it needs clearing belongs here too. Without it the
+   opponent would open each match still holding the previous one's view. */
+onNewGame(aiInit);
+
+/* ==========================================================================
+   CONFIGURATION
+
+   Every one of these is a function, and that is the whole point. The tuning
+   panel writes straight into A, FEEL and PHYS while a match is running, so a
+   value captured once — at match start, at plan time, anywhere — silently
+   stops matching the game it describes. Nothing here may become a stored
+   number. If a caller finds itself holding one of these, it has a bug.
+
+   Returned objects are LIVE REFERENCES, not copies, for the same reason.
+   ========================================================================== */
+function aiCfg() {
+  return {
+    arena: A,        // width, height, net, goals, paddle size, zone fractions
+    feel: FEEL,      // our own spring: frequencies, damping, error clamp, reach
+    phys: PHYS,      // gravity, restitution, friction, ball radius
+    match: MATCH,    // points to win, paddles per side
+    dt: FIXED_DT,    // the tick the simulation actually advances by
+  };
+}
+
+/* ==========================================================================
+   PERCEPTION
+   ========================================================================== */
+
+// Every tick: record the true state of everything outside us.
+function aiObserve(w) {
+  const o = ai.hist[ai.head];
+  const b = w.ball;
+  o.ball.x = b.x; o.ball.y = b.y; o.ball.vx = b.vx; o.ball.vy = b.vy; o.ball.w = b.w;
+  for (const id of PIDS) {
+    const src = w.p[id], rec = o.p[id];
+    rec.x = src.x; rec.y = src.y; rec.a = src.a;
+    rec.vx = src.vx; rec.vy = src.vy; rec.w = src.w;
+  }
+  o.sel['-1'] = w.sel['-1'];
+  o.sel['1'] = w.sel['1'];
+
+  ai.head = (ai.head + 1) % AI_HIST;
+  if (ai.filled < AI_HIST) ai.filled++;
+}
+
+/* The world as it looked `reaction` seconds ago.
+
+   Perception is DELAYED, not degraded. The values are exact; they are simply
+   old. That is the honest model of a person's limit — they are not seeing a
+   blurred ball, they are seeing precisely where it was a moment ago.
+
+   Reads the tick length from configuration rather than assuming one, so
+   changing the simulation rate does not silently change the reaction time. */
+function aiPerceived() {
+  if (!ai.hist) aiInit();
+  const dt = aiCfg().dt;
+  const want = Math.round(AI.reaction / dt);
+  const back = Math.min(Math.max(want, 0), Math.max(0, ai.filled - 1));
+  return ai.hist[((ai.head - 1 - back) % AI_HIST + AI_HIST) % AI_HIST];
+}
+
+/* Our own paddles, undelayed, straight from the live world. Separate function
+   from aiPerceived so the distinction is impossible to blur at a call site:
+   if it came from here it is current, if it came from there it is stale. */
+function aiSelf(w, side) {
+  return { p0: w.p[idOf(side, 0)], p1: w.p[idOf(side, 1)], sel: w.sel[String(side)] | 0 };
+}
+
+/* The PLAYER's paddles, as perceived — same delay as the ball.
+
+   Named for who they belong to rather than for their relationship to us.
+   "opponent" is relative: from here it means the player, from the player's
+   seat it means this AI, and a reader has to hold a perspective in their head
+   to know which. "player" means the same thing from either chair.
+
+   The argument is the AI's OWN side, because that is the fact the caller
+   reliably knows about itself. */
+function aiPlayerPaddles(aiSide) {
+  const o = aiPerceived();
+  const ps = -aiSide;
+  return { p0: o.p[idOf(ps, 0)], p1: o.p[idOf(ps, 1)], sel: o.sel[String(ps)] | 0 };
+}
+
+/* Where one of our paddles is allowed to be, right now.
+
+   Taken from the game's own paddleBoxes rather than re-deriving the zone
+   maths here. The same numbers computed in two places drift apart the moment
+   the zone rules change, and the AI would then be aiming at ground the clamp
+   will not let it reach — which is how the previous one ended up fighting the
+   boundary it could not see.
+
+   Index [0] is the court box. paddleBoxes also offers a second, disjoint box
+   for the goal pocket; we ignore it. There is nothing the AI wants inside its
+   own net, and a legal region in two pieces with a gap between them is a
+   source of trouble out of all proportion to its use.
+
+   NOT constant. The box shrinks by the paddle's rotated footprint, so it
+   changes as the paddle turns and as paddleLength or paddleT are retuned —
+   which is why this is a call, not a value. */
+function aiBox(p) {
+  return paddleBoxes(p)[0];
+}
+
+/* The line the player cannot reach past — the x at which their paddle's
+   leading edge stops, on our side of the net.
+
+   Rotation-independent, which the box maths disguises. paddleBoxes insets the
+   limit by the rotated half-extent (`fx0 = reachAcross + hx`), so the box edge
+   moves as the paddle turns — but that limit applies to the paddle's CENTRE,
+   and the body reaches hx beyond it. The extremity therefore lands on
+   reachAcross at any angle. The inset exists to make that true.
+
+   Only offence may cross the net, and a solo paddle inherits the same reach,
+   so this one line binds in either paddle mode.
+
+   All the AI needs to know about where the player can be. Their full box would
+   need their paddle's identity and angle, and the perception ring carries
+   neither. */
+function aiPlayerReach(aiSide) {
+  const arena = aiCfg().arena;
+  const mid = arena.width / 2;
+  return mid - (-aiSide) * mid * arena.crossFrac;
+}
+
+/* ==========================================================================
+   TIER 1 — DERIVED FROM PERCEPTION
+
+   Facts about the situation, computed from what we can see. Nothing here
+   simulates anything forward; every value is arithmetic on the present.
+   ========================================================================== */
+
+// The held paddle. Ours, so exact and current.
+function aiPaddle(w, side) {
+  const self = aiSelf(w, side);
+  return self.sel ? self.p1 : self.p0;
+}
+
+/* The nearest point on our own goal mouth to the ball. The mouth is a vertical
+   segment, so that is the ball's height clamped between the lip and the
+   crossbar: the top corner when the ball is above, the bottom corner when it
+   is below, and straight along x in between.
+
+   One definition, used by everything downstream. It was written out three
+   separate times before this and the copies would have drifted the first time
+   the goal geometry changed. */
+function aiGoalPoint(aiSide) {
+  const arena = aiCfg().arena;
+  const ball = aiPerceived().ball;
+  const lo = arena.goalLip, hi = arena.goalLip + arena.goalHeight;
+  return { x: aiSide < 0 ? 0 : arena.width,
+           y: ball.y < lo ? lo : ball.y > hi ? hi : ball.y };
+}
+
+/* THE DEFENSIVE LINE runs from that point to the ball. Everything about
+   defending is expressed against it: where to stand, how fast the danger is
+   growing, and how far out of position we are. */
+
+/* The ideal defensive position: the midpoint of the line.
+
+   Standing on the line is what blocking means — anything travelling from the
+   ball to the goal has to cross it — and the midpoint is the point on it that
+   stays useful as the ball moves, rather than committing to crowding the ball
+   or sitting on the goal.
+
+   Clamped to the box, and AFTER the drift error rather than before it. The
+   midpoint alone is often outside the zone the paddle may occupy, and the
+   error can push an already-legal one out; either way an unreachable target
+   is not a harder AI, it is a paddle pinned against its own boundary asking
+   to be somewhere it cannot go. Clamping first and then adding the error
+   would just reintroduce the problem it was meant to solve. */
+function aiDefensivePosition(w, aiSide) {
+  const ball = aiPerceived().ball;
+  const g = aiGoalPoint(aiSide);
+  const box = aiBox(aiPaddle(w, aiSide));
+  const x = (ball.x + g.x) / 2 + ai.standX;
+  const y = (ball.y + g.y) / 2 + ai.standY;
+  return { x: x < box.x0 ? box.x0 : x > box.x1 ? box.x1 : x,
+           y: y < box.y0 ? box.y0 : y > box.y1 ? box.y1 : y };
+}
+
+/* The standing error DRIFTS. A fresh number every tick would not be a mistake
+   but a vibration, buzzing around the right answer while averaging to it; and
+   stepping to a new one every standPeriod, which is what this did first, put a
+   teleport in the middle of an otherwise smooth paddle.
+
+   So: random waypoints, and a smooth ride between them. Two are held at a time
+   and the phase runs 0..1 across the gap, eased with S(u) = 3u^2 - 2u^3, whose
+   slope is zero at both ends — the drift settles into each waypoint and leaves
+   it again rather than cornering.
+
+   Waypoints are stored as UNIT values and scaled by the amplitude at read time,
+   which is what keeps standError an exact maximum: interpolating between two
+   points inside the bound never leaves it, and dragging the slider takes effect
+   at once instead of after the next draw.
+
+   Peak drift speed is 1.5*|P1-P0|/T, so at worst 3E/T — at 30% and a 2s period
+   that is 0.9 m/s, a twelfth of paddle speed. It reads as drift, not travel.
+
+   One phase clock for both axes, with independent values on each. Sharing the
+   clock is fine; sharing the NUMBER would confine the error to a diagonal. */
+function aiUpdateStand(dt) {
+  const T = AI.standPeriod > 0.01 ? AI.standPeriod : 0.01;
+  ai.standU += dt / T;
+  while (ai.standU >= 1) {
+    ai.standU -= 1;
+    ai.stand0X = ai.stand1X; ai.stand0Y = ai.stand1Y;
+    ai.stand1X = Math.random() * 2 - 1;
+    ai.stand1Y = Math.random() * 2 - 1;
+  }
+  const u = ai.standU, S = u * u * (3 - 2 * u);
+  const E = (AI.standError / 100) * AI_STAND_FULL;
+  ai.standX = (ai.stand0X + (ai.stand1X - ai.stand0X) * S) * E;
+  ai.standY = (ai.stand0Y + (ai.stand1Y - ai.stand0Y) * S) * E;
+}
+
+// How long the line is: the ball's distance from our goal mouth.
+function aiBallGoalDistance(aiSide) {
+  const ball = aiPerceived().ball;
+  const g = aiGoalPoint(aiSide);
+  return Math.hypot(g.x - ball.x, g.y - ball.y);
+}
+
+/* How fast the line is shrinking — the ball's velocity projected along it.
+   Positive approaching, negative opening.
+
+   Taken from the velocity the observation already carries rather than by
+   differencing positions, which would only add noise to a number we have
+   exactly.
+
+   While the ball is level with the mouth the line is horizontal, so vertical
+   motion contributes nothing. A ball flying straight up across the face of the
+   goal closes at zero, which is right: it is getting no nearer. */
+function aiClosingRate(aiSide) {
+  const ball = aiPerceived().ball;
+  const g = aiGoalPoint(aiSide);
+  const dx = g.x - ball.x, dy = g.y - ball.y;
+  const l = Math.hypot(dx, dy);
+  if (l < 1e-6) return 0;
+  return (ball.vx * dx + ball.vy * dy) / l;
+}
+
+// Our paddle's distance from the ball.
+function aiBallDistance(w, side) {
+  const p = aiPaddle(w, side), ball = aiPerceived().ball;
+  return Math.hypot(ball.x - p.x, ball.y - p.y);
+}
+
+/* Are we on the right side of the ball to hit it AWAY from our own goal?
+
+   `side` is also the direction toward that goal, so a positive value means the
+   paddle sits between the goal and the ball — the only place a forward touch is
+   possible. Negative means we are past it, and any contact drives the ball
+   homeward. */
+function aiOnGoalSide(w, side) {
+  const p = aiPaddle(w, side), ball = aiPerceived().ball;
+  return side * (p.x - ball.x) > 0;
+}
+
+/* Getting back round the ball when we are caught on the wrong side of it.
+
+   Not the nearest point on the line: from beyond the ball that IS the ball,
+   and driving at it from there is precisely the mistake being corrected. Go
+   round instead — clear it vertically, then run back past it — because a
+   straight line to the far side passes through the ball and hits it exactly
+   the wrong way.
+
+   Whichever way has more room, so it does not climb into the ceiling. */
+function aiRoundTheBall(w, side) {
+  const p = aiPaddle(w, side), ball = aiPerceived().ball;
+  const arena = aiCfg().arena;
+  const box = aiBox(p);
+  const clear = arena.paddleLength * 0.5 + aiCfg().phys.ballR + 0.25;
+
+  const up = box.y1 - ball.y, down = ball.y - box.y0;
+  const clearY = Math.max(box.y0, Math.min(box.y1,
+                   ball.y + (up >= down ? clear : -clear)));
+
+  // Still level with the ball: get out of its line first.
+  if (Math.abs(p.y - ball.y) < clear * 0.8) return { x: p.x, y: clearY };
+
+  // Clear of it: run to the goal side, staying at that height.
+  const gap = arena.paddleLength * 0.5 + aiCfg().phys.ballR + 0.30;
+  return { x: Math.max(box.x0, Math.min(box.x1, ball.x + side * gap)), y: clearY };
+}
+
+/* The point on the line closest to us, clamped to the segment. Beyond the ball
+   that is the ball itself; behind the goal point it is the goal point. */
+function aiNearestOnLine(w, side) {
+  const p = aiPaddle(w, side), ball = aiPerceived().ball;
+  const g = aiGoalPoint(side);
+  const lx = ball.x - g.x, ly = ball.y - g.y;
+  const ll = lx * lx + ly * ly;
+  if (ll < 1e-12) return { x: g.x, y: g.y };
+  let t = ((p.x - g.x) * lx + (p.y - g.y) * ly) / ll;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return { x: g.x + lx * t, y: g.y + ly * t };
+}
+
+/* How far our approach sits off the defensive line, in DEGREES: the angle
+   between the direction we would drive (paddle to ball) and the direction the
+   ball should leave in (goal to ball, extended).
+
+   Degrees rather than the perpendicular offset over range we first reached
+   for. That ratio is sin of this angle, and sine FOLDS BACK past ninety
+   degrees — a paddle a hundred and seventy degrees off, sitting almost
+   directly beyond the ball and about to knock it homeward, scores 0.17 on it,
+   better than a harmless twenty. The cosine behind this is monotonic all the
+   way to a hundred and eighty, so being on the wrong side of the ball reads as
+   what it is: the worst case, not a good one.
+
+   Which is the failure this exists to catch. Contact sends the ball roughly
+   along paddle-to-ball extended, so this angle is very nearly the angle the
+   ball leaves at, measured from straight out of our own goal. */
+function aiClearOffAngle(w, side) {
+  const p = aiPaddle(w, side), ball = aiPerceived().ball, g = aiGoalPoint(side);
+  const ux = ball.x - g.x, uy = ball.y - g.y;      // where the ball should go
+  const ax = ball.x - p.x, ay = ball.y - p.y;      // where we would send it
+  const ul = Math.hypot(ux, uy), al = Math.hypot(ax, ay);
+  if (ul < 1e-6 || al < 1e-6) return 0;
+  let c = (ux * ax + uy * ay) / (ul * al);
+  c = c < -1 ? -1 : c > 1 ? 1 : c;
+  return Math.acos(c) * 180 / Math.PI;
+}
+
+/* Is there a ball worth playing?
+
+   Three ways there is not. The phase is anything but PLAY — during EXIT the
+   ball is ghosting out through the back of a goal with the point already
+   conceded, and during ANNOUNCE and the count it is not in play at all. The
+   ball is hidden. Or play has only just restarted.
+
+   That last one is a real fault worth spelling out. Perception is delayed, so
+   for `reaction` seconds after the serve the AI is still looking at wherever
+   the ball was BEFORE it — sitting in a goal, most likely — and sets off
+   confidently in the wrong direction. The blackout is exactly `reaction` long
+   because that is precisely how long its view stays wrong. A fixed tenth of a
+   second would be wrong the moment the slider moved.
+
+   It is a blackout rather than a flush of the ring on purpose: emptying it
+   would hand the AI an undelayed view of the serve, which is not a limitation
+   removed but a rule broken. */
+function aiUpdateLive(w, dt) {
+  if (w.phase !== ai.lastPhase) {
+    if (w.phase === PHASE.PLAY) ai.blind = AI.reaction;
+    ai.lastPhase = w.phase;
+  }
+  if (ai.blind > 0) ai.blind -= dt;
+}
+
+function aiLiveBall(w) {
+  return w.phase === PHASE.PLAY && !w.ballHidden && ai.blind <= 0;
+}
+
+/* ==========================================================================
+   THE PLAYER, AND THE FAR GOAL
+   Everything an attacking decision would want to know. All of it perceived,
+   so it is as stale as the ball is.
+   ========================================================================== */
+
+// The player's held paddle — the one they can actually move.
+function aiPlayerPaddle(aiSide) {
+  const pp = aiPlayerPaddles(aiSide);
+  return pp.sel ? pp.p1 : pp.p0;
+}
+
+// How far the player's paddle is from the ball.
+function aiPlayerBallDistance(aiSide) {
+  const p = aiPlayerPaddle(aiSide), ball = aiPerceived().ball;
+  return Math.hypot(ball.x - p.x, ball.y - p.y);
+}
+
+/* How fast the ball is receding from where the player's paddle IS.
+
+   Only the ball's velocity is used; the paddle is treated as a fixed point.
+   That is deliberate, and it is what makes the number mean something: if the
+   ball is moving away from the player's position faster than the player can
+   move, the gap grows no matter what they do. Unreachable, without predicting
+   anything — just a comparison.
+
+   Their top speed is not a guess. Both paddles run the same spring, so
+   maxPaddleSpeed is as true of the player as of us, and it is configuration
+   rather than privileged information.
+
+   The limit: this holds only while the ball's velocity holds. Gravity is
+   bending it every tick, and a bounce ends the argument entirely — a ball
+   lofted away and out of reach can arc back down into it. So this is a sound
+   test for right now, not a promise about the next second. */
+function aiBallRecession(px, py) {
+  const ball = aiPerceived().ball;
+  const dx = ball.x - px, dy = ball.y - py;        // away from that point
+  const l = Math.hypot(dx, dy);
+  if (l < 1e-6) return 0;
+  return (ball.vx * dx + ball.vy * dy) / l;
+}
+
+/* Roughly how long before a paddle at this point could meet the ball.
+
+   The ball is closing on the point at some rate, and the paddle adds its own
+   top speed to that, so the gap shuts at (closing + vMax) and the time is the
+   distance over it. Instantaneous — no prediction, no simulation — which is
+   what keeps this a cheap gate rather than another forward pass.
+
+   The negative case is the one that matters. When the ball recedes faster than
+   the paddle can move, the rate goes NEGATIVE, and a distance over a negative
+   rate is a negative time — which would compare as sooner than everything
+   else. Unreachable has to be infinity, explicitly.
+
+   Approximate, and honest about it: exact only while the ball runs straight at
+   or away from the point. Gravity curves it, and the bearing shifts as the
+   paddle moves. Enough to decide who is favourite; not a promise. */
+function aiTimeToBall(px, py) {
+  const ball = aiPerceived().ball;
+  const d = Math.hypot(px - ball.x, py - ball.y);
+  if (d < 1e-6) return 0;
+  const closing = -aiBallRecession(px, py);
+  const rate = closing + maxPaddleSpeed();
+  return rate > 1e-6 ? d / rate : Infinity;
+}
+
+/* The player's time, with the one thing we know exactly about their box: past
+   their reach line they never arrive, however close they look. */
+function aiPlayerTimeToBall(aiSide) {
+  if (aiBallBeyondPlayerReach(aiSide)) return Infinity;
+  const pl = aiPlayerPaddle(aiSide);
+  return aiTimeToBall(pl.x, pl.y);
+}
+
+/* Is the ball past the furthest the player could ever touch?
+
+   Their box is not computable from here — the perception ring stores pose and
+   velocity, not paddle identity — but the only part that matters is the line
+   they cannot reach past, and that is pure configuration. Beyond it the ball is
+   theirs to watch, not to play.
+
+   Compared in x alone. The box has vertical limits too, but they are the
+   paddle's own thickness inset from floor and ceiling: centimetres, against
+   metres here. */
+function aiBallBeyondPlayerReach(aiSide) {
+  const ball = aiPerceived().ball;
+  return (ball.x - aiPlayerReach(aiSide)) * aiSide > 0;
+}
+
+/* Is the net in the way of a flat shot at the far goal?
+
+   Only one ray needs testing, not a search across the mouth. The crossing
+   height rises with the aim point, so the highest any straight shot can pass
+   over the net is the one aimed at the CROSSBAR. If that is blocked, all of
+   them are.
+
+   Read the limit carefully: this answers "no flat shot", not "no shot". A
+   lofted ball rises before it falls, so it can clear the net and still drop in
+   when the straight line could not. The test is conservative, and deliberately
+   so for now — the flat shots are the ones worth taking anyway. */
+function aiNetBlocks(aiSide) {
+  const cfg = aiCfg(), arena = cfg.arena;
+  const ball = aiPerceived().ball;
+  const netX = arena.width / 2;
+  const goalX = aiSide < 0 ? arena.width : 0;      // the goal we ATTACK
+
+  // Already past the net: nothing left to clear.
+  if ((goalX - netX) * (ball.x - netX) >= 0) return false;
+
+  const t = (netX - ball.x) / (goalX - ball.x);
+  const crossbar = arena.goalLip + arena.goalHeight;
+  const yCross = ball.y + t * (crossbar - ball.y);
+  return yCross <= arena.netHeight + cfg.phys.ballR;
+}
+
+/* The angle that points the paddle's FACE at the ball.
+
+   collidePaddle puts the paddle's spine along its local x, so for angle a the
+   spine runs along (cos a, sin a) and the face normal is perpendicular to it,
+   (-sin a, cos a). Wanting that normal to point along a unit vector (nx, ny)
+   therefore means -sin a = nx and cos a = ny, which is atan2(-nx, ny).
+
+   Facing the ball squarely presents the paddle's full width to it rather than
+   an edge it can slide past. Measured from our own paddle, which we know
+   exactly, to the PERCEIVED ball, which we do not. */
+function aiFaceBall(w, side) {
+  const p = aiPaddle(w, side);
+  const b = aiPerceived().ball;
+  const nx = b.x - p.x, ny = b.y - p.y;
+  const l = Math.hypot(nx, ny);
+  if (l < 1e-6) return null;        // sitting on the ball: no opinion to have
+  return Math.atan2(-nx / l, ny / l);
+}
+
+/* ==========================================================================
+   OUTPUT — THE HAND
+
+   A decision says where it wants the paddle; this says what a hand can
+   actually do about it. Both limits act on what is EMITTED, not on where the
+   paddle ends up, because the paddle is the spring's business and the hand
+   only holds the mouse.
+
+   The two need different treatment for a reason in stepPaddle. Position error
+   is clamped to maxError before the spring sees it, so a target fifty metres
+   away pulls exactly as hard as one at the clamp — acceleration saturates and
+   there is a terminal speed whatever we emit. Rotation has no such clamp:
+   torque is proportional to the whole angular error, so a distant target spins
+   the paddle arbitrarily fast. Nothing downstream will stop that. Any limit on
+   rotation has to be here.
+   ========================================================================== */
+
+/* What an unconstrained position would really buy is not speed — the clamp
+   already caps that — but the ability to REVERSE instantly at full force,
+   which no hand can do. That is what this removes. */
+function aiMoveToward(wantX, wantY, dt) {
+  const lim = AI.mouseSpeed * dt;
+  let dx = wantX - ai.outX, dy = wantY - ai.outY;
+  const d = Math.hypot(dx, dy);
+  if (d > lim && d > 0) { const k = lim / d; dx *= k; dy *= k; }
+  ai.outX += dx;
+  ai.outY += dy;
+}
+
+/* The wheel, in notches. The grid snap is copied from the player's own wheel
+   handler rather than approximated — same rounding, same one-notch advance —
+   so the AI can only ever rest on an angle a player could also have reached.
+   Coarse while far, fine for the last stretch, which is the choice a player
+   makes without thinking about it.
+
+   The carry is capped so a still period cannot bank notches and spend them as
+   a burst, which would reproduce the unbounded spin in a subtler form. */
+function aiWheelToward(wantA, dt) {
+  if (wantA === null) return;     // no opinion about the angle: leave it alone
+  ai.notches = Math.min(ai.notches + AI.wheelSpeed * dt, 2);
+  const budget = Math.floor(ai.notches);
+  if (budget < 1) return;
+
+  /* Take the short way round. The wheel's angle accumulates without bound,
+     exactly as a player's does, while a decision naturally hands us something
+     from atan2 in (-pi, pi]. Turning to the literal number would mean winding
+     a full turn to reach an angle already underfoot.
+
+     This belongs to the HAND, not to whoever decided: it is the wheel that
+     knows where it currently sits, and putting it here means no future
+     decision can get it wrong. A whole turn is 12 coarse notches or 48 fine
+     ones, so shifting by one leaves the grid alignment untouched. */
+  const TAU = Math.PI * 2;
+  const target = wantA + TAU * Math.round((ai.outA - wantA) / TAU);
+
+  const err = target - ai.outA;
+  const step = Math.abs(err) >= STEP_COARSE ? STEP_COARSE : STEP_FINE;
+  const n = Math.round(err / step);
+  if (n === 0) return;
+
+  const use = Math.min(budget, Math.abs(n));
+  ai.notches -= use;
+  ai.outA = (Math.round(ai.outA / step) + Math.sign(n) * use) * step;
+}
+
+/* Writes the setpoint. Seeded from the paddle's live pose the first time, or
+   the hand would start at the origin and drag the paddle across the court.
+
+   `sel` is left alone: choosing which paddle to hold is a decision, not
+   something a hand does, and there is nothing making that decision yet. */
+function aiEmit(w, side, dst, want, dt) {
+  const self = aiSelf(w, side);
+  const p = self.sel ? self.p1 : self.p0;
+  if (!ai.outSet) {
+    ai.outX = p.x; ai.outY = p.y; ai.outA = p.a;
+    ai.outSet = true;
+  }
+  aiMoveToward(want.x, want.y, dt);
+  aiWheelToward(want.a, dt);
+  dst.tx = ai.outX; dst.ty = ai.outY; dst.ta = ai.outA;
+}
+
+/* Is the ball inside the box our held paddle may occupy? */
+function aiBallInBox(w, side) {
+  const b = aiBox(aiPaddle(w, side)), ball = aiPerceived().ball;
+  return ball.x >= b.x0 && ball.x <= b.x1 && ball.y >= b.y0 && ball.y <= b.y1;
+}
+
+/* ==========================================================================
+   OPPORTUNITY — THE ENTRY CHAIN
+
+   A sequence of cheap yes/no questions, all answered from the present. None of
+   them predicts anything; the prediction is a separate stage that only runs
+   once every one of these has passed. That ordering is the whole point — the
+   expensive work sits behind a gate rather than at the root.
+
+   Nothing calls this yet. What the AI DOES with an opportunity is still to be
+   decided.
+   ========================================================================== */
+function aiOpportunityOpen(w, side) {
+  // Save outranks everything. A goal to defend is not an opening to attack.
+  if (ai.saving) return false;
+
+  // Can we play the ball at all?
+  if (!aiBallInBox(w, side)) return false;
+
+  /* Are we even on the right side of it? A shot taken from beyond the ball
+     drives it at our own goal however good the trajectory looks. */
+  if (!aiOnGoalSide(w, side)) return false;
+
+  /* Do we get there first? This replaces three cruder checks — who is nearer,
+     whether the ball had outrun the player, whether it was past their reach —
+     each an approximation of this one question.
+
+     The old test asked whether the ball could run AWAY from the player, which
+     a stationary ball never can. So a ball sitting still on top of the net was
+     never an opportunity, however far away they were standing. This asks who
+     arrives first, which is what was always meant.
+
+     raceMargin is the head start insisted on. Under 1 wants a clear win; over
+     1 contests balls we are slightly behind on. */
+  const me = aiPaddle(w, side);
+  if (!(aiTimeToBall(me.x, me.y) < aiPlayerTimeToBall(side) * AI.raceMargin)) return false;
+
+  /* No net gate. aiNetBlocks answers "no FLAT shot", and a ball tucked low
+     behind the net answers it yes — so the AI stood there doing nothing at all,
+     which is the one outcome with no way out of it. Swinging and burying the
+     ball in the net is worse than a good shot and better than being stuck: the
+     ball moves, and a moving ball eventually becomes playable again. */
+
+  return true;
+}
+
+/* Hold a shot, or find one.
+
+   A chosen shot is a COMMITMENT, not a preference re-examined every tick. The
+   entry chain is not re-run while one is being executed: a search that changed
+   its mind sixty times a second would leave the paddle chasing a different
+   contact point on each of them, and the wheel — which needs the whole
+   approach to turn — would never arrive anywhere.
+
+   It ends when its moment passes. Contact is not detected; the margin after
+   the contact time covers both a hit and a miss, and the entry chain then gets
+   a fresh look at whatever the world has become. */
+/* Has anything touched the ball since we last looked?
+
+   The prediction excludes paddles, so a paddle contact is the ONE thing that
+   can invalidate it — everything else was already simulated exactly. Which
+   makes staleness an exact test rather than a tolerance to tune: watch the
+   simulation's own event log for a paddle event.
+
+   Scanned incrementally against a watermark, because the log is a short ring
+   and reading it from a fixed point would miss events once it wrapped. */
+function aiContactSince(w) {
+  let hit = false;
+  const first = Math.max(ai.evSeen + 1, w.evCount - EV_SLOTS + 1);
+  for (let id = first; id <= w.evCount; id++) {
+    const e = w.ev[id % EV_SLOTS];
+    if (e && e.id === id && e.kind === 'paddle') hit = true;
+  }
+  ai.evSeen = w.evCount;
+  return hit;
+}
+
+function aiUpdateShot(w, side, dt) {
+  const touched = aiContactSince(w);
+
+  if (ai.shot) {
+    ai.shotAge += dt;
+
+    /* Three ways a shot ends, and none of them is "the entry conditions no
+       longer hold" — that would re-litigate the commitment every tick. */
+
+    // Someone hit the ball. Everything the plan was built on is now fiction.
+    if (touched) ai.shot = null;
+
+    // The ball became theirs. The same test that claimed it, run backwards.
+    else if (aiBallDistance(w, side) > aiPlayerBallDistance(side)) ai.shot = null;
+
+    // Its moment came and went. The margin covers a hit and a miss alike.
+    else if (ai.shotAge > ai.shot.t + AI.shotHold) ai.shot = null;
+
+    else return ai.shot;
+  }
+
+  if (!aiOpportunityOpen(w, side)) return null;
+
+  const wheel = ai.outSet ? ai.outA : aiPaddle(w, side).a;
+  const found = shotSearch(w, side, wheel);
+  if (found) {
+    aiSpoilShot(found);
+    ai.shot = found;
+    ai.shotAge = 0;
+    // Stop the world on a fresh shot, if that has been asked for. P resumes.
+    if (opts.freezeOnShot) frozen = true;
+  }
+  return ai.shot;
+}
+
+/* Where a shot goes wrong.
+
+   Applied ONCE, here, at the moment the shot is committed - not inside the
+   search, and not in aiShotTarget. The search's job is to find the best shot
+   available and it should not be handicapped into finding a worse one; what
+   is handicapped is our ability to execute the one it found. And aiShotTarget
+   runs every tick, so drawing a number there would shake the target at 240Hz
+   instead of missing by a fixed amount.
+
+   shot.js is untouched by any of this. It answers what is possible; how badly
+   we do it is the AI's business.
+
+   sh.vx/vy are deliberately NOT rotated. They are the solved exit velocity -
+   the shot as INTENDED - and the O-key diagnostic draws them. Leaving them
+   alone means the green line keeps showing what the AI was trying to do while
+   the paddle does something else, which is the more useful of the two things
+   to see. */
+function aiSpoilShot(sh) {
+  const cfg = aiCfg();
+
+  /* Staging is defined as a distance back along the swing line from the
+     contact. Both ends of that are about to move, so measure it first. */
+  const back = Math.hypot(sh.sx - sh.x, sh.sy - sh.y);
+
+  // AIM: rotate the face and the swing line together, by the same error. A
+  // face turned without the swing following it is not a misaim, it is a
+  // different and much stranger mistake.
+  const eA = (AI.aimError / 100) * (Math.PI / 4) * (Math.random() * 2 - 1);
+  if (eA) {
+    const c = Math.cos(eA), sn = Math.sin(eA);
+    const dx = sh.dirx * c - sh.diry * sn;
+    const dy = sh.dirx * sn + sh.diry * c;
+    sh.dirx = dx; sh.diry = dy;
+    sh.angle += eA;
+  }
+
+  // TOUCH: meet the ball somewhere other than where the plan said. 100% is
+  // half a paddle plus a ball, which is the distance at which a contact stops
+  // happening at all.
+  const span = cfg.arena.paddleLength / 2 + cfg.phys.ballR;
+  const eT = (AI.touchError / 100) * span;
+  if (eT) {
+    sh.x += (Math.random() * 2 - 1) * eT;
+    sh.y += (Math.random() * 2 - 1) * eT;
+  }
+
+  // Staging follows both of them, or the approach would aim at the old plan.
+  sh.sx = sh.x - sh.dirx * back;
+  sh.sy = sh.y - sh.diry * back;
+}
+
+/* Executing a shot. The face angle is commanded from the moment the shot is
+   chosen rather than at the end — the wheel turns at a fixed rate, so it needs
+   the whole approach to get there. The position closes on the contact point,
+   then drives one maxError PAST it along the shot's own direction, so the
+   paddle is still accelerating when the ball arrives. */
+function aiShotTarget(w, side) {
+  const sh = ai.shot;
+  const feel = aiCfg().feel;
+
+  /* Two phases, and the switch is on TIME rather than on distance to the ball.
+     Distance was what let the paddle arrive at the contact point and sit there
+     with no regard for where the ball actually was. */
+  const remaining = sh.t - ai.shotAge;
+
+  // Stand back along the shot's own line, and wait there.
+  if (remaining > sh.swingT) return { x: sh.sx, y: sh.sy };
+
+  /* Then drive. The offset IS the swing speed: with the error clamped the
+     spring settles at omega*d/(2*zeta), linear in how far the target is held
+     past the paddle, so the speed the search asked for maps to a distance in
+     closed form. Capped at maxError, beyond which the clamp gives nothing. */
+  const omega = 2 * Math.PI * feel.posFreq;
+  const cap = Math.min(feel.maxError, feel.reach);
+  const past = Math.min(cap, 2 * feel.posDamp * sh.swing / omega) + AI.followThrough;
+  return { x: sh.x + sh.dirx * past, y: sh.y + sh.diry * past };
+}
+
+/* ==========================================================================
+   DECISION
+
+   Returns what the AI WANTS: a position, and an angle or null for "no opinion
+   about the angle". What a hand can do about that want is aiEmit's business,
+   and the two are kept apart deliberately — a decision that also knew about
+   hand limits would be tempted to compromise its intent to suit them.
+
+   The default sits at the BOTTOM. A new state is an early return above it,
+   which is why there is no scaffolding here for states that do not exist:
+   adding one means adding its own condition and its own return, not filling in
+   a slot. The default is what happens when nothing else claims the tick, and
+   every state that ends falls back to it without having to say so.
+   ========================================================================== */
+/* Is the ball a threat we have to deal with now?
+
+   Entering takes EITHER alarm; leaving takes BOTH to be clear. That asymmetry
+   is the whole hysteresis — no extra thresholds needed. Between "closing at
+   saveRate" and "actually receding" lies a wide band in which the state simply
+   holds, so a ball that merely slows down does not release it.
+
+   Exit deliberately does not fire on contact. After a good touch the ball
+   flies off, the rate goes negative and the distance grows, so the triggers
+   release within a tick or two anyway — contact buys nothing there. After a
+   BAD touch, one that leaves the ball trickling goalward, contact would say
+   "done" while the ball is still going in. It is a proxy for success that is
+   wrong in exactly the case that matters.
+
+   A stationary ball in front of the mouth can never satisfy the exit, because
+   zero is not less than zero. That is correct: it still has to be dealt with. */
+function aiUpdateSave(side) {
+  const closing = aiClosingRate(side);
+  const dist = aiBallGoalDistance(side);
+  if (ai.saving) {
+    if (closing < 0 && dist > AI.saveDist) ai.saving = false;
+  } else if (closing > AI.saveRate || dist < AI.saveDist) {
+    ai.saving = true;
+  }
+  return ai.saving;
+}
+
+/* SAVE. Hold the defensive position until the ball is within reach, then
+   drive through it.
+
+   There is no need to advance on the ball before that. The defensive position
+   is the midpoint of the ball-to-goal line, so waiting there keeps the paddle
+   ON the line the whole time the ball is closing — and the line is where a
+   block has to happen. Setting off early would only mean meeting the ball
+   further from goal with less certainty about where it is going.
+
+   The clear target sits one maxError PAST the ball, along that same line
+   extended away from the goal. One maxError because that is exactly where the
+   spring saturates: nearer gives less than full force, further gives no more.
+   Full power, least overshoot. The paddle therefore arrives still accelerating
+   and drives through the ball rather than settling onto it, and the direction
+   sends the ball straight out from our goal.
+
+   Note the target is already ON the line — it is the line, extended — so there
+   is no sideways error left to correct while striking. Blending it toward the
+   line would only drag it back along the line: at through range the halfway
+   point lands behind the ball, and the paddle would stop short of the thing it
+   came to hit. */
+function aiSaveTarget(w, side) {
+  if (aiBallDistance(w, side) > AI.clearDist) {
+    ai.lined = true;                 // each new clear starts with a clean slate
+    return aiDefensivePosition(w, side);
+  }
+
+  /* Guard the clear while it is happening, not only when it begins. Driving
+     through the ball from the wrong angle sends it sideways, and from behind it
+     sends it at our own goal — worse than not striking at all. If the approach
+     drifts too far off, abandon the clear and get back on the line first.
+
+     Latched with room between the thresholds: leaving takes the full angle,
+     returning takes well under it. Identical ones would have the paddle
+     flicking between striking and repositioning while it sat on the boundary,
+     and those two want it in quite different places. */
+  const off = aiClearOffAngle(w, side);
+  if (ai.lined) { if (off > AI.clearAngle) ai.lined = false; }
+  else if (off < AI.clearAngle * 0.6) ai.lined = true;
+  if (!ai.lined) {
+    /* Two different problems wear the same symptom. Off the line but still
+       BEHIND the ball only needs sliding back onto it. Past the ball needs
+       going round it, and the nearest point on the line is useless there —
+       clamped to the segment, it returns the ball itself, so the paddle drives
+       at it from the wrong side and knocks it homeward. Which is the thing
+       that was happening. */
+    return aiOnGoalSide(w, side) ? aiNearestOnLine(w, side) : aiRoundTheBall(w, side);
+  }
+
+  const ball = aiPerceived().ball;
+  const g = aiGoalPoint(side);
+  const ux = ball.x - g.x, uy = ball.y - g.y;
+  const l = Math.hypot(ux, uy);
+  if (l < 1e-6) return { x: ball.x, y: ball.y };
+
+  const feel = aiCfg().feel;
+  const past = Math.min(feel.maxError, feel.reach) + AI.followThrough;
+  return { x: ball.x + (ux / l) * past, y: ball.y + (uy / l) * past };
+}
+
+function aiDecide(w, side, dt) {
+  const face = aiFaceBall(w, side);   // the fallback in every state
+
+  // A goal to defend outranks an opening to attack.
+  if (aiUpdateSave(side)) {
+    ai.shot = null;
+    const t = aiSaveTarget(w, side);
+    return { x: t.x, y: t.y, a: face };
+  }
+
+  const sh = aiUpdateShot(w, side, dt);
+  if (sh) {
+    const t = aiShotTarget(w, side);
+    return { x: t.x, y: t.y, a: sh.angle };
+  }
+
+  // Default: hold the defensive position.
+  const d = aiDefensivePosition(w, side);
+  return { x: d.x, y: d.y, a: face };
+}
+
+/* ==========================================================================
+   PER TICK
+   ========================================================================== */
+function aiStep(w, side, dst, dt) {
+  aiObserve(w);            // always: a ring that only filled while the AI
+                           // played would start every match blind
+  aiUpdateLive(w, dt);
+  if (!AI.on) return;      // practice leaves the opposing paddle inert
+
+  /* No live ball, no decisions — and the latches reset, so the next point
+     starts clean rather than resuming whatever the last one was doing. */
+  if (!aiLiveBall(w)) { ai.saving = false; ai.lined = true; ai.shot = null; return; }
+
+  aiUpdateStand(dt);
+  aiEmit(w, side, dst, aiDecide(w, side, dt), dt);
+}
