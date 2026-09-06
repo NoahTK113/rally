@@ -81,16 +81,16 @@ const AI_STAND_FULL = 2.0;
 /* ==========================================================================
    DIFFICULTY
 
-   Two levels for now, and only the keys that differ between them. A level has
-   to be able to put back what the other one changed, so both ends state every
-   key rather than one being "the defaults" — otherwise switching down and back
-   up would leave whatever the low level touched still in place.
+   Two ENDPOINTS, and everything between them is interpolated. Both ends state
+   every key rather than one being "the defaults" — a level has to be able to
+   put back what another one changed, or moving down and back up would leave
+   the low level's values sitting there.
 
    SHOT is in here too: swingTime belongs to the search, but how long the AI
    winds up is difficulty, not geometry. shot.js loads first, so the object is
    already there to write into.
 
-   Anything not listed is shared by both levels and lives on the sliders. */
+   Anything not listed is shared by every level and lives on the sliders. */
 const AI_LEVELS = {
   1:  { AI:   { reaction: 0.17, saveRate: 4.5, saveDist: 4.4, raceMargin: 2.00,
                 aimError: 90,   touchError: 50, standError: 100,
@@ -105,12 +105,24 @@ const AI_LEVELS = {
 
 let aiLevel = 10;             // what the defaults already are, so nothing to apply
 
+/* Straight line between the two ends. Every key is a number and every one of
+   them wants the same treatment, so there is nothing to special-case — which
+   is the argument for keeping the endpoints as plain value tables rather than
+   as code. Adding a parameter to the ladder means adding it to both ends and
+   nothing else.
+
+   Whether linear is RIGHT is a separate question and a tuning one: reaction in
+   particular has outsized effect and may want a curve, which would go here as
+   a per-key easing rather than as a different structure. */
 function aiSetLevel(n) {
-  const L = AI_LEVELS[n];
-  if (!L) return;
-  Object.assign(AI, L.AI);
-  Object.assign(SHOT, L.SHOT);
-  aiLevel = n;
+  const lvl = Math.max(1, Math.min(10, Math.round(n)));
+  const t = (lvl - 1) / 9;
+  const lo = AI_LEVELS[1], hi = AI_LEVELS[10];
+  for (const [name, obj] of [['AI', AI], ['SHOT', SHOT]]) {
+    const a = lo[name], b = hi[name];
+    for (const k in a) obj[k] = a[k] + (b[k] - a[k]) * t;
+  }
+  aiLevel = lvl;
 }
 
 /* Long enough to cover the largest reaction the panel allows (0.6s) at the
