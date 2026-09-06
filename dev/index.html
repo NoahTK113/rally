@@ -324,10 +324,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v16.7-dev"></script>
-<script src="ai.js?v=v16.7-dev"></script>
-<script src="audio.js?v=v16.7-dev"></script>
-<script src="tutorial.js?v=v16.7-dev"></script>
+<script src="shot.js?v=v16.8-dev"></script>
+<script src="ai.js?v=v16.8-dev"></script>
+<script src="audio.js?v=v16.8-dev"></script>
+<script src="tutorial.js?v=v16.8-dev"></script>
 <script>
 'use strict';
 
@@ -1881,7 +1881,7 @@ function buildReadout() {
   const f = (n, d = 2) => n.toFixed(d).padStart(6);
   const out =
     `${fps.toFixed(0).padStart(3)} fps   ${String(stepsLastFrame).padStart(2)} steps/frame` +
-    (frozen ? '   <b style="color:#fdba74">FROZEN</b>' : '') + '<br>' +
+    (frozen && devTools() ? '   <b style="color:#fdba74">FROZEN</b>' : '') + '<br>' +
     `pos   ${f(p.x)}, ${f(p.y)} m<br>` +
     `angle ${f(p.a / DEG, 1)}&deg;  (target ${(p.ta / DEG).toFixed(1)})<br>` +
     `vel   ${f(Math.hypot(p.vx, p.vy))} m/s   max ${f(maxPaddleSpeed())}<br>` +
@@ -1970,27 +1970,69 @@ canvas.addEventListener('wheel', e => {
   tutOnTurn(intent.ta - was, fineRotate);
 }, { passive: false });
 
+/* ---- THE DEVELOPER UNLOCK ------------------------------------------------
+   Every diagnostic is either an unfair advantage or a way to break a match, so
+   none of them answers outside practice unless this is armed.
+
+   Type the word anywhere - menu, setup or mid-match - and it toggles. It is
+   remembered per machine, so it is done once and not every session, and the
+   build watermark gains a DEV suffix so the state is never a guess.
+
+   No letter of the word is bound to anything, so spelling it cannot fire a
+   diagnostic on the way past.
+
+   Deliberately NOT in PREFS_KEYS: a version bump wipes stored settings whose
+   meaning changed, and this one has no meaning to get out of date. Being
+   re-locked by an unrelated upgrade would just be baffling. */
+const DEV_WORD = 'banjolab';
+let devUnlocked = false;
+try { devUnlocked = localStorage.getItem('banjoball.dev') === '1'; } catch (e) {}
+let devTyped = '';
+
+// Practice is always open; everywhere else needs the word.
+const devTools = () => inPractice() || devUnlocked;
+
+function paintBuild() {
+  $('build').textContent = BUILD + (devUnlocked ? '  DEV' : '');
+}
+
+addEventListener('keydown', e => {
+  if (e.key.length !== 1) return;
+  devTyped = (devTyped + e.key.toLowerCase()).slice(-DEV_WORD.length);
+  if (devTyped !== DEV_WORD) return;
+  devTyped = '';
+  devUnlocked = !devUnlocked;
+  try { localStorage.setItem('banjoball.dev', devUnlocked ? '1' : '0'); } catch (e) {}
+  if (!devUnlocked) { document.body.classList.remove('debug'); frozen = false; resize(); }
+  paintBuild();
+});
+
 addEventListener('keydown', e => {
   if (!running) return;          // menu keys are the menu's business
   const k = e.key.toLowerCase();
   if (k === ' ' || k === '.' || k === 'tab') e.preventDefault();
   if (e.repeat) return;
   keys.add(k);
-  if (k === 'p') frozen = !frozen;      // space now switches paddles
-  if (k === '.') { stepOnce = true; frozen = true; }
+  /* P and . stop the local simulation, which against another machine is a
+     silent desync rather than a pause. Behind the unlock with the rest. */
+  if ((k === 'p' || k === '.') && devTools()) {
+    if (k === 'p') frozen = !frozen;
+    else { stepOnce = true; frozen = true; }
+  }
   /* Practice only: take over the other team. The server reaches its clients
      through transport ends and each end is tagged with the side it drives, so
      switching means retagging our end — the simulation needs no notion of a
      player changing seats. */
   if (!controlsLive() && (k === ' ' || k === 'tab')) return;
 
-  /* F, R, H and Tab are practice tools: serving on demand, wiping the score,
-     the tuning panel, changing sides. Every one of them is either an unfair
-     advantage or an outright desync against another player, so none of them
-     answers outside practice - not in a hosted match and not against the AI.
-     Tab in particular used to test only for `solo`, which included VS AI, so
-     it would happily hand you the computer's paddles mid-match. */
-  if ((k === 'f' || k === 'r' || k === 'h' || k === 'tab') && !inPractice()) return;
+  /* The diagnostics: serve on demand, wipe the score, the tuning panel,
+     change sides, and the two overlays that show what an opponent cannot see.
+     Each is either an unfair advantage or an outright desync, so none of them
+     answers outside practice unless the unlock is armed. Tab used to test only
+     for `solo`, which included VS AI, so it would hand you the computer's
+     paddles mid-match. */
+  if (!devTools() && (k === 'f' || k === 'r' || k === 'h' || k === 'tab' ||
+                      k === 'v' || k === 'g')) return;
 
   if (k === 'tab') {
     mySide = -mySide;
@@ -2260,7 +2302,7 @@ function startGame(asTutorial) {
      opening it in practice and then starting a real game would have carried
      the panel straight in - past the H gate, which only stops you TOGGLING it.
      Cleared on entry to anything that is not practice. */
-  if (!inPractice()) document.body.classList.remove('debug');
+  if (!devTools()) document.body.classList.remove('debug');
   hideMenu();
   hideSetup();
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -2376,9 +2418,16 @@ function frame(nowMs) {
 
   let steps = 0;
   const holdSim = paused && !net.up;   // a local match stops; an online one cannot
+
+  /* Read through devTools rather than the flag itself. opts.freezeOnShot sets
+     `frozen` from inside ai.js on every shot the AI commits to, and it is
+     reachable from the console with no key to gate it - so the gate goes on
+     the EFFECT, not only on the ways in. */
+  const froze = frozen && devTools();
+
   if (holdSim) {
     accumulator = 0;
-  } else if (!frozen) {
+  } else if (!froze) {
     accumulator += dt;
     while (accumulator >= FIXED_DT && steps < MAX_STEPS) {
       simClock++;
@@ -2388,7 +2437,7 @@ function frame(nowMs) {
       accumulator -= FIXED_DT; steps++;
     }
     if (steps >= MAX_STEPS) accumulator = 0;
-  } else if (stepOnce) {
+  } else if (stepOnce && devTools()) {
     simClock++;
     pumpLinks();
     serverStepOnce(FIXED_DT);
@@ -2407,7 +2456,7 @@ function frame(nowMs) {
   pumpEvents();
   pumpTutorial(dt);
 
-  renderAlpha = (frozen || holdSim) ? 1 : accumulator / FIXED_DT;
+  renderAlpha = (froze || holdSim) ? 1 : accumulator / FIXED_DT;
   render();
 
   if (world.phase === PHASE.WIN && world.phaseT <= 0) { endMatch(); return; }
@@ -2437,7 +2486,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v16.7-dev';
+const BUILD = 'v16.8-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3440,7 +3489,7 @@ function onData(d) {
   }
 }
 
-$('build').textContent = BUILD;
+paintBuild();
 
 $('btnSolo').addEventListener('click', function () {
   net.role = 'solo'; mySide = 1; AI.on = false; updateStatus(); showSetup();
