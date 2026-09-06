@@ -45,7 +45,10 @@ const SHOT = {
   speedSteps: 3,      // how many launch speeds, from the hardest downward
   slowest: 0.65,      // the slowest of them, as a fraction of the hardest
   ramp: 0.10,         // s of the paddle's spin-up, unavailable for travelling
-  swingTime: 0.20,    // s of swing: how long before contact the drive begins
+  swingTime: 0.20,    // s of swing: how long before contact the drive begins.
+                      //   A guess, and tunable. Its floor is about three
+                      //   velocity time constants — roughly 45ms at the current
+                      //   tuning — below which the paddle never reaches pace.
 
   // Scoring weights. What makes one shot better than another.
   wSpeed: 1.0,        // faster gives the player less time
@@ -187,6 +190,15 @@ function shotSearch(w, aiSide, wheelAngle) {
   const hi = arena.goalLip + arena.goalHeight - phys.ballR;
   const goalX = aiSide < 0 ? arena.width : 0;
 
+  /* How much of the swing is actually spent travelling. The paddle starts
+     from REST at the staging point, and the spring takes a velocity time
+     constant to get going, so it covers v*(tau - tc), not v*tau. Staging at the
+     naive distance leaves it a constant 15cm short — about 15ms late, and at
+     ball speeds another 15cm of travel on top. Roughly a ball diameter of miss,
+     which is an edge contact rather than a shot. */
+  const tc = 1 / (2 * cfg.feel.posDamp * (2 * Math.PI * cfg.feel.posFreq));
+  const usable = Math.max(0.01, SHOT.swingTime - tc);
+
   const path = shotPath(w, aiSide);
   const box = aiBox(me);
   let best = null;
@@ -238,7 +250,7 @@ function shotSearch(w, aiSide, wheelAngle) {
              So the paddle stands back along the shot's own line and drives
              forward through it. How far back is the swing speed times the swing
              time — the distance it will actually cover getting up to pace. */
-          const back = swing * SHOT.swingTime;
+          const back = swing * usable;
           const sx = c.x - dirx * back, sy = c.y - diry * back;
           if (sx < box.x0 || sx > box.x1 || sy < box.y0 || sy > box.y1) continue;
 
