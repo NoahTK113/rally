@@ -224,10 +224,10 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="shot.js?v=v19.4-local"></script>
-<script src="ai.js?v=v19.4-local"></script>
-<script src="audio.js?v=v19.4-local"></script>
-<script src="tutorial.js?v=v19.4-local"></script>
+<script src="shot.js?v=v19.5-local"></script>
+<script src="ai.js?v=v19.5-local"></script>
+<script src="audio.js?v=v19.5-local"></script>
+<script src="tutorial.js?v=v19.5-local"></script>
 <script>
 'use strict';
 
@@ -901,6 +901,55 @@ function resetPaddles(w) {
       p.vx = p.vy = p.w = 0;
     }
   }
+}
+
+/* ---- BAND-AID: the dead ball on the floor -------------------------------
+   The ball can come to rest on the floor outside the player's reach, where it
+   threatens no goal and offers no shot. The AI's decision tree has nothing to
+   say about that position — every branch it has is about defending or
+   attacking, and this is neither — so it stands still, and nothing else in the
+   game ends the state either. The point simply stops.
+
+   Re-serve after FLOOR_STALL seconds of it.
+
+   This treats the symptom and is meant to be thrown away. The real fix is an
+   instruction for "the ball is dead, go and fetch it", which belongs in the
+   decision tree next to save and shot rather than on a timer out here.
+
+   Any paddle contact restarts the clock, whoever made it: a ball being nudged
+   along the floor is being played, however badly. */
+const FLOOR_STALL = 2.0;                  // s
+let floorStallT = 0, floorStallEv = 0;
+onNewGame(() => { floorStallT = 0; floorStallEv = 0; });
+
+// Is the ball somewhere the PLAYER could legally put a paddle? If so it is
+// their problem to solve and not a stall.
+function ballInPlayerBox(w, bx, by) {
+  for (let i = 0; i < MATCH.paddles; i++) {
+    for (const b of paddleBoxes(w.p[idOf(mySide, i)])) {
+      if (bx >= b.x0 && bx <= b.x1 && by >= b.y0 && by <= b.y1) return true;
+    }
+  }
+  return false;
+}
+
+function checkFloorStall(w, dt) {
+  if (!AI.on) { floorStallT = 0; floorStallEv = w.evCount; return; }
+
+  let hit = false;
+  const first = Math.max(floorStallEv + 1, w.evCount - EV_SLOTS + 1);
+  for (let id = first; id <= w.evCount; id++) {
+    const e = w.ev[id % EV_SLOTS];
+    if (e && e.id === id && e.kind === 'paddle') hit = true;
+  }
+  floorStallEv = w.evCount;
+
+  const b = w.ball;
+  const onFloor = b.y <= PHYS.ballR + 0.02;
+  if (hit || !onFloor || ballInPlayerBox(w, b.x, b.y)) { floorStallT = 0; return; }
+
+  floorStallT += dt;
+  if (floorStallT >= FLOOR_STALL) { floorStallT = 0; serve(w); }
 }
 
 function serve(w) {
@@ -2041,6 +2090,7 @@ function stepWorld(w, inp, dt) {
   if (w.phase === PHASE.PLAY) {
     stepBall(w, dt, true);
     checkGoal(w);
+    checkFloorStall(w, dt);
 
   } else if (w.phase === PHASE.EXIT) {
     stepBall(w, dt, true);            // still solid; the back is simply open
@@ -2248,7 +2298,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.4-local';
+const BUILD = 'v19.5-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
