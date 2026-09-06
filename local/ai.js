@@ -78,6 +78,39 @@ const AI = {
    so it is simply stated. */
 const AI_STAND_FULL = 2.0;
 
+/* ==========================================================================
+   DIFFICULTY
+
+   Two levels for now, and only the keys that differ between them. A level has
+   to be able to put back what the other one changed, so both ends state every
+   key rather than one being "the defaults" — otherwise switching down and back
+   up would leave whatever the low level touched still in place.
+
+   SHOT is in here too: swingTime belongs to the search, but how long the AI
+   winds up is difficulty, not geometry. shot.js loads first, so the object is
+   already there to write into.
+
+   Anything not listed is shared by both levels and lives on the sliders. */
+const AI_LEVELS = {
+  1:  { AI:   { reaction: 0.17, raceMargin: 1.15, aimError: 72,
+                touchError: 50, standError: 50,   standPeriod: 1.15 },
+        SHOT: { swingTime: 0.30 } },
+
+  10: { AI:   { reaction: 0.00, raceMargin: 1.40, aimError: 0,
+                touchError: 0,  standError: 0,    standPeriod: 1.00 },
+        SHOT: { swingTime: 0.20 } },
+};
+
+let aiLevel = 10;             // what the defaults already are, so nothing to apply
+
+function aiSetLevel(n) {
+  const L = AI_LEVELS[n];
+  if (!L) return;
+  Object.assign(AI, L.AI);
+  Object.assign(SHOT, L.SHOT);
+  aiLevel = n;
+}
+
 /* Long enough to cover the largest reaction the panel allows (0.6s) at the
    simulation rate, with room to spare. Sized from the constants rather than
    guessed, so a faster tick or a slower slider cannot quietly overrun it. */

@@ -40,6 +40,9 @@
   #panel button{background:#141c28;color:#c9d4e2;border:1px solid #24344a;border-radius:5px;
                 padding:5px 10px;font:inherit;font-size:10px;cursor:pointer}
   #panel button:hover{border-color:#33496a}
+  #panel button.on{border-color:#22d3ee;color:#e6edf6;background:#16222f}
+  .lvl{display:flex;gap:6px;width:100px}
+  .lvl button{flex:1;padding:4px 0}
 
   #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
@@ -221,10 +224,10 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="shot.js?v=v19.2-local"></script>
-<script src="ai.js?v=v19.2-local"></script>
-<script src="audio.js?v=v19.2-local"></script>
-<script src="tutorial.js?v=v19.2-local"></script>
+<script src="shot.js?v=v19.3-local"></script>
+<script src="ai.js?v=v19.3-local"></script>
+<script src="audio.js?v=v19.3-local"></script>
+<script src="tutorial.js?v=v19.3-local"></script>
 <script>
 'use strict';
 
@@ -1898,6 +1901,7 @@ const KNOBS = [
 
 
   ['AI'],
+  { level: true },
   { o: AI, k: 'reaction',   label: 'reaction',  min: 0,    max: 0.6, step: 0.01, u: 's' },
   { o: AI, k: 'mouseSpeed', label: 'mouse max', min: 2,    max: 80,  step: 1,    u: 'm/s' },
   { o: AI, k: 'wheelSpeed', label: 'wheel max', min: 2,    max: 40,  step: 1,    u: '/s' },
@@ -1920,7 +1924,13 @@ const KNOBS = [
   { o: VIS, k: 'glow',   label: 'glow',       min: 0, max: 3, step: 0.05, u: '×' },
 ];
 
-const DEFAULTS = KNOBS.filter(k => !Array.isArray(k)).map(k => [k, k.o[k.k]]);
+const DEFAULTS = KNOBS.filter(k => !Array.isArray(k) && k.o).map(k => [k, k.o[k.k]]);
+
+/* Pull every row back into line with the values behind it. Needed whenever
+   something other than a slider changes them — picking a level, or reset. */
+function syncPanel() {
+  for (const k of KNOBS) if (!Array.isArray(k) && k._sync) k._sync();
+}
 
 function buildPanel() {
   const el = document.getElementById('panel');
@@ -1936,6 +1946,27 @@ function buildPanel() {
       firstGroup = false;
       continue;
     }
+    /* The difficulty pair. Not a slider — it writes a whole set of values at
+       once, across both AI and SHOT, and then every other row has to catch up.
+       That is what syncPanel is for. */
+    if (k.level) {
+      const wrap = document.createElement('div');
+      wrap.className = 'lvl';
+      const levels = [1, 10];
+      for (const n of levels) {
+        const b = document.createElement('button');
+        b.textContent = 'L' + n;
+        b.addEventListener('click', () => { aiSetLevel(n); syncPanel(); });
+        wrap.appendChild(b);
+      }
+      k._sync = () => {
+        [...wrap.children].forEach((b, i) => b.classList.toggle('on', aiLevel === levels[i]));
+      };
+      k._sync();
+      el.appendChild(wrap);
+      continue;
+    }
+
     const wrap = document.createElement('label');
     wrap.className = 'knob';
     wrap.innerHTML =
@@ -1958,7 +1989,9 @@ function buildPanel() {
   const reset = document.createElement('button');
   reset.textContent = 'reset';
   reset.addEventListener('click', () => {
-    for (const [k, v] of DEFAULTS) { k.o[k.k] = v; k._sync(); }
+    for (const [k, v] of DEFAULTS) k.o[k.k] = v;
+    aiLevel = 10;                  // the defaults ARE level 10
+    syncPanel();
     resize();
   });
   el.appendChild(reset);
@@ -2215,7 +2248,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.2-local';
+const BUILD = 'v19.3-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
