@@ -57,6 +57,12 @@ const SHOT_PRED_DT = 1 / 120;   // integration step for the ball's future
 
 let shotWorld = null;
 
+/* Debug capture. The full sampled trajectory of the last search, and the shot
+   it settled on. Only the renderer reads these; nothing decides anything from
+   them. */
+let shotLastPath = null;
+let shotDebug = null;
+
 /* ==========================================================================
    THE BALL'S FUTURE
 
@@ -79,15 +85,20 @@ function shotPath(w, aiSide) {
   const steps = Math.floor(SHOT.horizon / SHOT_PRED_DT);
 
   const path = [];
+  const all = [];
   for (let i = 1; i <= steps; i++) {
     stepBall(shotWorld, SHOT_PRED_DT, true, true);
     if (b.x < -arena.goalDepth || b.x > arena.width + arena.goalDepth) break;
     if (i % every) continue;
 
+    const t = i * SHOT_PRED_DT;
+    all.push({ t, x: b.x, y: b.y });     // for drawing, wherever it goes
+
     // Only where our paddle could actually stand.
     if (b.x < box.x0 || b.x > box.x1 || b.y < box.y0 || b.y > box.y1) continue;
-    path.push({ t: i * SHOT_PRED_DT, x: b.x, y: b.y, vx: b.vx, vy: b.vy });
+    path.push({ t, x: b.x, y: b.y, vx: b.vx, vy: b.vy });
   }
+  shotLastPath = all;
   return path;
 }
 
@@ -233,12 +244,13 @@ function shotSearch(w, aiSide, wheelAngle) {
           if (!best || score > best.score) {
             best = { t: c.t, x: c.x, y: c.y, vinx: c.vx, viny: c.vy,
                      dirx, diry, speed: s, swing, angle: face,
-                     goalY: flight.yGoal, pass, score };
+                     goalY: flight.yGoal, flightT: flight.t, pass, score };
           }
         }
       }
     }
   }
+  shotDebug = best ? { path: shotLastPath, shot: best } : null;
   return best;
 }
 
