@@ -50,7 +50,16 @@ const SHOT = {
                       //   velocity time constants — roughly 45ms at the current
                       //   tuning — below which the paddle never reaches pace.
 
+  minFaceOn: 0.25,    /* How squarely the ball must meet the face. It is
+                         |cos| of the angle between the incoming ball and the
+                         face NORMAL, so 1 is dead broadside and 0 is the ball
+                         travelling along the paddle's spine — arriving at the
+                         end of it, where a centimetre of timing decides whether
+                         there is any contact at all. 0.25 is about 75 degrees
+                         off, and below that the shot is a coin toss. */
+
   // Scoring weights. What makes one shot better than another.
+  wFaceOn: 1.2,       // and among the possible ones, prefer the forgiving
   wSpeed: 1.0,        // faster gives the player less time
   wPass: 1.6,         // passing further from the player matters more
   wMargin: 0.5,       // and some room inside the posts, so it is not a coin flip
@@ -219,6 +228,18 @@ function shotSearch(w, aiSide, wheelAngle) {
       const s = (1 + e) * vpMax - e * vinN;
       if (s <= 0.5) continue;                 // no useful pace to be had here
 
+      /* How squarely the ball meets the face. A ball sliding along the spine
+         meets the paddle END-ON, where the timing has to be perfect and
+         usually is not — geometrically a fine shot, and one the AI will never
+         actually make. A ball arriving broadside forgives a slip, because
+         missing the intended spot only moves the contact along the paddle.
+
+         A nearly stationary ball has no meaningful direction, so it counts as
+         fully square rather than dividing by almost nothing. */
+      const vinMag = Math.hypot(c.vx, c.vy);
+      const faceOn = vinMag < 0.5 ? 1 : Math.abs(vinN) / vinMag;
+      if (faceOn < SHOT.minFaceOn) continue;
+
       const vx = dirx * s, vy = diry * s;
       const flight = shotFlight(c.x, c.y, vx, vy, aiSide);
       if (!flight) continue;
@@ -253,7 +274,8 @@ function shotSearch(w, aiSide, wheelAngle) {
 
           const pass = shotPassDistance(c.x, c.y, vx, vy, aiSide, flight.t);
           const score =
-              SHOT.wSpeed  * (s / hardest)
+              SHOT.wFaceOn * faceOn
+            + SHOT.wSpeed  * (s / hardest)
             + SHOT.wPass   * Math.min(pass, 3) / 3
             + SHOT.wMargin * Math.min(flight.margin, 0.5) / 0.5
             - SHOT.wTime   * (c.t / SHOT.horizon);
