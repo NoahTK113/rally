@@ -577,6 +577,52 @@ function aiEmit(w, side, dst, want, dt) {
   dst.tx = ai.outX; dst.ty = ai.outY; dst.ta = ai.outA;
 }
 
+/* Is the ball inside the box our held paddle may occupy? */
+function aiBallInBox(w, side) {
+  const b = aiBox(aiPaddle(w, side)), ball = aiPerceived().ball;
+  return ball.x >= b.x0 && ball.x <= b.x1 && ball.y >= b.y0 && ball.y <= b.y1;
+}
+
+/* ==========================================================================
+   OPPORTUNITY — THE ENTRY CHAIN
+
+   A sequence of cheap yes/no questions, all answered from the present. None of
+   them predicts anything; the prediction is a separate stage that only runs
+   once every one of these has passed. That ordering is the whole point — the
+   expensive work sits behind a gate rather than at the root.
+
+   Nothing calls this yet. What the AI DOES with an opportunity is still to be
+   decided.
+   ========================================================================== */
+function aiOpportunityOpen(w, side) {
+  // Save outranks everything. A goal to defend is not an opening to attack.
+  if (ai.saving) return false;
+
+  // Can we play the ball at all?
+  if (!aiBallInBox(w, side)) return false;
+
+  // Is it ours rather than theirs?
+  if (aiBallDistance(w, side) >= aiPlayerBallDistance(side)) return false;
+
+  /* Is the player out of it? Two ways, and the cheap definitive one is asked
+     first: past their reach line the ball is simply not theirs to play, at any
+     speed, so how fast it is moving stops mattering. Only when they COULD
+     still reach it does the velocity question earn its keep — is the ball
+     running away from them faster than they can follow.
+
+     Written as a nested check rather than an OR so the order is visible: the
+     geometric fact settles most cases outright, and the speed test is the
+     finer instrument used on what is left. */
+  if (!aiBallBeyondPlayerReach(side)) {
+    if (!aiBallEscaped(side)) return false;
+  }
+
+  // Is there a shot to take?
+  if (aiNetBlocks(side)) return false;
+
+  return true;
+}
+
 /* ==========================================================================
    DECISION
 
