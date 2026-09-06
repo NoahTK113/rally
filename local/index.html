@@ -224,10 +224,10 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="shot.js?v=v19.3-local"></script>
-<script src="ai.js?v=v19.3-local"></script>
-<script src="audio.js?v=v19.3-local"></script>
-<script src="tutorial.js?v=v19.3-local"></script>
+<script src="shot.js?v=v19.4-local"></script>
+<script src="ai.js?v=v19.4-local"></script>
+<script src="audio.js?v=v19.4-local"></script>
+<script src="tutorial.js?v=v19.4-local"></script>
 <script>
 'use strict';
 
@@ -1520,7 +1520,7 @@ function drawCursor() {
    thinks the ball is, which is a little behind where you can see it. */
 function drawDefensivePosition() {
   if (!AI.on) return;
-  const d = aiDefensivePosition(-mySide);
+  const d = aiDefensivePosition(world, -mySide);
   const r = 0.35;
   ctx.strokeStyle = '#f87171';
   ctx.lineWidth = lineW();
@@ -2248,7 +2248,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.3-local';
+const BUILD = 'v19.4-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
