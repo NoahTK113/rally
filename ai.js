@@ -39,7 +39,7 @@ const AI = {
   saveRate: 7,        // m/s — closing on our own goal faster than this is a save
   saveDist: 1.5,      // m — this near the mouth is a save whatever the speed
   clearDist: 1.75,    // m — inside this, the clear commits and drives through
-  followThrough: 0.75,// m of target held BEYOND the clamp distance.
+  followThrough: 1.0, // m of target held BEYOND the clamp distance.
 
                       /* Not extra force — the error clamp forbids that. Extra
                          DURATION of full force. At exactly maxError the paddle
@@ -54,7 +54,7 @@ const AI = {
   shotHold: 0.15,     // s to keep a shot alive past its contact time, so a hit
                       //   and a miss both end it the same way
 
-  raceMargin: 1.0,    // head start insisted on before attacking, as a fraction
+  raceMargin: 1.4,    // head start insisted on before attacking, as a fraction
                       //   of the player's time to the ball. Under 1 is cautious,
                       //   over 1 contests balls we are slightly behind on.
 };
@@ -684,8 +684,11 @@ function aiOpportunityOpen(w, side) {
   const me = aiPaddle(w, side);
   if (!(aiTimeToBall(me.x, me.y) < aiPlayerTimeToBall(side) * AI.raceMargin)) return false;
 
-  // Is there a shot to take?
-  if (aiNetBlocks(side)) return false;
+  /* No net gate. aiNetBlocks answers "no FLAT shot", and a ball tucked low
+     behind the net answers it yes — so the AI stood there doing nothing at all,
+     which is the one outcome with no way out of it. Swinging and burying the
+     ball in the net is worse than a good shot and better than being stuck: the
+     ball moves, and a moving ball eventually becomes playable again. */
 
   return true;
 }
