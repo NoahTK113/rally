@@ -221,9 +221,9 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="ai.js?v=v17.1-local"></script>
-<script src="audio.js?v=v17.1-local"></script>
-<script src="tutorial.js?v=v17.1-local"></script>
+<script src="ai.js?v=v17.2-local"></script>
+<script src="audio.js?v=v17.2-local"></script>
+<script src="tutorial.js?v=v17.2-local"></script>
 <script>
 'use strict';
 
@@ -1826,7 +1826,7 @@ const KNOBS = [
   { o: AI, k: 'saveDist',   label: 'save dist', min: 0,    max: 10,  step: 0.1,  u: 'm' },
   { o: AI, k: 'strikeDist', label: 'strike at', min: 0.2,  max: 6,   step: 0.05, u: 'm' },
   { o: AI, k: 'strikeAngle',label: 'strike ang',min: 5,   max: 90,  step: 1,    u: '°' },
-  { o: AI, k: 'escapeMargin',label:'escape x',min: 0.2, max: 3,   step: 0.05, u: '×' },
+  { o: AI, k: 'opportunityVelMargin', label: 'oppty vel', min: 0.2, max: 3, step: 0.05, u: '×' },
 
   ['RENDER'],
   { o: VIS, k: 'linePx', label: 'line width', min: 1, max: 8, step: 1,    u: 'px' },
@@ -2128,7 +2128,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v17.1-local';
+const BUILD = 'v17.2-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
