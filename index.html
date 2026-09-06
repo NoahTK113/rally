@@ -37,10 +37,20 @@
   #panel button{background:#141c28;color:#c9d4e2;border:1px solid #24344a;border-radius:5px;
                 padding:5px 10px;font:inherit;font-size:10px;cursor:pointer}
   #panel button:hover{border-color:#33496a}
+  #panel button.on{border-color:#22d3ee;color:#e6edf6;background:#16222f}
+  .lvl{display:flex;gap:6px;width:100px}
+  .lvl button{flex:1;padding:4px 0}
 
   #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
-  #menu.hidden,#setup.hidden,#setupOwner.hidden,#setupWait.hidden{display:none}
+  /* !important because #menu and #setup set display through ID selectors, and
+     an ID beats a class: a plain .hidden rule loses to both and silently does
+     nothing. That is not hypothetical - it shipped, and the menu stopped
+     hiding while #setup, which carries the class in markup, became a permanent
+     overlay underneath it. Every button still worked; nothing looked like it
+     did. A utility class that means "not displayed, whatever else says" has to
+     outrank the layout rules it is switching off. */
+  .hidden{display:none!important}
   #setup{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;
          background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
   #setup .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
@@ -54,9 +64,9 @@
   .stepper button:hover:not(:disabled){border-color:#22d3ee}
   .stepper button:disabled{opacity:.3;cursor:default}
   #ptVal{min-width:74px;font-size:30px;font-weight:700;color:#e6edf6;font-variant-numeric:tabular-nums}
-  #ptRange{-webkit-appearance:none;appearance:none;width:100%;height:3px;border-radius:2px;
+  #ptRange,#diffRange{-webkit-appearance:none;appearance:none;width:100%;height:3px;border-radius:2px;
            background:#22303f;outline:none;margin:0 0 10px;cursor:pointer}
-  #ptRange::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+  #ptRange::-webkit-slider-thumb,#diffRange::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
            background:#22d3ee;cursor:pointer}
   #ptRange:disabled::-webkit-slider-thumb{background:#3f4d61;cursor:default}
   .hint{font-size:10px;color:#66788f;margin-bottom:22px}
@@ -70,6 +80,7 @@
               border-radius:9px;cursor:pointer;background:#151d2b;color:#66788f;
               border:1px solid #263449}
   .seg button:hover:not(:disabled){color:#c9d4e2}
+  .seg button:disabled{opacity:.3;cursor:default}
   .seg button.on{border-color:#22d3ee;color:#e6edf6;background:#16222f}
 
   .sens{display:flex;align-items:center;gap:12px;margin-top:20px;padding-top:18px;
@@ -228,27 +239,26 @@
   <div class="card">
     <div id="setupOwner">
       <h1>SETUP</h1>
-      <div id="aiRow" style="display:none">
+      <div id="diffRow" class="hidden">
         <div class="lab">DIFFICULTY</div>
-        <div class="seg">
-          <button id="aiEasy">EASY</button>
-          <button id="aiNormal">NORMAL</button>
-          <button id="aiHard">HARD</button>
-        </div>
+        <input id="diffRange" type="range" min="1" max="10" step="1" value="10">
+        <div class="hint" id="diffHint">level 10</div>
       </div>
       <div class="lab">PADDLES PER PLAYER</div>
       <div class="seg">
         <button id="pd1">1</button>
         <button id="pd2">2</button>
       </div>
-      <div class="lab">POINTS TO WIN</div>
-      <div class="stepper">
-        <button id="ptMinus">&minus;</button>
-        <div id="ptVal">7</div>
-        <button id="ptPlus">+</button>
+      <div id="ptRow">
+        <div class="lab">POINTS TO WIN</div>
+        <div class="stepper">
+          <button id="ptMinus">&minus;</button>
+          <div id="ptVal">7</div>
+          <button id="ptPlus">+</button>
+        </div>
+        <input id="ptRange" type="range" min="0" max="100" step="1" value="7">
+        <div class="hint" id="ptHint">first to 7 goals</div>
       </div>
-      <input id="ptRange" type="range" min="0" max="100" step="1" value="7">
-      <div class="hint" id="ptHint">first to 7 goals</div>
       <button class="go" id="btnStart">START MATCH</button>
     </div>
     <div id="setupWait" class="hidden">
@@ -272,8 +282,8 @@
   <div class="card">
     <h1>BANJOBALL</h1>
     <button id="btnTutorial">HOW TO PLAY</button>
-    <button id="btnAI">PLAY THE COMPUTER</button>
-    <button id="btnSolo">PRACTICE ALONE</button>
+    <button id="btnSolo">PRACTICE</button>
+    <button id="btnAI">VS AI</button>
     <button id="btnHost">HOST A GAME</button>
     <div class="join">
       <input id="codeIn" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false">
@@ -303,9 +313,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v14.2"></script>
-<script src="ai.js?v=v14.2"></script>
-<script src="tutorial.js?v=v14.2"></script>
+<script src="shot.js?v=v16.2"></script>
+<script src="ai.js?v=v16.2"></script>
+<script src="audio.js?v=v16.2"></script>
+<script src="tutorial.js?v=v16.2"></script>
 <script>
 'use strict';
 
@@ -427,7 +438,14 @@ const COL = {
 const goalColour = side => side > 0 ? COL.blue : COL.red;
 const goalFill   = side => side > 0 ? COL.blueFill : COL.redFill;
 
-const opts = { showTarget: false, showVectors: false };
+/* freezeOnShot stops the world the instant the AI commits to a shot, so the
+   trajectory overlay can be read. It is an AI-development tool and there is
+   deliberately NO key bound to it here — this is the game build, and a freeze
+   in a hosted match would desync from the opponent with no warning.
+
+   To use it while debugging: set opts.freezeOnShot = true from the console in
+   a solo game. P resumes. The local build has it on the H panel. */
+const opts = { showTarget: false, showVectors: false, freezeOnShot: false };
 let renderAlpha = 1;
 
 // Outward glow: the same contour stroked a few times, widening and fading.
@@ -943,9 +961,18 @@ const teamName = side => side > 0 ? 'BLUE' : 'RED';
 
 // Read from MATCH rather than the world: it is a rule, not state. Both peers
 // hold the same value because it is synced with the rest of the config.
+/* Practice alone is one player and an empty half. There is nobody to beat, so
+   there is nothing to beat them to: it runs until you leave.
+
+   Expressed as an EFFECTIVE target rather than by writing 0 into MATCH.target,
+   because that value is shared with the other modes and persisted. Visiting
+   practice must not silently turn a hosted match endless too. */
+function inPractice() { return net.role === 'solo' && !AI.on; }
+function matchTarget() { return inPractice() ? 0 : MATCH.target; }
+
 function matchOver(w) {
-  return MATCH.target > 0 &&
-         (w.scores['-1'] >= MATCH.target || w.scores['1'] >= MATCH.target);
+  const t = matchTarget();
+  return t > 0 && (w.scores['-1'] >= t || w.scores['1'] >= t);
 }
 
 function checkGoal(w) {
@@ -990,6 +1017,57 @@ function resetPaddles(w) {
       p.vx = p.vy = p.w = 0;
     }
   }
+}
+
+/* ---- BAND-AID: the dead ball on the floor -------------------------------
+   The ball can come to rest on the floor outside the player's reach, where it
+   threatens no goal and offers no shot. Every branch of the AI's decision tree
+   is about defending or attacking and this is neither, so it stands still, and
+   nothing else in the game ends the state either. The point simply stops.
+
+   Re-serve after FLOOR_STALL seconds of it. Symptom fix, meant to be thrown
+   away: the real answer is a "the ball is dead, go and fetch it" branch in the
+   decision tree rather than a timer out here.
+
+   Runs on server.world only. Not because of networking — there is none in a
+   game against the computer — but because that is the AUTHORITATIVE world.
+   The client keeps its own predicted copy and reconciles it against snapshots
+   every tick, so a re-serve written there would be undone within a tick or
+   two. Whatever changes the world has to change that one. */
+const FLOOR_STALL = 4.0;                  // s
+let floorStallT = 0, floorStallEv = 0;
+onNewGame(() => { floorStallT = 0; floorStallEv = 0; });
+
+// Is the ball somewhere the PLAYER could legally put a paddle? If so it is
+// their problem to solve and not a stall.
+function ballInPlayerBox(w, bx, by) {
+  for (let i = 0; i < MATCH.paddles; i++) {
+    for (const b of paddleBoxes(w.p[idOf(mySide, i)])) {
+      if (bx >= b.x0 && bx <= b.x1 && by >= b.y0 && by <= b.y1) return true;
+    }
+  }
+  return false;
+}
+
+function checkFloorStall(w, dt) {
+  if (!AI.on || net.role !== 'solo' || w.phase !== PHASE.PLAY) {
+    floorStallT = 0; floorStallEv = w.evCount; return;
+  }
+
+  let hit = false;
+  const first = Math.max(floorStallEv + 1, w.evCount - EV_SLOTS + 1);
+  for (let id = first; id <= w.evCount; id++) {
+    const e = w.ev[id % EV_SLOTS];
+    if (e && e.id === id && e.kind === 'paddle') hit = true;
+  }
+  floorStallEv = w.evCount;
+
+  const b = w.ball;
+  const onFloor = b.y <= PHYS.ballR + 0.02;
+  if (hit || !onFloor || ballInPlayerBox(w, b.x, b.y)) { floorStallT = 0; return; }
+
+  floorStallT += dt;
+  if (floorStallT >= FLOOR_STALL) { floorStallT = 0; serve(w); }
 }
 
 function serve(w) {
@@ -1600,8 +1678,28 @@ function drawCursor() {
   ctx.globalAlpha = 1;
 }
 
+/* Where the AI would ideally stand. Drawn from the same call the AI reads, so
+   the cross cannot show one thing while the AI acts on another — and from the
+   PERCEIVED ball, so it sits where the AI thinks the ball is, a little behind
+   where you can see it.
+
+   Reads the client's world rather than the server's. In solo those are one
+   tick apart at most, which is below what the eye resolves. */
+function drawDefensivePosition() {
+  if (!AI.on) return;
+  const d = aiDefensivePosition(world, -mySide);
+  const r = 0.35;
+  ctx.strokeStyle = '#f87171';
+  ctx.lineWidth = lineW();
+  ctx.beginPath();
+  ctx.moveTo(d.x - r, d.y); ctx.lineTo(d.x + r, d.y);
+  ctx.moveTo(d.x, d.y - r); ctx.lineTo(d.x, d.y + r);
+  ctx.stroke();
+}
+
 function drawEffects() {
   drawCursor();
+  drawDefensivePosition();
   if (!opts.showVectors) return;
   const p0 = me();
   arrow(p0.x, p0.y, p0.vx * VEL_SCALE, p0.vy * VEL_SCALE, 'rgba(125,211,252,.9)');
@@ -1640,10 +1738,11 @@ function drawHud() {
   ctx.fillText('–', sx, sy);
   ctx.globalAlpha = 1;
 
-  if (MATCH.target > 0) {
+  const goal = matchTarget();
+  if (goal > 0) {
     ctx.font = `600 ${Math.max(9, Math.round(size * 0.28))}px ui-monospace, Consolas, monospace`;
     ctx.fillStyle = 'rgba(140,160,185,.4)';
-    ctx.fillText(MATCH.target + ' POINTS TO WIN', sx, sy + size * 0.72);
+    ctx.fillText(goal + ' POINTS TO WIN', sx, sy + size * 0.72);
   }
 
   drawAnnouncement();
@@ -1923,21 +2022,36 @@ const KNOBS = [
   { o: NET, k: 'floor',     label: 'delay floor',min: 0, max: 100, step: 5, u: 'ms' },
 
   ['AI'],
+  { level: true },
   { o: AI, k: 'reaction',   label: 'reaction',  min: 0,    max: 0.6, step: 0.01, u: 's' },
-  { o: AI, k: 'commit',     label: 'commit',    min: 0.04, max: 0.6, step: 0.01, u: 's' },
-  { o: AI, k: 'wheelRate',  label: 'wheel',     min: 2,    max: 40,  step: 1,    u: '/s' },
-  { o: AI, k: 'maxCommit',  label: 'max plan',  min: 0.1,  max: 1.5, step: 0.02, u: 's' },
-  { o: AI, k: 'maxRecover', label: 'max recover',min: 0.2, max: 3,   step: 0.05, u: 's' },
-  { o: AI, k: 'standoff',   label: 'standoff',  min: 0.5,  max: 8,   step: 0.1,  u: '×' },
-  { o: AI, k: 'accuracy',   label: 'accuracy',  min: 0,    max: 1,   step: 0.01, u: '' },
-  { o: AI, k: 'switchTime', label: 'switch',    min: 0.05, max: 1.2, step: 0.01, u: 's' },
+  { o: AI, k: 'mouseSpeed', label: 'mouse max', min: 2,    max: 80,  step: 1,    u: 'm/s' },
+  { o: AI, k: 'wheelSpeed', label: 'wheel max', min: 2,    max: 40,  step: 1,    u: '/s' },
+  { o: AI, k: 'saveRate',   label: 'save rate', min: 0,    max: 20,  step: 0.5,  u: 'm/s' },
+  { o: AI, k: 'saveDist',   label: 'save dist', min: 0,    max: 10,  step: 0.1,  u: 'm' },
+  { o: AI, k: 'clearDist', label: 'clear at' , min: 0.2,  max: 6,   step: 0.05, u: 'm' },
+  { o: AI, k: 'clearAngle',label: 'clear ang',min: 5,   max: 90,  step: 1,    u: '°' },
+  { o: AI, k: 'raceMargin', label: 'race margin', min: 0.3, max: 2, step: 0.05, u: '×' },
+  { o: AI, k: 'aimError',   label: 'aim err',   min: 0,    max: 100, step: 1,   u: '%' },
+  { o: AI, k: 'touchError', label: 'touch err', min: 0,    max: 100, step: 1,   u: '%' },
+  { o: AI, k: 'standError', label: 'stand err', min: 0,    max: 100, step: 1,   u: '%' },
+  { o: AI, k: 'standPeriod',label: 'drift time',min: 0.05, max: 8,  step: 0.05, u: 's' },
+  { o: SHOT, k: 'swingTime', label: 'swing time', min: 0.05, max: 0.5, step: 0.01, u: 's' },
+  { o: AI, k: 'followThrough', label: 'follow thru', min: 0, max: 2.5, step: 0.05, u: 'm' },
+  { o: SHOT, k: 'minWindow', label: 'min window', min: 0, max: 0.4, step: 0.005, u: 's' },
+  { o: SHOT, k: 'wWindow',   label: 'w window',  min: 0, max: 4,   step: 0.1,   u: '' },
 
   ['RENDER'],
   { o: VIS, k: 'linePx', label: 'line width', min: 1, max: 8, step: 1,    u: 'px' },
   { o: VIS, k: 'glow',   label: 'glow',       min: 0, max: 3, step: 0.05, u: '×' },
 ];
 
-const DEFAULTS = KNOBS.filter(k => !Array.isArray(k)).map(k => [k, k.o[k.k]]);
+const DEFAULTS = KNOBS.filter(k => !Array.isArray(k) && k.o).map(k => [k, k.o[k.k]]);
+
+/* Pull every row back into line with the values behind it. Needed whenever
+   something other than a slider changes them — picking a level, or reset. */
+function syncPanel() {
+  for (const k of KNOBS) if (!Array.isArray(k) && k._sync) k._sync();
+}
 
 function buildPanel() {
   const el = document.getElementById('panel');
@@ -1953,6 +2067,27 @@ function buildPanel() {
       firstGroup = false;
       continue;
     }
+    /* The difficulty pair. Not a slider — it writes a whole set of values at
+       once, across both AI and SHOT, and then every other row has to catch up.
+       That is what syncPanel is for. */
+    if (k.level) {
+      const wrap = document.createElement('div');
+      wrap.className = 'lvl';
+      const levels = [1, 10];
+      for (const lv of levels) {
+        const b = document.createElement('button');
+        b.textContent = 'L' + lv;
+        b.addEventListener('click', () => { setDifficulty(lv); });
+        wrap.appendChild(b);
+      }
+      k._sync = () => {
+        [...wrap.children].forEach((b, i) => b.classList.toggle('on', aiLevel === levels[i]));
+      };
+      k._sync();
+      el.appendChild(wrap);
+      continue;
+    }
+
     const wrap = document.createElement('label');
     wrap.className = 'knob';
     wrap.innerHTML =
@@ -1976,7 +2111,9 @@ function buildPanel() {
   const reset = document.createElement('button');
   reset.textContent = 'reset';
   reset.addEventListener('click', () => {
-    for (const [k, v] of DEFAULTS) { k.o[k.k] = v; k._sync(); }
+    for (const [k, v] of DEFAULTS) k.o[k.k] = v;
+    aiLevel = 10;                  // the captured defaults ARE level 10
+    syncPanel();
     resize();
   });
   el.appendChild(reset);
@@ -2243,7 +2380,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v14.2';
+const BUILD = 'v16.2';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2449,17 +2586,26 @@ function serverReceive(end, m) {
 function serverStepOnce(dt) {
   if (!server.active) return;
 
+  /* The AI seat, filled before anything is read off the ring. It produces
+     the same record a hand or a peer would and the simulation cannot tell the
+     difference — which is why it goes straight into server.inputs rather than
+     through server.buf: the ring exists to carry input across a link, and
+     there is no link here. That also keeps the AI clear of hostDelay, so its
+     only latency is AI.reaction.
+
+     Called for the whole of solo rather than only when AI.on, because aiStep
+     observes on every tick regardless. A perception ring that filled only
+     while the AI played would start each match blind. */
+  if (net.role === 'solo') {
+    aiStep(server.world, -mySide, server.inputs[String(-mySide)], dt);
+  }
+
   // Resolve each side's input for the tick about to run. Nothing on file means
   // the packet has not arrived, so assume the last one is still held — never
   // wait, because waiting is lockstep.
   const T = server.world.tick + 1;
   for (const k of ['-1', '1']) {
-    // An AI seat produces the same record a person or a peer would; the
-    // simulation cannot tell the difference.
-    if (AI.on && k === String(-mySide) && net.role === 'solo') {
-      aiFillInput(server.world, -mySide, server.inputs[k], dt);
-      continue;
-    }
+    if (AI.on && net.role === 'solo' && k === String(-mySide)) continue;  // filled above
     const cell = server.buf[k][slot(T)];
     const dst = server.inputs[k];
     if (cell.tick === T) {
@@ -2485,6 +2631,7 @@ function serverStepOnce(dt) {
   }
 
   stepWorld(server.world, server.inputs, dt);
+  checkFloorStall(server.world, dt);
 
   // ping every 48 ticks, about five times a second
   if (server.sendTick % 48 === 0) {
@@ -2833,6 +2980,17 @@ function makeLoopbackPair() {
 // One-way delay applied to the host's own link. Half the round trip, because
 // the guest's packets traverse the wire once in each direction.
 function linkDelayMs() {
+  /* Practice and the computer are one machine talking to itself. There is no
+     trip to simulate, so none is simulated: solo runs at whatever the loopback
+     can deliver, which is one tick.
+
+     This overrides NET.floor deliberately. The floor existed so practice would
+     feel like a real match rather than teaching a timing you could not
+     reproduce online — a defensible idea, and the cost of dropping it is that
+     practice is now the snappier of the two. Against the computer that is the
+     right trade: the opponent is not on a wire, and pretending it is only
+     makes the game worse to play. */
+  if (net.role === 'solo') return 0;
   if (!NET.autoDelay) return Math.max(0, NET.hostDelay);
   // Connected: match the guest's one-way trip exactly. Taking max() with the
   // floor here would penalise the host beyond the guest on a fast link, which
@@ -2919,7 +3077,7 @@ function showSetup() {
   $('setupOwner').classList.toggle('hidden', !owner);
   $('setupWait').classList.toggle('hidden', owner);
   $('setupMsg').innerHTML = '';
-  if (owner) { paintTarget(); paintPaddles(); paintAI(); }
+  if (owner) { paintTarget(); paintPaddles(); paintDifficulty(); }
 }
 
 /* ==========================================================================
@@ -2994,22 +3152,33 @@ function setSens(v) {
   paintSens();
 }
 
-let aiLevel = 'normal';
-
-function paintAI() {
-  $('aiRow').style.display = AI.on ? 'block' : 'none';
-  for (const [k, id] of [['easy','aiEasy'], ['normal','aiNormal'], ['hard','aiHard']]) {
-    $(id).classList.toggle('on', aiLevel === k);
-  }
+/* Only meaningful against the computer, so it is hidden the rest of the time
+   rather than greyed — there is no version of a two-human match where a
+   difficulty setting means anything. */
+function paintDifficulty() {
+  $('diffRow').classList.toggle('hidden', !AI.on);
+  $('diffRange').value = aiLevel;
+  $('diffHint').textContent = aiLevel === 10 ? 'level 10 — as hard as it plays'
+                            : aiLevel === 1  ? 'level 1 — slow, and misses a lot'
+                            : 'level ' + aiLevel;
 }
 
-function setAILevel(name) {
-  aiLevel = name;
-  aiSetLevel(name);
-  paintAI();
+function setDifficulty(n) {
+  aiSetLevel(n);
+  try { localStorage.setItem('banjoball.ai', aiLevel); } catch (e) {}
+  paintDifficulty();
+  syncPanel();          // the tuning panel must not go on showing the old set
 }
 
 function paintPaddles() {
+  /* TEMPORARY: two paddles are unavailable against the computer. The AI never
+     writes `sel`, so it would hold paddle 0 for the whole match and leave the
+     other one standing — a worse opponent presented as a harder one. Locked
+     rather than hidden, so it is visibly a restriction and not a missing
+     feature, and it comes off the moment the AI can switch. */
+  const noTwo = AI.on;
+  if (noTwo && MATCH.paddles !== 1) MATCH.paddles = 1;
+  $('pd2').disabled = noTwo;
   $('pd1').classList.toggle('on', MATCH.paddles === 1);
   $('pd2').classList.toggle('on', MATCH.paddles === 2);
 }
@@ -3021,6 +3190,11 @@ function setPaddles(n) {
 }
 
 function paintTarget() {
+  /* Practice alone has nobody to beat, so a target to beat them to is noise on
+     the card. Hidden for that mode only — against the computer it is a real
+     setting, and in a hosted match it is the whole shape of the game. */
+  $('ptRow').classList.toggle('hidden', inPractice());
+
   const t = MATCH.target;
   $('ptVal').textContent = t === 0 ? '∞' : t;
   $('ptRange').value = t;
@@ -3214,14 +3388,16 @@ $('build').textContent = BUILD;
 $('btnSolo').addEventListener('click', function () {
   net.role = 'solo'; mySide = 1; AI.on = false; updateStatus(); showSetup();
 });
+
+/* AI.on selects the mode and is deliberately NOT reset per match: finishing a
+   match returns to the lobby, and starting another there should keep you
+   playing whoever you chose to play. The menu handlers are the only thing that
+   changes it. */
 $('btnAI').addEventListener('click', function () {
   net.role = 'solo'; mySide = 1; AI.on = true;
-  aiInit(-mySide);
+  aiInit();
   updateStatus(); showSetup();
 });
-$('aiEasy').addEventListener('click', () => setAILevel('easy'));
-$('aiNormal').addEventListener('click', () => setAILevel('normal'));
-$('aiHard').addEventListener('click', () => setAILevel('hard'));
 
 $('btnTutorial').addEventListener('click', function () {
   // Straight in: a lobby would be one more thing to explain before explaining
@@ -3236,6 +3412,7 @@ $('pd2').addEventListener('click', () => setPaddles(2));
 $('ptMinus').addEventListener('click', () => setTarget(MATCH.target - 1));
 $('ptPlus').addEventListener('click', () => setTarget(MATCH.target + 1));
 $('ptRange').addEventListener('input', e => setTarget(parseInt(e.target.value, 10)));
+$('diffRange').addEventListener('input', e => setDifficulty(parseInt(e.target.value, 10)));
 $('sensSetup').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 $('sensPlay').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 $('volSetup').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
@@ -3252,9 +3429,14 @@ $('volPause').addEventListener('input', e => setVolume(parseFloat(e.target.value
    physics or arena defaults never needs a bump. Only these five choices about
    the player persist, and wiping them is a real cost to that player — so bump
    it when a value would be MISREAD, not merely when a default moves. */
-const PREFS_VERSION = 1;
-const PREFS_KEYS = ['banjoball.target', 'banjoball.sens', 'banjoball.ai',
-                    'banjoball.paddles', 'banjoball.vol'];
+/* 2: banjoball.ai changed meaning. It held a difficulty NAME ('normal') for
+   the old AI and now holds a level 1-10. parseInt('normal') is NaN so the new
+   code already falls back safely, but a stale string would otherwise sit in
+   storage forever, and this is exactly the "a stored value would be MISREAD"
+   case the version exists for. */
+const PREFS_VERSION = 2;
+const PREFS_KEYS = ['banjoball.target', 'banjoball.sens',
+                    'banjoball.paddles', 'banjoball.vol', 'banjoball.ai'];
 
 function prefsCheck() {
   try {
@@ -3276,8 +3458,8 @@ try {
   if (!isNaN(saved)) MATCH.target = Math.max(0, Math.min(100, saved));
   const ms = parseFloat(localStorage.getItem('banjoball.sens'));
   if (!isNaN(ms)) MOUSE.sens = Math.max(0.2, Math.min(3, ms));
-  const lv = localStorage.getItem('banjoball.ai');
-  if (lv && AI_LEVELS[lv]) { aiLevel = lv; aiSetLevel(lv); }
+  const lv = parseInt(localStorage.getItem('banjoball.ai'), 10);
+  if (lv >= 1 && lv <= 10) aiSetLevel(lv);
   const pc = parseInt(localStorage.getItem('banjoball.paddles'), 10);
   if (pc === 1 || pc === 2) MATCH.paddles = pc;
   const vv = parseFloat(localStorage.getItem('banjoball.vol'));
@@ -3286,7 +3468,7 @@ try {
 paintVolume();
 paintTarget();
 paintPaddles();
-paintAI();
+paintDifficulty();
 paintSens();
 $('btnHost').addEventListener('click', hostGame);
 $('btnJoin').addEventListener('click', joinGame);
