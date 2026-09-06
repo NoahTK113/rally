@@ -41,6 +41,8 @@ const AI = {
   strikeDist: 1.75,   // m — inside this, commit and drive through the ball
   strikeAngle: 25,    // deg — how far our approach may sit off the line before
                       //   the strike is abandoned and we get back on it
+  shotHold: 0.15,     // s to keep a shot alive past its contact time, so a hit
+                      //   and a miss both end it the same way
 
   opportunityVelMargin: 1.0,  // multiple of the player's top paddle speed. The ball is
                       //   beyond them when it recedes faster than this.
@@ -77,6 +79,8 @@ const ai = {
   lastPhase: null, // to notice the moment play begins
   saving: false,   // latched: see aiUpdateSave
   lined: true,     // latched: are we square enough behind the ball to strike?
+  shot: null,      // the shot being executed, from shot.js
+  shotAge: 0,      // s since it was chosen
 };
 
 function aiInit() {
@@ -87,6 +91,8 @@ function aiInit() {
   ai.notches = 0;
   ai.saving = false;
   ai.lined = true;
+  ai.shot = null;
+  ai.shotAge = 0;
   ai.blind = 0;
   ai.lastPhase = null;
   if (!ai.hist) {
@@ -623,6 +629,45 @@ function aiOpportunityOpen(w, side) {
   return true;
 }
 
+/* Hold a shot, or find one.
+
+   A chosen shot is a COMMITMENT, not a preference re-examined every tick. The
+   entry chain is not re-run while one is being executed: a search that changed
+   its mind sixty times a second would leave the paddle chasing a different
+   contact point on each of them, and the wheel — which needs the whole
+   approach to turn — would never arrive anywhere.
+
+   It ends when its moment passes. Contact is not detected; the margin after
+   the contact time covers both a hit and a miss, and the entry chain then gets
+   a fresh look at whatever the world has become. */
+function aiUpdateShot(w, side, dt) {
+  if (ai.shot) {
+    ai.shotAge += dt;
+    if (ai.shotAge > ai.shot.t + AI.shotHold) ai.shot = null;
+    else return ai.shot;
+  }
+
+  if (!aiOpportunityOpen(w, side)) return null;
+
+  const wheel = ai.outSet ? ai.outA : aiPaddle(w, side).a;
+  const found = shotSearch(w, side, wheel);
+  if (found) { ai.shot = found; ai.shotAge = 0; }
+  return ai.shot;
+}
+
+/* Executing a shot. The face angle is commanded from the moment the shot is
+   chosen rather than at the end — the wheel turns at a fixed rate, so it needs
+   the whole approach to get there. The position closes on the contact point,
+   then drives one maxError PAST it along the shot's own direction, so the
+   paddle is still accelerating when the ball arrives. */
+function aiShotTarget(w, side) {
+  const sh = ai.shot;
+  if (aiBallDistance(w, side) > AI.strikeDist) return { x: sh.x, y: sh.y };
+  const feel = aiCfg().feel;
+  const past = Math.min(feel.maxError, feel.reach);
+  return { x: sh.x + sh.dirx * past, y: sh.y + sh.diry * past };
+}
+
 /* ==========================================================================
    DECISION
 
@@ -716,12 +761,20 @@ function aiSaveTarget(w, side) {
   return { x: ball.x + (ux / l) * past, y: ball.y + (uy / l) * past };
 }
 
-function aiDecide(w, side) {
-  const face = aiFaceBall(w, side);   // the same in every state
+function aiDecide(w, side, dt) {
+  const face = aiFaceBall(w, side);   // the fallback in every state
 
+  // A goal to defend outranks an opening to attack.
   if (aiUpdateSave(side)) {
+    ai.shot = null;
     const t = aiSaveTarget(w, side);
     return { x: t.x, y: t.y, a: face };
+  }
+
+  const sh = aiUpdateShot(w, side, dt);
+  if (sh) {
+    const t = aiShotTarget(w, side);
+    return { x: t.x, y: t.y, a: sh.angle };
   }
 
   // Default: hold the defensive position.
@@ -740,7 +793,7 @@ function aiStep(w, side, dst, dt) {
 
   /* No live ball, no decisions — and the latches reset, so the next point
      starts clean rather than resuming whatever the last one was doing. */
-  if (!aiLiveBall(w)) { ai.saving = false; ai.lined = true; return; }
+  if (!aiLiveBall(w)) { ai.saving = false; ai.lined = true; ai.shot = null; return; }
 
-  aiEmit(w, side, dst, aiDecide(w, side), dt);
+  aiEmit(w, side, dst, aiDecide(w, side, dt), dt);
 }
