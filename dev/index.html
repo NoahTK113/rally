@@ -43,7 +43,7 @@
 
   #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
-  #menu.hidden,#setup.hidden,#setupOwner.hidden,#setupWait.hidden{display:none}
+  .hidden{display:none}
   #setup{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;
          background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
   #setup .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
@@ -242,14 +242,16 @@
         <button id="pd1">1</button>
         <button id="pd2">2</button>
       </div>
-      <div class="lab">POINTS TO WIN</div>
-      <div class="stepper">
-        <button id="ptMinus">&minus;</button>
-        <div id="ptVal">7</div>
-        <button id="ptPlus">+</button>
+      <div id="ptRow">
+        <div class="lab">POINTS TO WIN</div>
+        <div class="stepper">
+          <button id="ptMinus">&minus;</button>
+          <div id="ptVal">7</div>
+          <button id="ptPlus">+</button>
+        </div>
+        <input id="ptRange" type="range" min="0" max="100" step="1" value="7">
+        <div class="hint" id="ptHint">first to 7 goals</div>
       </div>
-      <input id="ptRange" type="range" min="0" max="100" step="1" value="7">
-      <div class="hint" id="ptHint">first to 7 goals</div>
       <button class="go" id="btnStart">START MATCH</button>
     </div>
     <div id="setupWait" class="hidden">
@@ -304,10 +306,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v16.0-dev"></script>
-<script src="ai.js?v=v16.0-dev"></script>
-<script src="audio.js?v=v16.0-dev"></script>
-<script src="tutorial.js?v=v16.0-dev"></script>
+<script src="shot.js?v=v16.1-dev"></script>
+<script src="ai.js?v=v16.1-dev"></script>
+<script src="audio.js?v=v16.1-dev"></script>
+<script src="tutorial.js?v=v16.1-dev"></script>
 <script>
 'use strict';
 
@@ -952,9 +954,18 @@ const teamName = side => side > 0 ? 'BLUE' : 'RED';
 
 // Read from MATCH rather than the world: it is a rule, not state. Both peers
 // hold the same value because it is synced with the rest of the config.
+/* Practice alone is one player and an empty half. There is nobody to beat, so
+   there is nothing to beat them to: it runs until you leave.
+
+   Expressed as an EFFECTIVE target rather than by writing 0 into MATCH.target,
+   because that value is shared with the other modes and persisted. Visiting
+   practice must not silently turn a hosted match endless too. */
+function inPractice() { return net.role === 'solo' && !AI.on; }
+function matchTarget() { return inPractice() ? 0 : MATCH.target; }
+
 function matchOver(w) {
-  return MATCH.target > 0 &&
-         (w.scores['-1'] >= MATCH.target || w.scores['1'] >= MATCH.target);
+  const t = matchTarget();
+  return t > 0 && (w.scores['-1'] >= t || w.scores['1'] >= t);
 }
 
 function checkGoal(w) {
@@ -1720,10 +1731,11 @@ function drawHud() {
   ctx.fillText('–', sx, sy);
   ctx.globalAlpha = 1;
 
-  if (MATCH.target > 0) {
+  const goal = matchTarget();
+  if (goal > 0) {
     ctx.font = `600 ${Math.max(9, Math.round(size * 0.28))}px ui-monospace, Consolas, monospace`;
     ctx.fillStyle = 'rgba(140,160,185,.4)';
-    ctx.fillText(MATCH.target + ' POINTS TO WIN', sx, sy + size * 0.72);
+    ctx.fillText(goal + ' POINTS TO WIN', sx, sy + size * 0.72);
   }
 
   drawAnnouncement();
@@ -2361,7 +2373,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v16.0-dev';
+const BUILD = 'v16.1-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3171,6 +3183,11 @@ function setPaddles(n) {
 }
 
 function paintTarget() {
+  /* Practice alone has nobody to beat, so a target to beat them to is noise on
+     the card. Hidden for that mode only — against the computer it is a real
+     setting, and in a hosted match it is the whole shape of the game. */
+  $('ptRow').classList.toggle('hidden', inPractice());
+
   const t = MATCH.target;
   $('ptVal').textContent = t === 0 ? '∞' : t;
   $('ptRange').value = t;
