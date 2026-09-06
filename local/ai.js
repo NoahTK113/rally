@@ -42,7 +42,7 @@ const AI = {
   strikeAngle: 25,    // deg — how far our approach may sit off the line before
                       //   the strike is abandoned and we get back on it
 
-  escapeMargin: 1.0,  // multiple of the player's top paddle speed. The ball is
+  opportunityVelMargin: 1.0,  // multiple of the player's top paddle speed. The ball is
                       //   beyond them when it recedes faster than this.
 };
 
@@ -384,7 +384,7 @@ function aiBallEscapeRate(aiSide) {
    in metres per second, so retuning the spring cannot quietly invalidate it.
    Above 1 is cautious, below 1 optimistic. */
 function aiBallEscaped(aiSide) {
-  return aiBallEscapeRate(aiSide) > AI.escapeMargin * maxPaddleSpeed();
+  return aiBallEscapeRate(aiSide) > AI.opportunityVelMargin * maxPaddleSpeed();
 }
 
 /* Is the net in the way of a flat shot at the far goal?
