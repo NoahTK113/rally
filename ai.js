@@ -38,9 +38,9 @@ const AI = {
 
   saveRate: 5,        // m/s — closing on our own goal faster than this is a save
   saveDist: 3.0,      // m — this near the mouth is a save whatever the speed
-  strikeDist: 1.75,   // m — inside this, commit and drive through the ball
-  strikeAngle: 25,    // deg — how far our approach may sit off the line before
-                      //   the strike is abandoned and we get back on it
+  throughDist: 1.75,   // m — inside this, commit and drive through the ball
+  clearAngle: 25,    // deg — how far our approach may sit off the line before
+                      //   the clear is abandoned and we get back on it
   shotHold: 0.15,     // s to keep a shot alive past its contact time, so a hit
                       //   and a miss both end it the same way
 
@@ -78,9 +78,10 @@ const ai = {
   blind: 0,        // s of blackout left after a serve; see aiLiveBall
   lastPhase: null, // to notice the moment play begins
   saving: false,   // latched: see aiUpdateSave
-  lined: true,     // latched: are we square enough behind the ball to strike?
+  lined: true,     // latched: are we square enough behind the ball to clear?
   shot: null,      // the shot being executed, from shot.js
   shotAge: 0,      // s since it was chosen
+  evSeen: 0,       // event id watermark, for spotting a contact
 };
 
 function aiInit() {
@@ -93,6 +94,7 @@ function aiInit() {
   ai.lined = true;
   ai.shot = null;
   ai.shotAge = 0;
+  ai.evSeen = 0;
   ai.blind = 0;
   ai.lastPhase = null;
   if (!ai.hist) {
@@ -335,7 +337,7 @@ function aiNearestOnLine(w, side) {
    Which is the failure this exists to catch. Contact sends the ball roughly
    along paddle-to-ball extended, so this angle is very nearly the angle the
    ball leaves at, measured from straight out of our own goal. */
-function aiStrikeOffAngle(w, side) {
+function aiClearOffAngle(w, side) {
   const p = aiPaddle(w, side), ball = aiPerceived().ball, g = aiGoalPoint(side);
   const ux = ball.x - g.x, uy = ball.y - g.y;      // where the ball should go
   const ax = ball.x - p.x, ay = ball.y - p.y;      // where we would send it
@@ -421,24 +423,6 @@ function aiBallRecession(px, py) {
 function aiBallEscapeRate(aiSide) {
   const p = aiPlayerPaddle(aiSide);
   return aiBallRecession(p.x, p.y);
-}
-
-/* From where WE are standing. The same question asked of ourselves, and the
-   check the entry list was missing: a ball receding from the player faster
-   than they can move may be receding from us just as fast, in which case it is
-   nobody's opportunity. */
-function aiBallRecessionFromSelf(w, side) {
-  const p = aiPaddle(w, side);
-  return aiBallRecession(p.x, p.y);
-}
-
-/* Is the ball already beyond the player's reach?
-
-   The threshold is a MULTIPLE of the player's top speed rather than a figure
-   in metres per second, so retuning the spring cannot quietly invalidate it.
-   Above 1 is cautious, below 1 optimistic. */
-function aiBallEscaped(aiSide) {
-  return aiBallEscapeRate(aiSide) > AI.opportunityVelMargin * maxPaddleSpeed();
 }
 
 /* Is the ball past the furthest the player could ever touch?
@@ -640,10 +624,44 @@ function aiOpportunityOpen(w, side) {
    It ends when its moment passes. Contact is not detected; the margin after
    the contact time covers both a hit and a miss, and the entry chain then gets
    a fresh look at whatever the world has become. */
+/* Has anything touched the ball since we last looked?
+
+   The prediction excludes paddles, so a paddle contact is the ONE thing that
+   can invalidate it — everything else was already simulated exactly. Which
+   makes staleness an exact test rather than a tolerance to tune: watch the
+   simulation's own event log for a paddle event.
+
+   Scanned incrementally against a watermark, because the log is a short ring
+   and reading it from a fixed point would miss events once it wrapped. */
+function aiContactSince(w) {
+  let hit = false;
+  const first = Math.max(ai.evSeen + 1, w.evCount - EV_SLOTS + 1);
+  for (let id = first; id <= w.evCount; id++) {
+    const e = w.ev[id % EV_SLOTS];
+    if (e && e.id === id && e.kind === 'paddle') hit = true;
+  }
+  ai.evSeen = w.evCount;
+  return hit;
+}
+
 function aiUpdateShot(w, side, dt) {
+  const touched = aiContactSince(w);
+
   if (ai.shot) {
     ai.shotAge += dt;
-    if (ai.shotAge > ai.shot.t + AI.shotHold) ai.shot = null;
+
+    /* Three ways a shot ends, and none of them is "the entry conditions no
+       longer hold" — that would re-litigate the commitment every tick. */
+
+    // Someone hit the ball. Everything the plan was built on is now fiction.
+    if (touched) ai.shot = null;
+
+    // The ball became theirs. The same test that claimed it, run backwards.
+    else if (aiBallDistance(w, side) > aiPlayerBallDistance(side)) ai.shot = null;
+
+    // Its moment came and went. The margin covers a hit and a miss alike.
+    else if (ai.shotAge > ai.shot.t + AI.shotHold) ai.shot = null;
+
     else return ai.shot;
   }
 
@@ -662,9 +680,26 @@ function aiUpdateShot(w, side, dt) {
    paddle is still accelerating when the ball arrives. */
 function aiShotTarget(w, side) {
   const sh = ai.shot;
-  if (aiBallDistance(w, side) > AI.strikeDist) return { x: sh.x, y: sh.y };
+  if (aiBallDistance(w, side) > AI.throughDist) return { x: sh.x, y: sh.y };
+
+  /* The offset IS the swing speed. With the error clamped the spring settles
+     at omega*d/(2*zeta) — linear in how far the target is held past the paddle
+     — so the speed the search asked for maps to a distance in closed form.
+     Full offset is exactly maxPaddleSpeed, which is why maxError and that
+     figure agree: they are the same equation.
+
+     Capped at maxError because beyond it the clamp gives nothing more. In
+     practice the search prefers fast shots, so this will usually BE the cap;
+     it earns its keep on the occasional placed ball, and the real use for
+     speed variation is flicking, which is its own project.
+
+     Approximate when the run-up is short: this is the steady speed, reached
+     about 45ms after the offset is applied, and until then the paddle is still
+     travelling in with the error clamped and moving at full pace regardless. */
   const feel = aiCfg().feel;
-  const past = Math.min(feel.maxError, feel.reach);
+  const omega = 2 * Math.PI * feel.posFreq;
+  const cap = Math.min(feel.maxError, feel.reach);
+  const past = Math.min(cap, 2 * feel.posDamp * sh.swing / omega);
   return { x: sh.x + sh.dirx * past, y: sh.y + sh.diry * past };
 }
 
@@ -718,7 +753,7 @@ function aiUpdateSave(side) {
    block has to happen. Setting off early would only mean meeting the ball
    further from goal with less certainty about where it is going.
 
-   The strike target sits one maxError PAST the ball, along that same line
+   The clear target sits one maxError PAST the ball, along that same line
    extended away from the goal. One maxError because that is exactly where the
    spring saturates: nearer gives less than full force, further gives no more.
    Full power, least overshoot. The paddle therefore arrives still accelerating
@@ -727,27 +762,27 @@ function aiUpdateSave(side) {
 
    Note the target is already ON the line — it is the line, extended — so there
    is no sideways error left to correct while striking. Blending it toward the
-   line would only drag it back along the line: at strike range the halfway
+   line would only drag it back along the line: at through range the halfway
    point lands behind the ball, and the paddle would stop short of the thing it
    came to hit. */
 function aiSaveTarget(w, side) {
-  if (aiBallDistance(w, side) > AI.strikeDist) {
-    ai.lined = true;                 // each new strike starts with a clean slate
+  if (aiBallDistance(w, side) > AI.throughDist) {
+    ai.lined = true;                 // each new clear starts with a clean slate
     return aiDefensivePosition(side);
   }
 
-  /* Guard the strike while it is happening, not only when it begins. Driving
+  /* Guard the clear while it is happening, not only when it begins. Driving
      through the ball from the wrong angle sends it sideways, and from behind it
      sends it at our own goal — worse than not striking at all. If the approach
-     drifts too far off, abandon the strike and get back on the line first.
+     drifts too far off, abandon the clear and get back on the line first.
 
      Latched with room between the thresholds: leaving takes the full angle,
      returning takes well under it. Identical ones would have the paddle
      flicking between striking and repositioning while it sat on the boundary,
      and those two want it in quite different places. */
-  const off = aiStrikeOffAngle(w, side);
-  if (ai.lined) { if (off > AI.strikeAngle) ai.lined = false; }
-  else if (off < AI.strikeAngle * 0.6) ai.lined = true;
+  const off = aiClearOffAngle(w, side);
+  if (ai.lined) { if (off > AI.clearAngle) ai.lined = false; }
+  else if (off < AI.clearAngle * 0.6) ai.lined = true;
   if (!ai.lined) return aiNearestOnLine(w, side);
 
   const ball = aiPerceived().ball;
