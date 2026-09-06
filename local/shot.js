@@ -113,7 +113,7 @@ function shotPath(w, aiSide) {
 
     // Only where our paddle could actually stand.
     if (b.x < box.x0 || b.x > box.x1 || b.y < box.y0 || b.y > box.y1) continue;
-    path.push({ t, x: b.x, y: b.y, vx: b.vx, vy: b.vy });
+    path.push({ t, x: b.x, y: b.y, vx: b.vx, vy: b.vy, w: b.w });
   }
   shotLastPath = all;
   return path;
@@ -211,25 +211,46 @@ function shotSearch(w, aiSide, wheelAngle) {
     if (c.t <= SHOT.swingTime + SHOT.ramp) continue;
 
     for (let k = 0; k < SHOT.angleSteps; k++) {
-      /* Sweep the DIRECTION and compute what speed that direction actually
-         yields, rather than choosing a speed and solving for the angle it
-         needs. The exit speed is not ours to pick: at full swing it is fixed
-         by the contact,
+      /* Sweep the FACE ANGLE, and let the contact say where the ball goes.
 
-             s = (1+e)*vpMax - e*(v_in . n)
+         The outgoing direction is not ours to choose. resolveContact returns
 
-         with the face normal n along the outgoing direction. Asking for any
-         other speed meant asking the paddle to arrive at a pace it could not
-         hold, and it showed as shots that never reached the goal.
+             v_out = v_in + jn*n + jt*t
 
-         Choosing a speed also made the solve circular — the speed sets the
-         angle, and the angle sets the speed through v_in.n. Sweeping the
-         direction and evaluating the result has no such knot in it. */
+         so the ball's velocity ALONG THE FACE survives the hit, cut only by
+         friction. Only the normal component is replaced. Building the outgoing
+         velocity as speed*n, as this used to, is right for a ball arriving dead
+         square and wrong for every other one: a 12 m/s ball meeting the face
+         60 degrees off the normal carries 10 m/s along it, and leaves about 40
+         degrees away from where a pure-normal model puts it.
+
+         So the sweep runs over the face normal, and the outgoing velocity comes
+         out of the same arithmetic the solver will run at contact. */
       const theta = SHOT.angleLo + (SHOT.angleHi - SHOT.angleLo) * (k / (SHOT.angleSteps - 1));
-      const dirx = toGoal * Math.cos(theta), diry = Math.sin(theta);
+      const nx = toGoal * Math.cos(theta), ny = Math.sin(theta);
+      const tx = -ny, ty = nx;
 
-      const vinN = c.vx * dirx + c.vy * diry;
-      const s = (1 + e) * vpMax - e * vinN;
+      // the paddle drives along its own normal, at full speed
+      const svx = nx * vpMax, svy = ny * vpMax;
+
+      // contact-point velocity relative to that moving face, spin included
+      const R = phys.ballR;
+      const cvx = c.vx + c.w * ny * R - svx;
+      const cvy = c.vy - c.w * nx * R - svy;
+      const vn = cvx * nx + cvy * ny;
+      if (vn >= 0) continue;              // the face is running away from it
+
+      const vt = cvx * tx + cvy * ty;
+      const er = Math.abs(vn) < phys.restThreshold ? 0 : e;
+      const jn = -(1 + er) * vn;
+      let jt = -vt / 3;
+      const maxF = phys.paddleFriction * jn;
+      if (jt >  maxF) jt =  maxF;
+      if (jt < -maxF) jt = -maxF;
+
+      const vx = c.vx + jn * nx + jt * tx;
+      const vy = c.vy + jn * ny + jt * ty;
+      const s = Math.hypot(vx, vy);
       if (s <= 0.5) continue;                 // no useful pace to be had here
 
       /* How much timing slack the contact allows. The paddle's spine runs
@@ -241,13 +262,11 @@ function shotSearch(w, aiSide, wheelAngle) {
          Magnitude, not direction: a ball creeping along the spine is easy to
          meet however parallel it is, and only a fast one makes the timing
          tight. */
-      const spx = -diry, spy = dirx;
-      const vTan = Math.abs(c.vx * spx + c.vy * spy);
+      const vTan = Math.abs(c.vx * tx + c.vy * ty);
       const span = arena.paddleLength / 2 + phys.ballR;
       const windowS = vTan > 1e-3 ? 2 * span / vTan : 99;
       if (windowS < SHOT.minWindow) continue;
 
-      const vx = dirx * s, vy = diry * s;
       const flight = shotFlight(c.x, c.y, vx, vy, aiSide);
       if (!flight) continue;
 
@@ -263,7 +282,7 @@ function shotSearch(w, aiSide, wheelAngle) {
              forward through it. How far back is the swing speed times the
              usable part of the swing. */
           const back = swing * usable;
-          const sx = c.x - dirx * back, sy = c.y - diry * back;
+          const sx = c.x - nx * back, sy = c.y - ny * back;
           if (sx < box.x0 || sx > box.x1 || sy < box.y0 || sy > box.y1) continue;
 
           /* The deadline is the START of the swing, not the contact. Being able
@@ -275,21 +294,21 @@ function shotSearch(w, aiSide, wheelAngle) {
 
           /* The wheel answers to the same deadline: the face has to be set
              before the drive begins, not by the moment of contact. */
-          const face = shotNearAngle(Math.atan2(-dirx, diry), wheelAngle);
+          const face = shotNearAngle(Math.atan2(-nx, ny), wheelAngle);
           const notches = Math.abs(face - wheelAngle) / STEP_FINE;
           if (notches / AI.wheelSpeed > ready) continue;
 
           const pass = shotPassDistance(c.x, c.y, vx, vy, aiSide, flight.t);
           const score =
               SHOT.wWindow * Math.min(windowS, 0.30) / 0.30
-            + SHOT.wSpeed  * (s / hardest)
+            + SHOT.wSpeed  * Math.min(s / hardest, 1)
             + SHOT.wPass   * Math.min(pass, 3) / 3
             + SHOT.wMargin * Math.min(flight.margin, 0.5) / 0.5
             - SHOT.wTime   * (c.t / SHOT.horizon);
 
           if (!best || score > best.score) {
             best = { t: c.t, x: c.x, y: c.y, vinx: c.vx, viny: c.vy,
-                     dirx, diry, speed: s, swing, angle: face,
+                     dirx: nx, diry: ny, vx, vy, speed: s, swing, angle: face,
                      sx, sy, swingT: SHOT.swingTime,
                      goalY: flight.yGoal, flightT: flight.t, pass, score };
           }
