@@ -145,6 +145,8 @@
   #pause .row button{flex:1}
   #pauseControls{width:440px;text-align:left}
   #pauseControls h2{text-align:center}
+  #pauseControls h3{margin:18px 0 10px;font-size:9.5px;letter-spacing:.2em;
+                    font-weight:600;color:#4d5c72;text-align:center}
   #pauseControls dl{display:grid;grid-template-columns:auto 1fr;gap:10px 18px;
                     margin:0 0 20px;font-size:13.5px;line-height:1.45}
   #pauseControls dt{color:#22d3ee;font-weight:600;white-space:nowrap}
@@ -211,12 +213,15 @@
       <dt>Mouse</dt><dd>Move your paddle</dd>
       <dt>Wheel</dt><dd>Rotate your paddle</dd>
       <dt>Hold right-click</dt><dd>Finer rotation steps</dd>
-      <dt>Space</dt><dd>Switch to your other paddle</dd>
+      <dt>Space</dt><dd>Switch paddles (two paddle mode)</dd>
+      <dt>Esc</dt><dd>Pause</dd>
+    </dl>
+    <h3>PRACTICE ONLY</h3>
+    <dl>
       <dt>F</dt><dd>Serve</dd>
       <dt>R</dt><dd>Reset the score</dd>
       <dt>H</dt><dd>Settings panel</dd>
-      <dt>Tab</dt><dd>Swap teams (practice only)</dd>
-      <dt>Esc</dt><dd>Pause</dd>
+      <dt>Tab</dt><dd>Swap teams</dd>
     </dl>
     <div class="sl"><span>MOUSE</span>
       <input id="sensPause" type="range" min="0.2" max="3" step="0.05" value="1">
@@ -319,10 +324,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v16.5-dev"></script>
-<script src="ai.js?v=v16.5-dev"></script>
-<script src="audio.js?v=v16.5-dev"></script>
-<script src="tutorial.js?v=v16.5-dev"></script>
+<script src="shot.js?v=v16.6-dev"></script>
+<script src="ai.js?v=v16.6-dev"></script>
+<script src="audio.js?v=v16.6-dev"></script>
+<script src="tutorial.js?v=v16.6-dev"></script>
 <script>
 'use strict';
 
@@ -1979,7 +1984,15 @@ addEventListener('keydown', e => {
      player changing seats. */
   if (!controlsLive() && (k === ' ' || k === 'tab')) return;
 
-  if (k === 'tab' && net.role === 'solo') {
+  /* F, R, H and Tab are practice tools: serving on demand, wiping the score,
+     the tuning panel, changing sides. Every one of them is either an unfair
+     advantage or an outright desync against another player, so none of them
+     answers outside practice - not in a hosted match and not against the AI.
+     Tab in particular used to test only for `solo`, which included VS AI, so
+     it would happily hand you the computer's paddles mid-match. */
+  if ((k === 'f' || k === 'r' || k === 'h' || k === 'tab') && !inPractice()) return;
+
+  if (k === 'tab') {
     mySide = -mySide;
     for (const l of server.links) if (l.kind === 'loopback') l.side = mySide;
 
@@ -2243,6 +2256,11 @@ function startGame(asTutorial) {
   if (running) return;
   running = true;
   document.body.classList.add('playing');
+  /* The debug view is a practice tool and body.debug survives a match, so
+     opening it in practice and then starting a real game would have carried
+     the panel straight in - past the H gate, which only stops you TOGGLING it.
+     Cleared on entry to anything that is not practice. */
+  if (!inPractice()) document.body.classList.remove('debug');
   hideMenu();
   hideSetup();
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -2419,7 +2437,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v16.5-dev';
+const BUILD = 'v16.6-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
