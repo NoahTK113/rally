@@ -199,10 +199,10 @@
 <div id="devFlag" class="hidden">DEVELOPER MODE</div>
 <div id="status"></div>
 <div id="sensBar">
-  <span>MOUSE</span>
+  <span>MOUSE SENSITIVITY</span>
   <input id="sensPlay" type="range" min="0.2" max="3" step="0.05" value="1">
   <span class="v" id="sensPlayVal">1.00</span>
-  <span>SOUND</span>
+  <span>VOLUME</span>
   <input id="volPlay" type="range" min="0" max="1" step="0.05" value="0.7">
   <span class="v" id="volPlayVal">70</span>
 </div>
@@ -231,10 +231,10 @@
       <dt>H</dt><dd>Developer settings</dd>
       <dt>Tab</dt><dd>Swap teams</dd>
     </dl>
-    <div class="sl"><span>MOUSE</span>
+    <div class="sl"><span>MOUSE SENSITIVITY</span>
       <input id="sensPause" type="range" min="0.2" max="3" step="0.05" value="1">
       <span class="v" id="sensPauseVal">1.00</span></div>
-    <div class="sl"><span>SOUND</span>
+    <div class="sl"><span>VOLUME</span>
       <input id="volPause" type="range" min="0" max="1" step="0.05" value="0.7">
       <span class="v" id="volPauseVal">70</span></div>
     <button id="pBack">BACK</button>
@@ -257,7 +257,7 @@
 <div id="setup" class="hidden">
   <div class="card">
     <div id="setupOwner">
-      <h1>SETUP</h1>
+      <h1 id="setupTitle">SETUP</h1>
       <div id="tuneRow" class="hidden">
         <div class="lab">KEEP TUNED SETTINGS</div>
         <div class="seg">
@@ -292,12 +292,12 @@
       <div class="hint">The host is choosing the settings.</div>
     </div>
     <div class="sens">
-      <span>MOUSE</span>
+      <span>MOUSE SENSITIVITY</span>
       <input id="sensSetup" type="range" min="0.2" max="3" step="0.05" value="1">
       <span class="v" id="sensSetupVal">1.00</span>
     </div>
     <div class="sens" style="margin-top:12px;padding-top:0;border-top:0">
-      <span>SOUND</span>
+      <span>VOLUME</span>
       <input id="volSetup" type="range" min="0" max="1" step="0.05" value="0.7">
       <span class="v" id="volSetupVal">70</span>
     </div>
@@ -339,10 +339,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v17.1-dev"></script>
-<script src="ai.js?v=v17.1-dev"></script>
-<script src="audio.js?v=v17.1-dev"></script>
-<script src="tutorial.js?v=v17.1-dev"></script>
+<script src="shot.js?v=v17.2-dev"></script>
+<script src="ai.js?v=v17.2-dev"></script>
+<script src="audio.js?v=v17.2-dev"></script>
+<script src="tutorial.js?v=v17.2-dev"></script>
 <script>
 'use strict';
 
@@ -2505,7 +2505,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v17.1-dev';
+const BUILD = 'v17.2-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3186,13 +3186,24 @@ const randomCode = () => Array.from({ length: 4 },
 
 function setMsg(html) { $('netMsg').innerHTML = html; }
 function hideMenu() { $('menu').classList.add('hidden'); }
-function showMenu() { $('menu').classList.remove('hidden'); hideSetup(); }
+function showMenu() { pendingTutorial = false;
+                     $('menu').classList.remove('hidden'); hideSetup(); }
 function hideSetup() { $('setup').classList.add('hidden'); }
 
 /* The lobby. Reached once there is someone to play against — or straight away
    in practice — and returned to after a match. The host owns the settings and
    the guest waits, which avoids having to resolve two people editing the same
    number. */
+/* Which lobby the setup card is currently being. Cleared by every other way
+   into it, so a tutorial abandoned at the card cannot start the next game as a
+   tutorial. */
+let pendingTutorial = false;
+
+function paintSetupMode() {
+  $('setupTitle').textContent = pendingTutorial ? 'TUTORIAL SETUP' : 'SETUP';
+  $('btnStart').textContent   = pendingTutorial ? 'START TUTORIAL' : 'START MATCH';
+}
+
 function showSetup() {
   hideMenu();
   $('setup').classList.remove('hidden');
@@ -3202,6 +3213,7 @@ function showSetup() {
   $('setupOwner').classList.toggle('hidden', !owner);
   $('setupWait').classList.toggle('hidden', owner);
   $('setupMsg').innerHTML = '';
+  paintSetupMode();
   if (owner) { paintTarget(); paintPaddles(); paintDifficulty(); paintTuning(); }
 }
 
@@ -3367,7 +3379,9 @@ function beginMatch() {
   if (net.role === 'guest') return;             // only the host may start
   if (net.role === 'host') send({ t: 'start', m: MATCH });
   hideSetup();
-  startGame();
+  const tut = pendingTutorial;
+  pendingTutorial = false;
+  startGame(tut);
 }
 
 function updateStatus() {
@@ -3428,7 +3442,7 @@ function hostGame() {
   if (!peerAvailable()) return;
   net.role = 'host';
   mySide = 1;
-  AI.on = false;                      // a human is on the way
+  AI.on = false; pendingTutorial = false;                      // a human is on the way
   net.code = randomCode();
   setMsg('Opening room&hellip;');
   net.peer = new Peer(PEER_PREFIX + net.code, PEER_OPTS);
@@ -3452,7 +3466,7 @@ function joinGame() {
   if (code.length !== 4) { setMsg('Enter the four-character room code.'); return; }
   net.role = 'guest';
   mySide = -1;
-  AI.on = false;
+  AI.on = false; pendingTutorial = false;
   net.code = code;
   setMsg('Connecting to ' + code + '&hellip;');
   net.peer = new Peer(undefined, PEER_OPTS);
@@ -3541,7 +3555,8 @@ function onData(d) {
 paintBuild();
 
 $('btnSolo').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; AI.on = false; updateStatus(); showSetup();
+  net.role = 'solo'; mySide = 1; AI.on = false; pendingTutorial = false;
+  updateStatus(); showSetup();
 });
 
 /* AI.on selects the mode and is deliberately NOT reset per match: finishing a
@@ -3549,17 +3564,23 @@ $('btnSolo').addEventListener('click', function () {
    playing whoever you chose to play. The menu handlers are the only thing that
    changes it. */
 $('btnAI').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; AI.on = true;
+  net.role = 'solo'; mySide = 1; AI.on = true; pendingTutorial = false;
   aiInit();
   updateStatus(); showSetup();
 });
 
+/* The tutorial used to go straight in, on the reasoning that a lobby is one
+   more thing to explain before explaining anything. It gets one now: paddles
+   per player changes what the tutorial is teaching, and sensitivity and volume
+   are worth setting before a lesson rather than during one.
+
+   Same card as practice, so there is nothing new to learn about it - only the
+   title and the start button read differently. Difficulty and points to win
+   hide themselves already: the first wants AI.on, the second is hidden
+   whenever inPractice(), and a tutorial is practice by that test. */
 $('btnTutorial').addEventListener('click', function () {
-  // Straight in: a lobby would be one more thing to explain before explaining
-  // anything.
-  net.role = 'solo'; mySide = 1; AI.on = false; updateStatus();
-  hideMenu();
-  startGame(true);
+  net.role = 'solo'; mySide = 1; AI.on = false; pendingTutorial = true;
+  updateStatus(); showSetup();
 });
 $('btnStart').addEventListener('click', beginMatch);
 $('pd1').addEventListener('click', () => setPaddles(1));
