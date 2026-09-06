@@ -232,10 +232,10 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="shot.js?v=v20.0-local"></script>
-<script src="ai.js?v=v20.0-local"></script>
-<script src="audio.js?v=v20.0-local"></script>
-<script src="tutorial.js?v=v20.0-local"></script>
+<script src="shot.js?v=v20.1-local"></script>
+<script src="ai.js?v=v20.1-local"></script>
+<script src="audio.js?v=v20.1-local"></script>
+<script src="tutorial.js?v=v20.1-local"></script>
 <script>
 'use strict';
 
@@ -933,9 +933,27 @@ onNewGame(() => { floorStallT = 0; floorStallEv = 0; });
 // Is the ball somewhere the PLAYER could legally put a paddle? If so it is
 // their problem to solve and not a stall.
 function ballInPlayerBox(w, bx, by) {
+  /* paddleBoxes answers where the paddle's CENTRE may sit, inset by its
+     rotated half-extents so the body stays inside. Two corrections are needed
+     before that answers "could they reach it".
+
+     The paddle is 0.85m long, so its centre being confined to the box does not
+     confine what it can touch: anything within half a paddle plus a ball of
+     the box is reachable. Hence the inflation.
+
+     And the inset depends on the CURRENT angle, which for a ball on the floor
+     is ruinous — y0 is 0.025 with the paddle flat but 0.425 held vertical, and
+     a ball resting on the floor has its centre at 0.15. Measured against the
+     live angle, every floor ball read as unreachable unless the player
+     happened to be holding flat, which is precisely the case this test exists
+     to judge. So the box is taken at a = 0 and the paddle is credited with
+     being able to turn, which it can. */
+  const reach = A.paddleLength / 2 + PHYS.ballR;
   for (let i = 0; i < MATCH.paddles; i++) {
-    for (const b of paddleBoxes(w.p[idOf(mySide, i)])) {
-      if (bx >= b.x0 && bx <= b.x1 && by >= b.y0 && by <= b.y1) return true;
+    const p = w.p[idOf(mySide, i)];
+    for (const b of paddleBoxes({ x: p.x, y: p.y, a: 0, side: p.side, index: p.index })) {
+      if (bx >= b.x0 - reach && bx <= b.x1 + reach &&
+          by >= b.y0 - reach && by <= b.y1 + reach) return true;
     }
   }
   return false;
@@ -2306,7 +2324,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v20.0-local';
+const BUILD = 'v20.1-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
