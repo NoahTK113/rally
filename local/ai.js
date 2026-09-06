@@ -73,6 +73,8 @@ const ai = {
   outX: 0, outY: 0, outA: 0,
   notches: 0,      // fractional wheel allowance carried between ticks
 
+  blind: 0,        // s of blackout left after a serve; see aiLiveBall
+  lastPhase: null, // to notice the moment play begins
   saving: false,   // latched: see aiUpdateSave
   lined: true,     // latched: are we square enough behind the ball to strike?
 };
@@ -85,6 +87,8 @@ function aiInit() {
   ai.notches = 0;
   ai.saving = false;
   ai.lined = true;
+  ai.blind = 0;
+  ai.lastPhase = null;
   if (!ai.hist) {
     ai.hist = new Array(AI_HIST);
     for (let i = 0; i < AI_HIST; i++) ai.hist[i] = makeObservation();
@@ -336,6 +340,35 @@ function aiStrikeOffAngle(w, side) {
   return Math.acos(c) * 180 / Math.PI;
 }
 
+/* Is there a ball worth playing?
+
+   Three ways there is not. The phase is anything but PLAY — during EXIT the
+   ball is ghosting out through the back of a goal with the point already
+   conceded, and during ANNOUNCE and the count it is not in play at all. The
+   ball is hidden. Or play has only just restarted.
+
+   That last one is a real fault worth spelling out. Perception is delayed, so
+   for `reaction` seconds after the serve the AI is still looking at wherever
+   the ball was BEFORE it — sitting in a goal, most likely — and sets off
+   confidently in the wrong direction. The blackout is exactly `reaction` long
+   because that is precisely how long its view stays wrong. A fixed tenth of a
+   second would be wrong the moment the slider moved.
+
+   It is a blackout rather than a flush of the ring on purpose: emptying it
+   would hand the AI an undelayed view of the serve, which is not a limitation
+   removed but a rule broken. */
+function aiUpdateLive(w, dt) {
+  if (w.phase !== ai.lastPhase) {
+    if (w.phase === PHASE.PLAY) ai.blind = AI.reaction;
+    ai.lastPhase = w.phase;
+  }
+  if (ai.blind > 0) ai.blind -= dt;
+}
+
+function aiLiveBall(w) {
+  return w.phase === PHASE.PLAY && !w.ballHidden && ai.blind <= 0;
+}
+
 /* ==========================================================================
    THE PLAYER, AND THE FAR GOAL
    Everything an attacking decision would want to know. All of it perceived,
@@ -370,12 +403,27 @@ function aiPlayerBallDistance(aiSide) {
    bending it every tick, and a bounce ends the argument entirely — a ball
    lofted away and out of reach can arc back down into it. So this is a sound
    test for right now, not a promise about the next second. */
-function aiBallEscapeRate(aiSide) {
-  const p = aiPlayerPaddle(aiSide), ball = aiPerceived().ball;
-  const dx = ball.x - p.x, dy = ball.y - p.y;      // away from the player
+function aiBallRecession(px, py) {
+  const ball = aiPerceived().ball;
+  const dx = ball.x - px, dy = ball.y - py;        // away from that point
   const l = Math.hypot(dx, dy);
   if (l < 1e-6) return 0;
   return (ball.vx * dx + ball.vy * dy) / l;
+}
+
+// From where the player is standing.
+function aiBallEscapeRate(aiSide) {
+  const p = aiPlayerPaddle(aiSide);
+  return aiBallRecession(p.x, p.y);
+}
+
+/* From where WE are standing. The same question asked of ourselves, and the
+   check the entry list was missing: a ball receding from the player faster
+   than they can move may be receding from us just as fast, in which case it is
+   nobody's opportunity. */
+function aiBallRecessionFromSelf(w, side) {
+  const p = aiPaddle(w, side);
+  return aiBallRecession(p.x, p.y);
 }
 
 /* Is the ball already beyond the player's reach?
@@ -385,6 +433,21 @@ function aiBallEscapeRate(aiSide) {
    Above 1 is cautious, below 1 optimistic. */
 function aiBallEscaped(aiSide) {
   return aiBallEscapeRate(aiSide) > AI.opportunityVelMargin * maxPaddleSpeed();
+}
+
+/* Is the ball past the furthest the player could ever touch?
+
+   Their box is not computable from here — the perception ring stores pose and
+   velocity, not paddle identity — but the only part that matters is the line
+   they cannot reach past, and that is pure configuration. Beyond it the ball is
+   theirs to watch, not to play.
+
+   Compared in x alone. The box has vertical limits too, but they are the
+   paddle's own thickness inset from floor and ceiling: centimetres, against
+   metres here. */
+function aiBallBeyondPlayerReach(aiSide) {
+  const ball = aiPerceived().ball;
+  return (ball.x - aiPlayerReach(aiSide)) * aiSide > 0;
 }
 
 /* Is the net in the way of a flat shot at the far goal?
@@ -626,6 +689,12 @@ function aiDecide(w, side) {
 function aiStep(w, side, dst, dt) {
   aiObserve(w);            // always: a ring that only filled while the AI
                            // played would start every match blind
+  aiUpdateLive(w, dt);
   if (!AI.on) return;      // practice leaves the opposing paddle inert
+
+  /* No live ball, no decisions — and the latches reset, so the next point
+     starts clean rather than resuming whatever the last one was doing. */
+  if (!aiLiveBall(w)) { ai.saving = false; ai.lined = true; return; }
+
   aiEmit(w, side, dst, aiDecide(w, side), dt);
 }
