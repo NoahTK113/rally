@@ -113,8 +113,10 @@ const ai = {
   shotAge: 0,      // s since it was chosen
   evSeen: 0,       // event id watermark, for spotting a contact
 
-  standT: 0,       // s until the standing error is re-drawn
-  standX: 0, standY: 0,   // the offset being held meanwhile
+  standU: 0,       // 0..1 phase between the two drift waypoints
+  stand0X: 0, stand0Y: 0, // the waypoint drifted FROM, in units of the amplitude
+  stand1X: 0, stand1Y: 0, // and the one drifted TO
+  standX: 0, standY: 0,   // the offset itself, in metres
 };
 
 function aiInit() {
@@ -130,7 +132,10 @@ function aiInit() {
   ai.evSeen = 0;
   ai.blind = 0;
   ai.lastPhase = null;
-  ai.standT = 0;
+  ai.standU = 0;
+  ai.stand0X = ai.stand0Y = 0;     // start centred and drift out of it
+  ai.stand1X = Math.random() * 2 - 1;
+  ai.stand1Y = Math.random() * 2 - 1;
   ai.standX = ai.standY = 0;
   if (!ai.hist) {
     ai.hist = new Array(AI_HIST);
@@ -313,19 +318,39 @@ function aiDefensivePosition(aiSide) {
            y: (ball.y + g.y) / 2 + ai.standY };
 }
 
-/* The standing error is HELD, then re-drawn. Not because holding is cheaper,
-   but because a fresh number every tick is not a mistake — it is a vibration,
-   and the paddle would buzz around the right answer while averaging to it.
-   Being wrong for a while is what looks human. standPeriod is how long a
-   while, and it is on a slider because that is the knob that decides whether
-   this reads as a player thinking or a player twitching. */
+/* The standing error DRIFTS. A fresh number every tick would not be a mistake
+   but a vibration, buzzing around the right answer while averaging to it; and
+   stepping to a new one every standPeriod, which is what this did first, put a
+   teleport in the middle of an otherwise smooth paddle.
+
+   So: random waypoints, and a smooth ride between them. Two are held at a time
+   and the phase runs 0..1 across the gap, eased with S(u) = 3u^2 - 2u^3, whose
+   slope is zero at both ends — the drift settles into each waypoint and leaves
+   it again rather than cornering.
+
+   Waypoints are stored as UNIT values and scaled by the amplitude at read time,
+   which is what keeps standError an exact maximum: interpolating between two
+   points inside the bound never leaves it, and dragging the slider takes effect
+   at once instead of after the next draw.
+
+   Peak drift speed is 1.5*|P1-P0|/T, so at worst 3E/T — at 30% and a 2s period
+   that is 0.9 m/s, a twelfth of paddle speed. It reads as drift, not travel.
+
+   One phase clock for both axes, with independent values on each. Sharing the
+   clock is fine; sharing the NUMBER would confine the error to a diagonal. */
 function aiUpdateStand(dt) {
-  ai.standT -= dt;
-  if (ai.standT > 0) return;
-  ai.standT = AI.standPeriod > 0.01 ? AI.standPeriod : 0.01;
-  const r = (AI.standError / 100) * AI_STAND_FULL;
-  ai.standX = (Math.random() * 2 - 1) * r;
-  ai.standY = (Math.random() * 2 - 1) * r;
+  const T = AI.standPeriod > 0.01 ? AI.standPeriod : 0.01;
+  ai.standU += dt / T;
+  while (ai.standU >= 1) {
+    ai.standU -= 1;
+    ai.stand0X = ai.stand1X; ai.stand0Y = ai.stand1Y;
+    ai.stand1X = Math.random() * 2 - 1;
+    ai.stand1Y = Math.random() * 2 - 1;
+  }
+  const u = ai.standU, S = u * u * (3 - 2 * u);
+  const E = (AI.standError / 100) * AI_STAND_FULL;
+  ai.standX = (ai.stand0X + (ai.stand1X - ai.stand0X) * S) * E;
+  ai.standY = (ai.stand0Y + (ai.stand1Y - ai.stand0Y) * S) * E;
 }
 
 // How long the line is: the ball's distance from our goal mouth.
