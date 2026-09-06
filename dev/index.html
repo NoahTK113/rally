@@ -313,10 +313,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v16.3-dev"></script>
-<script src="ai.js?v=v16.3-dev"></script>
-<script src="audio.js?v=v16.3-dev"></script>
-<script src="tutorial.js?v=v16.3-dev"></script>
+<script src="shot.js?v=v16.4-dev"></script>
+<script src="ai.js?v=v16.4-dev"></script>
+<script src="audio.js?v=v16.4-dev"></script>
+<script src="tutorial.js?v=v16.4-dev"></script>
 <script>
 'use strict';
 
@@ -392,7 +392,7 @@ const contourW = () => (VIS.linePx * 2) / view.sDev;
 
 /* Match rules. Synced with the rest of the config, because both simulations
    must agree on when a match ends or they would disagree about the result. */
-const MATCH = { target: 7, paddles: 2 };   // target 0 = endless
+const MATCH = { target: 7, paddles: 2, deadBall: 4 };  // target 0 = endless, deadBall 0 = off
 
 /* Latency injected into the HOST's own link to its own server. The whole
    point of a listen server is that we can raise the host's delay but can never
@@ -1019,73 +1019,85 @@ function resetPaddles(w) {
   }
 }
 
-/* ---- BAND-AID: the dead ball on the floor -------------------------------
-   The ball can come to rest on the floor outside the player's reach, where it
-   threatens no goal and offers no shot. Every branch of the AI's decision tree
-   is about defending or attacking and this is neither, so it stands still, and
-   nothing else in the game ends the state either. The point simply stops.
+/* ---- THE DEAD BALL ------------------------------------------------------
+   A ball nobody can play is not a rally, and there are two ways to get one.
 
-   Re-serve after FLOOR_STALL seconds of it. Symptom fix, meant to be thrown
-   away: the real answer is a "the ball is dead, go and fetch it" branch in the
-   decision tree rather than a timer out here.
+   The AI can leave one: its decision tree is built out of defending and
+   attacking, and a ball that threatens no goal and offers no shot is neither,
+   so it stands there. And a PERSON can make one deliberately — hold the ball
+   on your own side, out of your opponent's reach, and juggle it for as long as
+   you like. Nothing in the rules said otherwise.
 
-   Runs on server.world only. Not because of networking — there is none in a
-   game against the computer — but because that is the AUTHORITATIVE world.
-   The client keeps its own predicted copy and reconciles it against snapshots
-   every tick, so a re-serve written there would be undone within a tick or
-   two. Whatever changes the world has to change that one. */
-const FLOOR_STALL = 4.0;                  // s
-let floorStallT = 0, floorStallEv = 0;
-onNewGame(() => { floorStallT = 0; floorStallEv = 0; });
+   One rule covers both. If the ball stays out of a player's reach for
+   MATCH.deadBall seconds, the point ends: play stops, the ball is hidden, the
+   announcement reads DEAD BALL, paddles reset and the countdown runs, exactly
+   as after a goal. The score does not move, because nobody did anything worth
+   a point.
 
-// Is the ball somewhere the PLAYER could legally put a paddle? If so it is
-// their problem to solve and not a stall.
-function ballInPlayerBox(w, bx, by) {
-  /* paddleBoxes answers where the paddle's CENTRE may sit, inset by its
-     rotated half-extents so the body stays inside. Two corrections are needed
-     before that answers "could they reach it".
+   Contact does NOT reset the clock, and that is the whole design. Resetting on
+   contact is the obvious choice and it would leave the stall intact: keeping
+   the ball alive on your own half is a stream of contacts. What matters is not
+   whether the ball is being hit but whether the OTHER player can reach it, so
+   that is the only thing measured.
 
-     The paddle is 0.85m long, so its centre being confined to the box does not
-     confine what it can touch: anything within half a paddle plus a ball of
-     the box is reachable. Hence the inflation.
+   A timer per side, and only for seats with somebody in them. In practice
+   alone the far seat is empty, so its clock never runs and you can keep the
+   ball on your own side as long as you like — which is what practice is.
 
-     And the inset depends on the CURRENT angle, which for a ball on the floor
-     is ruinous — y0 is 0.025 with the paddle flat but 0.425 held vertical, and
-     a ball resting on the floor has its centre at 0.15. Measured against the
-     live angle, every floor ball read as unreachable unless the player
-     happened to be holding flat, which is precisely the case this test exists
-     to judge. So the box is taken at a = 0 and the paddle is credited with
-     being able to turn, which it can. */
+   Runs on server.world: not for any networking reason, but because that is the
+   authoritative world, and the client's copy is reconciled away every tick. */
+const deadT = { '-1': 0, '1': 0 };
+onNewGame(() => { deadT['-1'] = deadT['1'] = 0; });
+
+function seatOccupied(side) {
+  if (side === mySide) return true;
+  if (AI.on) return true;                       // the computer is a player
+  return net.role === 'host' && net.up;         // a guest is on the other side
+}
+
+/* Could this side's paddles TOUCH the ball where it is?
+
+   paddleBoxes answers where a paddle's CENTRE may sit, which is not the same
+   question twice over. The paddle is 0.85m long, so it reaches half a paddle
+   plus a ball beyond its box. And the box is inset by the paddle's ROTATED
+   half-extents, so it shrinks as the paddle turns — measured against the live
+   angle, a ball on the floor reads as unreachable whenever the player is not
+   holding flat, which is most of the time. The box is therefore taken at a = 0
+   and the paddle credited with being able to turn, which it can. */
+function ballInReach(w, side) {
   const reach = A.paddleLength / 2 + PHYS.ballR;
+  const b = w.ball;
   for (let i = 0; i < MATCH.paddles; i++) {
-    const p = w.p[idOf(mySide, i)];
-    for (const b of paddleBoxes({ x: p.x, y: p.y, a: 0, side: p.side, index: p.index })) {
-      if (bx >= b.x0 - reach && bx <= b.x1 + reach &&
-          by >= b.y0 - reach && by <= b.y1 + reach) return true;
+    const p = w.p[idOf(side, i)];
+    for (const box of paddleBoxes({ x: p.x, y: p.y, a: 0, side: p.side, index: p.index })) {
+      if (b.x >= box.x0 - reach && b.x <= box.x1 + reach &&
+          b.y >= box.y0 - reach && b.y <= box.y1 + reach) return true;
     }
   }
   return false;
 }
 
-function checkFloorStall(w, dt) {
-  if (!AI.on || net.role !== 'solo' || w.phase !== PHASE.PLAY) {
-    floorStallT = 0; floorStallEv = w.evCount; return;
+function checkDeadBall(w, dt) {
+  if (w.phase !== PHASE.PLAY) { deadT['-1'] = deadT['1'] = 0; return; }
+  if (MATCH.deadBall <= 0) return;               // 0 turns the rule off
+
+  for (const side of [-1, 1]) {
+    const k = String(side);
+    if (!seatOccupied(side) || ballInReach(w, side)) { deadT[k] = 0; continue; }
+    deadT[k] += dt;
+    if (deadT[k] < MATCH.deadBall) continue;
+
+    deadT['-1'] = deadT['1'] = 0;
+    /* lastScorer 0 IS the dead ball. A goal always sets it to a side, so zero
+       during ANNOUNCE can only mean nobody scored — which lets this ride the
+       snapshot that already carries lastScorer instead of widening the wire
+       format for one flag. */
+    w.lastScorer = 0;
+    w.ballHidden = true;
+    w.phase = PHASE.ANNOUNCE;
+    w.phaseT = ANNOUNCE_T;
+    return;
   }
-
-  let hit = false;
-  const first = Math.max(floorStallEv + 1, w.evCount - EV_SLOTS + 1);
-  for (let id = first; id <= w.evCount; id++) {
-    const e = w.ev[id % EV_SLOTS];
-    if (e && e.id === id && e.kind === 'paddle') hit = true;
-  }
-  floorStallEv = w.evCount;
-
-  const b = w.ball;
-  const onFloor = b.y <= PHYS.ballR + 0.02;
-  if (hit || !onFloor || ballInPlayerBox(w, b.x, b.y)) { floorStallT = 0; return; }
-
-  floorStallT += dt;
-  if (floorStallT >= FLOOR_STALL) { floorStallT = 0; serve(w); }
 }
 
 function serve(w) {
@@ -1819,10 +1831,12 @@ function drawAnnouncement() {
   if (world.phase === PHASE.ANNOUNCE) {
     const size = Math.max(16, Math.round(view.scale * 0.55));
     ctx.font = `700 ${size}px ui-monospace, Consolas, monospace`;
-    ctx.fillStyle = goalColour(world.lastScorer);
+    const dead = !world.lastScorer;
+    ctx.fillStyle = dead ? '#8fa3bd' : goalColour(world.lastScorer);
     // brief fade-in so it does not just snap on
     ctx.globalAlpha = Math.min(1, (ANNOUNCE_T - world.phaseT) / 0.18);
-    ctx.fillText(`${teamName(world.lastScorer)} TEAM SCORED`, cx, cy);
+    ctx.fillText(dead ? 'DEAD BALL — RE-SERVE'
+                      : `${teamName(world.lastScorer)} TEAM SCORED`, cx, cy);
   } else {
     const n = Math.max(1, Math.ceil(world.phaseT));
     const frac = world.phaseT - Math.floor(world.phaseT);      // 1 -> 0 within each second
@@ -2036,6 +2050,7 @@ const KNOBS = [
   { o: PHYS, k: 'goalPull',    label: 'goal pull',   min: 0,    max: 80,  step: 1,    u: 'm/s²' },
 
   ['LINK'],
+  { o: MATCH, k: 'deadBall', label: 'dead ball', min: 0, max: 20, step: 0.5, u: 's' },
   { o: NET, k: 'hostDelay', label: 'host delay', min: 0, max: 200, step: 5, u: 'ms' },
   { o: NET, k: 'floor',     label: 'delay floor',min: 0, max: 100, step: 5, u: 'ms' },
 
@@ -2398,7 +2413,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v16.3-dev';
+const BUILD = 'v16.4-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2649,7 +2664,7 @@ function serverStepOnce(dt) {
   }
 
   stepWorld(server.world, server.inputs, dt);
-  checkFloorStall(server.world, dt);
+  checkDeadBall(server.world, dt);
 
   // ping every 48 ticks, about five times a second
   if (server.sendTick % 48 === 0) {
