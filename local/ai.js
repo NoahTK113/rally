@@ -333,6 +333,65 @@ function aiStrikeOffAngle(w, side) {
   return Math.acos(c) * 180 / Math.PI;
 }
 
+/* ==========================================================================
+   THE PLAYER, AND THE FAR GOAL
+   Everything an attacking decision would want to know. All of it perceived,
+   so it is as stale as the ball is.
+   ========================================================================== */
+
+// The player's held paddle — the one they can actually move.
+function aiPlayerPaddle(aiSide) {
+  const pp = aiPlayerPaddles(aiSide);
+  return pp.sel ? pp.p1 : pp.p0;
+}
+
+// How far the player's paddle is from the ball.
+function aiPlayerBallDistance(aiSide) {
+  const p = aiPlayerPaddle(aiSide), ball = aiPerceived().ball;
+  return Math.hypot(ball.x - p.x, ball.y - p.y);
+}
+
+/* How fast the player and the ball are converging: the closing speed along the
+   line between them, taking BOTH velocities into account. Positive means the
+   gap is shrinking.
+
+   The relative velocity is what matters, not the ball's alone. A ball drifting
+   gently toward a paddle already sprinting at it is closing fast; the same ball
+   with the paddle retreating is not closing at all. */
+function aiPlayerClosingRate(aiSide) {
+  const p = aiPlayerPaddle(aiSide), ball = aiPerceived().ball;
+  const dx = p.x - ball.x, dy = p.y - ball.y;
+  const l = Math.hypot(dx, dy);
+  if (l < 1e-6) return 0;
+  return ((ball.vx - p.vx) * dx + (ball.vy - p.vy) * dy) / l;
+}
+
+/* Is the net in the way of a flat shot at the far goal?
+
+   Only one ray needs testing, not a search across the mouth. The crossing
+   height rises with the aim point, so the highest any straight shot can pass
+   over the net is the one aimed at the CROSSBAR. If that is blocked, all of
+   them are.
+
+   Read the limit carefully: this answers "no flat shot", not "no shot". A
+   lofted ball rises before it falls, so it can clear the net and still drop in
+   when the straight line could not. The test is conservative, and deliberately
+   so for now — the flat shots are the ones worth taking anyway. */
+function aiNetBlocks(aiSide) {
+  const cfg = aiCfg(), arena = cfg.arena;
+  const ball = aiPerceived().ball;
+  const netX = arena.width / 2;
+  const goalX = aiSide < 0 ? arena.width : 0;      // the goal we ATTACK
+
+  // Already past the net: nothing left to clear.
+  if ((goalX - netX) * (ball.x - netX) >= 0) return false;
+
+  const t = (netX - ball.x) / (goalX - ball.x);
+  const crossbar = arena.goalLip + arena.goalHeight;
+  const yCross = ball.y + t * (crossbar - ball.y);
+  return yCross <= arena.netHeight + cfg.phys.ballR;
+}
+
 /* The angle that points the paddle's FACE at the ball.
 
    collidePaddle puts the paddle's spine along its local x, so for angle a the
