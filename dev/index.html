@@ -43,7 +43,14 @@
 
   #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
-  .hidden{display:none}
+  /* !important because #menu and #setup set display through ID selectors, and
+     an ID beats a class: a plain .hidden rule loses to both and silently does
+     nothing. That is not hypothetical - it shipped, and the menu stopped
+     hiding while #setup, which carries the class in markup, became a permanent
+     overlay underneath it. Every button still worked; nothing looked like it
+     did. A utility class that means "not displayed, whatever else says" has to
+     outrank the layout rules it is switching off. */
+  .hidden{display:none!important}
   #setup{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;
          background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
   #setup .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
@@ -275,8 +282,8 @@
   <div class="card">
     <h1>BANJOBALL</h1>
     <button id="btnTutorial">HOW TO PLAY</button>
-    <button id="btnSolo">PRACTICE ALONE</button>
-    <button id="btnAI">PLAY THE COMPUTER</button>
+    <button id="btnSolo">PRACTICE</button>
+    <button id="btnAI">VS AI</button>
     <button id="btnHost">HOST A GAME</button>
     <div class="join">
       <input id="codeIn" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false">
@@ -306,10 +313,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v16.1-dev"></script>
-<script src="ai.js?v=v16.1-dev"></script>
-<script src="audio.js?v=v16.1-dev"></script>
-<script src="tutorial.js?v=v16.1-dev"></script>
+<script src="shot.js?v=v16.2-dev"></script>
+<script src="ai.js?v=v16.2-dev"></script>
+<script src="audio.js?v=v16.2-dev"></script>
+<script src="tutorial.js?v=v16.2-dev"></script>
 <script>
 'use strict';
 
@@ -2373,7 +2380,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v16.1-dev';
+const BUILD = 'v16.2-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
