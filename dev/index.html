@@ -228,14 +228,6 @@
   <div class="card">
     <div id="setupOwner">
       <h1>SETUP</h1>
-      <div id="aiRow" style="display:none">
-        <div class="lab">DIFFICULTY</div>
-        <div class="seg">
-          <button id="aiEasy">EASY</button>
-          <button id="aiNormal">NORMAL</button>
-          <button id="aiHard">HARD</button>
-        </div>
-      </div>
       <div class="lab">PADDLES PER PLAYER</div>
       <div class="seg">
         <button id="pd1">1</button>
@@ -272,7 +264,6 @@
   <div class="card">
     <h1>BANJOBALL</h1>
     <button id="btnTutorial">HOW TO PLAY</button>
-    <button id="btnAI">PLAY THE COMPUTER</button>
     <button id="btnSolo">PRACTICE ALONE</button>
     <button id="btnHost">HOST A GAME</button>
     <div class="join">
@@ -303,9 +294,8 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="audio.js?v=v14.2-dev"></script>
-<script src="ai.js?v=v14.2-dev"></script>
-<script src="tutorial.js?v=v14.2-dev"></script>
+<script src="audio.js?v=v15.0-dev"></script>
+<script src="tutorial.js?v=v15.0-dev"></script>
 <script>
 'use strict';
 
@@ -1922,16 +1912,6 @@ const KNOBS = [
   { o: NET, k: 'hostDelay', label: 'host delay', min: 0, max: 200, step: 5, u: 'ms' },
   { o: NET, k: 'floor',     label: 'delay floor',min: 0, max: 100, step: 5, u: 'ms' },
 
-  ['AI'],
-  { o: AI, k: 'reaction',   label: 'reaction',  min: 0,    max: 0.6, step: 0.01, u: 's' },
-  { o: AI, k: 'commit',     label: 'commit',    min: 0.04, max: 0.6, step: 0.01, u: 's' },
-  { o: AI, k: 'wheelRate',  label: 'wheel',     min: 2,    max: 40,  step: 1,    u: '/s' },
-  { o: AI, k: 'maxCommit',  label: 'max plan',  min: 0.1,  max: 1.5, step: 0.02, u: 's' },
-  { o: AI, k: 'maxRecover', label: 'max recover',min: 0.2, max: 3,   step: 0.05, u: 's' },
-  { o: AI, k: 'standoff',   label: 'standoff',  min: 0.5,  max: 8,   step: 0.1,  u: '×' },
-  { o: AI, k: 'accuracy',   label: 'accuracy',  min: 0,    max: 1,   step: 0.01, u: '' },
-  { o: AI, k: 'switchTime', label: 'switch',    min: 0.05, max: 1.2, step: 0.01, u: 's' },
-
   ['RENDER'],
   { o: VIS, k: 'linePx', label: 'line width', min: 1, max: 8, step: 1,    u: 'px' },
   { o: VIS, k: 'glow',   label: 'glow',       min: 0, max: 3, step: 0.05, u: '×' },
@@ -2243,7 +2223,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v14.2-dev';
+const BUILD = 'v15.0-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2454,12 +2434,6 @@ function serverStepOnce(dt) {
   // wait, because waiting is lockstep.
   const T = server.world.tick + 1;
   for (const k of ['-1', '1']) {
-    // An AI seat produces the same record a person or a peer would; the
-    // simulation cannot tell the difference.
-    if (AI.on && k === String(-mySide) && net.role === 'solo') {
-      aiFillInput(server.world, -mySide, server.inputs[k], dt);
-      continue;
-    }
     const cell = server.buf[k][slot(T)];
     const dst = server.inputs[k];
     if (cell.tick === T) {
@@ -2919,7 +2893,7 @@ function showSetup() {
   $('setupOwner').classList.toggle('hidden', !owner);
   $('setupWait').classList.toggle('hidden', owner);
   $('setupMsg').innerHTML = '';
-  if (owner) { paintTarget(); paintPaddles(); paintAI(); }
+  if (owner) { paintTarget(); paintPaddles(); }
 }
 
 /* ==========================================================================
@@ -2992,21 +2966,6 @@ function setSens(v) {
   MOUSE.sens = Math.max(0.2, Math.min(3, Math.round(v * 100) / 100));
   try { localStorage.setItem('banjoball.sens', MOUSE.sens); } catch (e) {}
   paintSens();
-}
-
-let aiLevel = 'normal';
-
-function paintAI() {
-  $('aiRow').style.display = AI.on ? 'block' : 'none';
-  for (const [k, id] of [['easy','aiEasy'], ['normal','aiNormal'], ['hard','aiHard']]) {
-    $(id).classList.toggle('on', aiLevel === k);
-  }
-}
-
-function setAILevel(name) {
-  aiLevel = name;
-  aiSetLevel(name);
-  paintAI();
 }
 
 function paintPaddles() {
@@ -3099,7 +3058,6 @@ function hostGame() {
   if (!peerAvailable()) return;
   net.role = 'host';
   mySide = 1;
-  AI.on = false;                      // a human is on the way
   net.code = randomCode();
   setMsg('Opening room&hellip;');
   net.peer = new Peer(PEER_PREFIX + net.code, PEER_OPTS);
@@ -3123,7 +3081,6 @@ function joinGame() {
   if (code.length !== 4) { setMsg('Enter the four-character room code.'); return; }
   net.role = 'guest';
   mySide = -1;
-  AI.on = false;
   net.code = code;
   setMsg('Connecting to ' + code + '&hellip;');
   net.peer = new Peer(undefined, PEER_OPTS);
@@ -3212,21 +3169,13 @@ function onData(d) {
 $('build').textContent = BUILD;
 
 $('btnSolo').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; AI.on = false; updateStatus(); showSetup();
+  net.role = 'solo'; mySide = 1; updateStatus(); showSetup();
 });
-$('btnAI').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; AI.on = true;
-  aiInit(-mySide);
-  updateStatus(); showSetup();
-});
-$('aiEasy').addEventListener('click', () => setAILevel('easy'));
-$('aiNormal').addEventListener('click', () => setAILevel('normal'));
-$('aiHard').addEventListener('click', () => setAILevel('hard'));
 
 $('btnTutorial').addEventListener('click', function () {
   // Straight in: a lobby would be one more thing to explain before explaining
   // anything.
-  net.role = 'solo'; mySide = 1; AI.on = false; updateStatus();
+  net.role = 'solo'; mySide = 1; updateStatus();
   hideMenu();
   startGame(true);
 });
@@ -3253,7 +3202,7 @@ $('volPause').addEventListener('input', e => setVolume(parseFloat(e.target.value
    the player persist, and wiping them is a real cost to that player — so bump
    it when a value would be MISREAD, not merely when a default moves. */
 const PREFS_VERSION = 1;
-const PREFS_KEYS = ['banjoball.target', 'banjoball.sens', 'banjoball.ai',
+const PREFS_KEYS = ['banjoball.target', 'banjoball.sens',
                     'banjoball.paddles', 'banjoball.vol'];
 
 function prefsCheck() {
@@ -3276,8 +3225,6 @@ try {
   if (!isNaN(saved)) MATCH.target = Math.max(0, Math.min(100, saved));
   const ms = parseFloat(localStorage.getItem('banjoball.sens'));
   if (!isNaN(ms)) MOUSE.sens = Math.max(0.2, Math.min(3, ms));
-  const lv = localStorage.getItem('banjoball.ai');
-  if (lv && AI_LEVELS[lv]) { aiLevel = lv; aiSetLevel(lv); }
   const pc = parseInt(localStorage.getItem('banjoball.paddles'), 10);
   if (pc === 1 || pc === 2) MATCH.paddles = pc;
   const vv = parseFloat(localStorage.getItem('banjoball.vol'));
@@ -3286,7 +3233,6 @@ try {
 paintVolume();
 paintTarget();
 paintPaddles();
-paintAI();
 paintSens();
 $('btnHost').addEventListener('click', hostGame);
 $('btnJoin').addEventListener('click', joinGame);
