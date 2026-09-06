@@ -50,16 +50,20 @@ const SHOT = {
                       //   velocity time constants — roughly 45ms at the current
                       //   tuning — below which the paddle never reaches pace.
 
-  minFaceOn: 0.25,    /* How squarely the ball must meet the face. It is
-                         |cos| of the angle between the incoming ball and the
-                         face NORMAL, so 1 is dead broadside and 0 is the ball
-                         travelling along the paddle's spine — arriving at the
-                         end of it, where a centimetre of timing decides whether
-                         there is any contact at all. 0.25 is about 75 degrees
-                         off, and below that the shot is a coin toss. */
+  minWindow: 0.09,    /* s. How long the ball stays within reach along the
+                         paddle's SPINE — the direction a timing slip carries it
+                         off the end. Everything else about a contact is
+                         forgiving; that is the axis where being early or late
+                         means missing entirely.
+
+                         A time, not an angle, and the difference matters: a
+                         slow ball drifting exactly along the spine has a window
+                         of most of a second and needs no precision at all,
+                         while an angle measure would have called it the worst
+                         shot on the board. */
 
   // Scoring weights. What makes one shot better than another.
-  wFaceOn: 1.2,       // and among the possible ones, prefer the forgiving
+  wWindow: 1.2,       // and among the possible ones, prefer the forgiving
   wSpeed: 1.0,        // faster gives the player less time
   wPass: 1.6,         // passing further from the player matters more
   wMargin: 0.5,       // and some room inside the posts, so it is not a coin flip
@@ -228,17 +232,20 @@ function shotSearch(w, aiSide, wheelAngle) {
       const s = (1 + e) * vpMax - e * vinN;
       if (s <= 0.5) continue;                 // no useful pace to be had here
 
-      /* How squarely the ball meets the face. A ball sliding along the spine
-         meets the paddle END-ON, where the timing has to be perfect and
-         usually is not — geometrically a fine shot, and one the AI will never
-         actually make. A ball arriving broadside forgives a slip, because
-         missing the intended spot only moves the contact along the paddle.
+      /* How much timing slack the contact allows. The paddle's spine runs
+         perpendicular to its normal, so the ball's speed ALONG the spine is
+         what decides how long it stays on the paddle rather than past the end
+         of it. Divide the reach along that axis by that speed and the answer
+         is a window in seconds.
 
-         A nearly stationary ball has no meaningful direction, so it counts as
-         fully square rather than dividing by almost nothing. */
-      const vinMag = Math.hypot(c.vx, c.vy);
-      const faceOn = vinMag < 0.5 ? 1 : Math.abs(vinN) / vinMag;
-      if (faceOn < SHOT.minFaceOn) continue;
+         Magnitude, not direction: a ball creeping along the spine is easy to
+         meet however parallel it is, and only a fast one makes the timing
+         tight. */
+      const spx = -diry, spy = dirx;
+      const vTan = Math.abs(c.vx * spx + c.vy * spy);
+      const span = arena.paddleLength / 2 + phys.ballR;
+      const windowS = vTan > 1e-3 ? 2 * span / vTan : 99;
+      if (windowS < SHOT.minWindow) continue;
 
       const vx = dirx * s, vy = diry * s;
       const flight = shotFlight(c.x, c.y, vx, vy, aiSide);
@@ -274,7 +281,7 @@ function shotSearch(w, aiSide, wheelAngle) {
 
           const pass = shotPassDistance(c.x, c.y, vx, vy, aiSide, flight.t);
           const score =
-              SHOT.wFaceOn * faceOn
+              SHOT.wWindow * Math.min(windowS, 0.30) / 0.30
             + SHOT.wSpeed  * (s / hardest)
             + SHOT.wPass   * Math.min(pass, 3) / 3
             + SHOT.wMargin * Math.min(flight.margin, 0.5) / 0.5
