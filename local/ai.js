@@ -44,8 +44,9 @@ const AI = {
   shotHold: 0.15,     // s to keep a shot alive past its contact time, so a hit
                       //   and a miss both end it the same way
 
-  opportunityVelMargin: 1.0,  // multiple of the player's top paddle speed. The ball is
-                      //   beyond them when it recedes faster than this.
+  raceMargin: 1.0,    // head start insisted on before attacking, as a fraction
+                      //   of the player's time to the ball. Under 1 is cautious,
+                      //   over 1 contests balls we are slightly behind on.
 };
 
 /* Long enough to cover the largest reaction the panel allows (0.6s) at the
@@ -457,19 +458,36 @@ function aiBallRecession(px, py) {
   return (ball.vx * dx + ball.vy * dy) / l;
 }
 
-// From where the player is standing.
-function aiBallEscapeRate(aiSide) {
-  const p = aiPlayerPaddle(aiSide);
-  return aiBallRecession(p.x, p.y);
+/* Roughly how long before a paddle at this point could meet the ball.
+
+   The ball is closing on the point at some rate, and the paddle adds its own
+   top speed to that, so the gap shuts at (closing + vMax) and the time is the
+   distance over it. Instantaneous — no prediction, no simulation — which is
+   what keeps this a cheap gate rather than another forward pass.
+
+   The negative case is the one that matters. When the ball recedes faster than
+   the paddle can move, the rate goes NEGATIVE, and a distance over a negative
+   rate is a negative time — which would compare as sooner than everything
+   else. Unreachable has to be infinity, explicitly.
+
+   Approximate, and honest about it: exact only while the ball runs straight at
+   or away from the point. Gravity curves it, and the bearing shifts as the
+   paddle moves. Enough to decide who is favourite; not a promise. */
+function aiTimeToBall(px, py) {
+  const ball = aiPerceived().ball;
+  const d = Math.hypot(px - ball.x, py - ball.y);
+  if (d < 1e-6) return 0;
+  const closing = -aiBallRecession(px, py);
+  const rate = closing + maxPaddleSpeed();
+  return rate > 1e-6 ? d / rate : Infinity;
 }
 
-/* Is the ball already beyond the player's reach?
-
-   The threshold is a MULTIPLE of the player's top speed rather than a figure
-   in metres per second, so retuning the spring cannot quietly invalidate it.
-   Above 1 is cautious, below 1 optimistic. */
-function aiBallEscaped(aiSide) {
-  return aiBallEscapeRate(aiSide) > AI.opportunityVelMargin * maxPaddleSpeed();
+/* The player's time, with the one thing we know exactly about their box: past
+   their reach line they never arrive, however close they look. */
+function aiPlayerTimeToBall(aiSide) {
+  if (aiBallBeyondPlayerReach(aiSide)) return Infinity;
+  const pl = aiPlayerPaddle(aiSide);
+  return aiTimeToBall(pl.x, pl.y);
 }
 
 /* Is the ball past the furthest the player could ever touch?
@@ -638,25 +656,23 @@ function aiOpportunityOpen(w, side) {
   // Can we play the ball at all?
   if (!aiBallInBox(w, side)) return false;
 
-  // Is it ours rather than theirs?
-  if (aiBallDistance(w, side) >= aiPlayerBallDistance(side)) return false;
-
   /* Are we even on the right side of it? A shot taken from beyond the ball
      drives it at our own goal however good the trajectory looks. */
   if (!aiOnGoalSide(w, side)) return false;
 
-  /* Is the player out of it? Two ways, and the cheap definitive one is asked
-     first: past their reach line the ball is simply not theirs to play, at any
-     speed, so how fast it is moving stops mattering. Only when they COULD
-     still reach it does the velocity question earn its keep — is the ball
-     running away from them faster than they can follow.
+  /* Do we get there first? This replaces three cruder checks — who is nearer,
+     whether the ball had outrun the player, whether it was past their reach —
+     each an approximation of this one question.
 
-     Written as a nested check rather than an OR so the order is visible: the
-     geometric fact settles most cases outright, and the speed test is the
-     finer instrument used on what is left. */
-  if (!aiBallBeyondPlayerReach(side)) {
-    if (!aiBallEscaped(side)) return false;
-  }
+     The old test asked whether the ball could run AWAY from the player, which
+     a stationary ball never can. So a ball sitting still on top of the net was
+     never an opportunity, however far away they were standing. This asks who
+     arrives first, which is what was always meant.
+
+     raceMargin is the head start insisted on. Under 1 wants a clear win; over
+     1 contests balls we are slightly behind on. */
+  const me = aiPaddle(w, side);
+  if (!(aiTimeToBall(me.x, me.y) < aiPlayerTimeToBall(side) * AI.raceMargin)) return false;
 
   // Is there a shot to take?
   if (aiNetBlocks(side)) return false;
