@@ -177,6 +177,13 @@
 
   /* Above the menu's z-index on purpose: you want to check the build BEFORE
      connecting, not after. */
+  /* Loud on purpose. Developer mode changes what the game will do and it
+     persists across sessions, so it must never be something you are in without
+     knowing. Above everything, and it does not take clicks. */
+  #devFlag{position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:31;
+           padding:4px 14px 5px;border:1px solid #b45309;border-top:0;
+           border-radius:0 0 7px 7px;background:rgba(120,53,15,.92);color:#fdba74;
+           font-size:9.5px;letter-spacing:.22em;font-weight:600;pointer-events:none}
   #build{position:fixed;top:10px;left:14px;z-index:30;font-size:10px;letter-spacing:.14em;
          color:#3f4d61;pointer-events:none;text-shadow:0 1px 3px #000}
   #status{position:fixed;top:10px;right:14px;z-index:9;font-size:10px;letter-spacing:.1em;
@@ -189,6 +196,7 @@
 <div id="panel"></div>
 <div id="tag"></div>
 <div id="build"></div>
+<div id="devFlag" class="hidden">DEVELOPER MODE</div>
 <div id="status"></div>
 <div id="sensBar">
   <span>MOUSE</span>
@@ -250,6 +258,13 @@
   <div class="card">
     <div id="setupOwner">
       <h1>SETUP</h1>
+      <div id="tuneRow" class="hidden">
+        <div class="lab">KEEP TUNED SETTINGS</div>
+        <div class="seg">
+          <button id="tuneNo">NO</button>
+          <button id="tuneYes">YES</button>
+        </div>
+      </div>
       <div id="diffRow" class="hidden">
         <div class="lab">DIFFICULTY</div>
         <input id="diffRange" type="range" min="1" max="10" step="1" value="10">
@@ -324,10 +339,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v16.8-dev"></script>
-<script src="ai.js?v=v16.8-dev"></script>
-<script src="audio.js?v=v16.8-dev"></script>
-<script src="tutorial.js?v=v16.8-dev"></script>
+<script src="shot.js?v=v16.9-dev"></script>
+<script src="ai.js?v=v16.9-dev"></script>
+<script src="audio.js?v=v16.9-dev"></script>
+<script src="tutorial.js?v=v16.9-dev"></script>
 <script>
 'use strict';
 
@@ -1993,7 +2008,8 @@ let devTyped = '';
 const devTools = () => inPractice() || devUnlocked;
 
 function paintBuild() {
-  $('build').textContent = BUILD + (devUnlocked ? '  DEV' : '');
+  $('build').textContent = BUILD;
+  $('devFlag').classList.toggle('hidden', !devUnlocked);
 }
 
 addEventListener('keydown', e => {
@@ -2003,7 +2019,9 @@ addEventListener('keydown', e => {
   devTyped = '';
   devUnlocked = !devUnlocked;
   try { localStorage.setItem('banjoball.dev', devUnlocked ? '1' : '0'); } catch (e) {}
-  if (!devUnlocked) { document.body.classList.remove('debug'); frozen = false; resize(); }
+  if (!devUnlocked) { document.body.classList.remove('debug'); frozen = false;
+                      keepTuning = false; resize(); }
+  paintTuning();
   paintBuild();
 });
 
@@ -2303,6 +2321,7 @@ function startGame(asTutorial) {
      the panel straight in - past the H gate, which only stops you TOGGLING it.
      Cleared on entry to anything that is not practice. */
   if (!devTools()) document.body.classList.remove('debug');
+  if (!inPractice() && !(devUnlocked && keepTuning)) restoreTuning();
   hideMenu();
   hideSetup();
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -2486,7 +2505,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v16.8-dev';
+const BUILD = 'v16.9-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3183,7 +3202,7 @@ function showSetup() {
   $('setupOwner').classList.toggle('hidden', !owner);
   $('setupWait').classList.toggle('hidden', owner);
   $('setupMsg').innerHTML = '';
-  if (owner) { paintTarget(); paintPaddles(); paintDifficulty(); }
+  if (owner) { paintTarget(); paintPaddles(); paintDifficulty(); paintTuning(); }
 }
 
 /* ==========================================================================
@@ -3261,6 +3280,36 @@ function setSens(v) {
 /* Only meaningful against the computer, so it is hidden the rest of the time
    rather than greyed — there is no version of a two-human match where a
    difficulty setting means anything. */
+/* Tuning is a practice tool, so it does not follow you into a real game: the
+   panel values go back to the file defaults on entry to anything that is not
+   practice. Without that, an evening spent moving sliders in practice would
+   quietly become the physics of the next match - and on a HOST it is worse
+   than quietly, because sendConfig pushes A, FEEL, PHYS and MATCH to the guest
+   every second, so your tuning becomes theirs too.
+
+   Developer mode can opt out, since testing a change means playing with it.
+   Session-only and defaulting to NO: a persisted YES is exactly the setting
+   you would forget you had left on. */
+let keepTuning = false;
+
+function paintTuning() {
+  $('tuneRow').classList.toggle('hidden', !devUnlocked);
+  $('tuneNo').classList.toggle('on', !keepTuning);
+  $('tuneYes').classList.toggle('on', keepTuning);
+}
+
+function setKeepTuning(v) { keepTuning = v; paintTuning(); }
+
+/* The difficulty CHOICE is a game setting, not tuning, so it survives the
+   restore - the defaults put AI and SHOT back to level 10 and the chosen level
+   is then re-applied over them. */
+function restoreTuning() {
+  const lv = aiLevel;
+  for (const [k, v] of DEFAULTS) k.o[k.k] = v;
+  aiSetLevel(lv);
+  syncPanel();
+}
+
 function paintDifficulty() {
   $('diffRow').classList.toggle('hidden', !AI.on);
   $('diffRange').value = aiLevel;
@@ -3519,6 +3568,8 @@ $('ptMinus').addEventListener('click', () => setTarget(MATCH.target - 1));
 $('ptPlus').addEventListener('click', () => setTarget(MATCH.target + 1));
 $('ptRange').addEventListener('input', e => setTarget(parseInt(e.target.value, 10)));
 $('diffRange').addEventListener('input', e => setDifficulty(parseInt(e.target.value, 10)));
+$('tuneNo').addEventListener('click', () => setKeepTuning(false));
+$('tuneYes').addEventListener('click', () => setKeepTuning(true));
 $('sensSetup').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 $('sensPlay').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 $('volSetup').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
