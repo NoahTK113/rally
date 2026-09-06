@@ -46,7 +46,10 @@
 
   #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
-  .hidden{display:none}
+  /* !important because #menu and #setup set display through ID selectors, and
+     an ID beats a class: a plain .hidden rule loses to both and does nothing
+     at all. v19.9 shipped exactly that and the menu stopped hiding. */
+  .hidden{display:none!important}
   #setup{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;
          background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
   #setup .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
@@ -229,10 +232,10 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="shot.js?v=v19.9-local"></script>
-<script src="ai.js?v=v19.9-local"></script>
-<script src="audio.js?v=v19.9-local"></script>
-<script src="tutorial.js?v=v19.9-local"></script>
+<script src="shot.js?v=v19.10-local"></script>
+<script src="ai.js?v=v19.10-local"></script>
+<script src="audio.js?v=v19.10-local"></script>
+<script src="tutorial.js?v=v19.10-local"></script>
 <script>
 'use strict';
 
@@ -2303,7 +2306,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.9-local';
+const BUILD = 'v19.10-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
