@@ -71,6 +71,49 @@ function tutAngleIs(deg) {
          Math.abs(a - target + Math.PI) < TUT_ANGLE_TOL;
 }
 
+/* The two tilts that send the ball toward the goal this player attacks.
+
+   The upward-facing normal of a paddle at angle a is whichever of ±(-sin a,
+   cos a) points up. At 30° and 60° that normal leans toward x = 0; at 120° and
+   150° it leans toward x = width. Side +1 scores into x = 0 — checkGoal awards
+   it when the ball crosses there — so +1 wants the first pair and -1 the
+   second. Mirrored rather than written down twice, and the diagram is built
+   from the same numbers so it can never disagree with the gate. */
+function tutTiltAngles() { return mySide > 0 ? [30, 60] : [120, 150]; }
+
+/* A small picture of the two acceptable positions, because "at an angle" has a
+   mirror image that is exactly wrong and no wording makes that as clear as
+   seeing both. SVG y runs downward, so a world angle of +a is rotate(-a). */
+function tutTiltDiagram() {
+  const cells = tutTiltAngles().map((deg, i) => {
+    const a = deg * Math.PI / 180;
+    let nx = -Math.sin(a), ny = Math.cos(a);
+    if (ny < 0) { nx = -nx; ny = -ny; }          // the face that is uppermost
+    const cx = 70 + i * 130, cy = 56;
+    const ex = cx + nx * 30, ey = cy - ny * 30;   // outgoing, in SVG coords
+    const ang = Math.atan2(ey - cy, ex - cx);
+    const h = 7;
+    return (
+      '<g>' +
+      '<circle cx="' + cx + '" cy="16" r="5" fill="#ffffff" opacity=".55"/>' +
+      '<line x1="' + cx + '" y1="22" x2="' + cx + '" y2="' + (cy - 12) + '" ' +
+        'stroke="#ffffff" stroke-opacity=".35" stroke-width="2" stroke-dasharray="3 3"/>' +
+      '<rect x="' + (cx - 30) + '" y="' + (cy - 4) + '" width="60" height="8" rx="4" ' +
+        'fill="#22d3ee" transform="rotate(' + (-deg) + ' ' + cx + ' ' + cy + ')"/>' +
+      '<line x1="' + cx + '" y1="' + cy + '" x2="' + ex + '" y2="' + ey + '" ' +
+        'stroke="#ffffff" stroke-width="2"/>' +
+      '<polygon fill="#ffffff" points="' +
+        ex + ',' + ey + ' ' +
+        (ex - h * Math.cos(ang - 0.45)) + ',' + (ey - h * Math.sin(ang - 0.45)) + ' ' +
+        (ex - h * Math.cos(ang + 0.45)) + ',' + (ey - h * Math.sin(ang + 0.45)) + '"/>' +
+      '<text x="' + cx + '" y="100" text-anchor="middle" fill="#ffffff" ' +
+        'font-size="12" font-family="ui-monospace, Consolas, monospace">' + deg + '°</text>' +
+      '</g>'
+    );
+  }).join('');
+  return '<svg viewBox="0 0 270 110" width="270" height="110">' + cells + '</svg>';
+}
+
 const STEPS = [
   {
     text: 'Move your mouse to <b>control your paddle</b>.',
@@ -89,9 +132,16 @@ const STEPS = [
     /* 30 or 60, both one coarse step from flat or upright. An earlier draft
        asked for 45, which the 30° wheel cannot reach at all without the fine
        modifier - a step the player could not finish with what they had been
-       taught so far. */
-    hint: 'a tilted face sends the ball away at an angle instead of straight back',
-    done: () => tutAngleIs(30) || tutAngleIs(60),
+       taught so far.
+
+       Which two angles depends on the side. A tilt is not just an angle, it is
+       a DIRECTION: tilted one way the face throws the ball up the field, and
+       the mirror image of it throws the ball into your own half. Both are
+       "an angle", and only one is the lesson. tutTiltAngles picks the pair
+       that faces the goal being attacked. */
+    hint: 'tilt it so the face points up the field, toward the goal you are attacking',
+    diagram: () => tutTiltDiagram(),
+    done: () => { const [a, b] = tutTiltAngles(); return tutAngleIs(a) || tutAngleIs(b); },
   },
   {
     text: 'The goal of the game is simply to <b>score on your opponent</b> ' +
@@ -183,6 +233,9 @@ function paintTutorial() {
   $('tutText').innerHTML = start ? TUT_START : praise ? TUT_PRAISE : s.text;
   // innerHTML, not textContent: hints carry <b> now.
   $('tutHint').innerHTML = (start || praise) ? '' : (s.hint || '');
+  const diagram = (!start && !praise && s.diagram) ? s.diagram() : '';
+  $('tutDiagram').innerHTML = diagram;
+  $('tutDiagram').style.display = diagram ? '' : 'none';
   $('tutReady').innerHTML = brief ? TUT_READY : '';
   $('tutReady').style.display = brief ? '' : 'none';
 

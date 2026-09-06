@@ -125,6 +125,8 @@
   #tut.mid{top:50%;transform:translate(-50%,-50%)}
   #tut.top{top:34px;transform:translateX(-50%)}
   #tut.fade{opacity:0}
+  #tutDiagram{margin-top:14px}
+  #tutDiagram svg{display:block;margin:0 auto}
   #tutReady{margin-top:14px;font-size:14px;color:#ffffff;letter-spacing:.08em}
   #tutReady b{color:#22d3ee;font-weight:600}
   /* The tutorial says CLICK ANYWHERE ON THE FIELD itself. Two cards asking for
@@ -256,6 +258,7 @@
 <div id="tut">
   <div id="tutText"></div>
   <div id="tutHint"></div>
+  <div id="tutDiagram"></div>
   <div id="tutReady"></div>
   <div id="tutDots"></div>
 </div>
@@ -344,10 +347,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v17.5-dev"></script>
-<script src="ai.js?v=v17.5-dev"></script>
-<script src="audio.js?v=v17.5-dev"></script>
-<script src="tutorial.js?v=v17.5-dev"></script>
+<script src="shot.js?v=v17.6-dev"></script>
+<script src="ai.js?v=v17.6-dev"></script>
+<script src="audio.js?v=v17.6-dev"></script>
+<script src="tutorial.js?v=v17.6-dev"></script>
 <script>
 'use strict';
 
@@ -2517,7 +2520,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v17.5-dev';
+const BUILD = 'v17.6-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
