@@ -27,7 +27,7 @@
 
 const AI = {
   on: false,
-  reaction: 0.12,     // s — how stale our view of the OUTSIDE WORLD is
+  reaction: 0,     // s — how stale our view of the OUTSIDE WORLD is
 
   /* The hand. Not derived from the player's mouse settings on purpose: their
      cursor speed depends on their own sensitivity slider and window size, so
@@ -36,8 +36,8 @@ const AI = {
   mouseSpeed: 25,     // m/s — furthest the emitted position may travel per second
   wheelSpeed: 12,     // notches/s — how fast the wheel can be turned
 
-  saveRate: 5,        // m/s — closing on our own goal faster than this is a save
-  saveDist: 3.0,      // m — this near the mouth is a save whatever the speed
+  saveRate: 7,        // m/s — closing on our own goal faster than this is a save
+  saveDist: 1.5,      // m — this near the mouth is a save whatever the speed
   throughDist: 1.75,   // m — inside this, commit and drive through the ball
   clearAngle: 25,    // deg — how far our approach may sit off the line before
                       //   the clear is abandoned and we get back on it
