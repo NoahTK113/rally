@@ -57,7 +57,26 @@ const AI = {
   raceMargin: 1.4,    // head start insisted on before attacking, as a fraction
                       //   of the player's time to the ball. Under 1 is cautious,
                       //   over 1 contests balls we are slightly behind on.
+
+  /* ERROR. Everything above describes an AI playing as well as it can; these
+     say how far short of that it falls. All are percentages of a stated 100%,
+     so a difficulty level can ask for "a third of a bad human's miss" without
+     knowing the units underneath.
+
+     Aim and touch are separate on purpose. They are not two sizes of the same
+     mistake: a misaim is struck cleanly and goes to the wrong place, a bad
+     touch is aimed right and hit off the end of the paddle. They look nothing
+     alike in play, so they tune apart. */
+  aimError: 0,        // % — 100% is 45 deg of face-angle error
+  touchError: 0,      // % — 100% is half a paddle plus a ball: a clean miss
+  standError: 0,      // % — 100% is 2m out of defensive position
+  standPeriod: 1.0,   // s — how often the standing error is re-drawn
 };
+
+/* 100% of a standing error, in metres. Aim and touch measure themselves
+   against the geometry they act on; this one has nothing to measure against,
+   so it is simply stated. */
+const AI_STAND_FULL = 2.0;
 
 /* Long enough to cover the largest reaction the panel allows (0.6s) at the
    simulation rate, with room to spare. Sized from the constants rather than
@@ -93,6 +112,9 @@ const ai = {
   shot: null,      // the shot being executed, from shot.js
   shotAge: 0,      // s since it was chosen
   evSeen: 0,       // event id watermark, for spotting a contact
+
+  standT: 0,       // s until the standing error is re-drawn
+  standX: 0, standY: 0,   // the offset being held meanwhile
 };
 
 function aiInit() {
@@ -108,6 +130,8 @@ function aiInit() {
   ai.evSeen = 0;
   ai.blind = 0;
   ai.lastPhase = null;
+  ai.standT = 0;
+  ai.standX = ai.standY = 0;
   if (!ai.hist) {
     ai.hist = new Array(AI_HIST);
     for (let i = 0; i < AI_HIST; i++) ai.hist[i] = makeObservation();
@@ -285,7 +309,23 @@ function aiGoalPoint(aiSide) {
 function aiDefensivePosition(aiSide) {
   const ball = aiPerceived().ball;
   const g = aiGoalPoint(aiSide);
-  return { x: (ball.x + g.x) / 2, y: (ball.y + g.y) / 2 };
+  return { x: (ball.x + g.x) / 2 + ai.standX,
+           y: (ball.y + g.y) / 2 + ai.standY };
+}
+
+/* The standing error is HELD, then re-drawn. Not because holding is cheaper,
+   but because a fresh number every tick is not a mistake — it is a vibration,
+   and the paddle would buzz around the right answer while averaging to it.
+   Being wrong for a while is what looks human. standPeriod is how long a
+   while, and it is on a slider because that is the knob that decides whether
+   this reads as a player thinking or a player twitching. */
+function aiUpdateStand(dt) {
+  ai.standT -= dt;
+  if (ai.standT > 0) return;
+  ai.standT = AI.standPeriod > 0.01 ? AI.standPeriod : 0.01;
+  const r = (AI.standError / 100) * AI_STAND_FULL;
+  ai.standX = (Math.random() * 2 - 1) * r;
+  ai.standY = (Math.random() * 2 - 1) * r;
 }
 
 // How long the line is: the ball's distance from our goal mouth.
@@ -750,12 +790,64 @@ function aiUpdateShot(w, side, dt) {
   const wheel = ai.outSet ? ai.outA : aiPaddle(w, side).a;
   const found = shotSearch(w, side, wheel);
   if (found) {
+    aiSpoilShot(found);
     ai.shot = found;
     ai.shotAge = 0;
     // Stop the world on a fresh shot, if that has been asked for. P resumes.
     if (opts.freezeOnShot) frozen = true;
   }
   return ai.shot;
+}
+
+/* Where a shot goes wrong.
+
+   Applied ONCE, here, at the moment the shot is committed - not inside the
+   search, and not in aiShotTarget. The search's job is to find the best shot
+   available and it should not be handicapped into finding a worse one; what
+   is handicapped is our ability to execute the one it found. And aiShotTarget
+   runs every tick, so drawing a number there would shake the target at 240Hz
+   instead of missing by a fixed amount.
+
+   shot.js is untouched by any of this. It answers what is possible; how badly
+   we do it is the AI's business.
+
+   sh.vx/vy are deliberately NOT rotated. They are the solved exit velocity -
+   the shot as INTENDED - and the O-key diagnostic draws them. Leaving them
+   alone means the green line keeps showing what the AI was trying to do while
+   the paddle does something else, which is the more useful of the two things
+   to see. */
+function aiSpoilShot(sh) {
+  const cfg = aiCfg();
+
+  /* Staging is defined as a distance back along the swing line from the
+     contact. Both ends of that are about to move, so measure it first. */
+  const back = Math.hypot(sh.sx - sh.x, sh.sy - sh.y);
+
+  // AIM: rotate the face and the swing line together, by the same error. A
+  // face turned without the swing following it is not a misaim, it is a
+  // different and much stranger mistake.
+  const eA = (AI.aimError / 100) * (Math.PI / 4) * (Math.random() * 2 - 1);
+  if (eA) {
+    const c = Math.cos(eA), sn = Math.sin(eA);
+    const dx = sh.dirx * c - sh.diry * sn;
+    const dy = sh.dirx * sn + sh.diry * c;
+    sh.dirx = dx; sh.diry = dy;
+    sh.angle += eA;
+  }
+
+  // TOUCH: meet the ball somewhere other than where the plan said. 100% is
+  // half a paddle plus a ball, which is the distance at which a contact stops
+  // happening at all.
+  const span = cfg.arena.paddleLength / 2 + cfg.phys.ballR;
+  const eT = (AI.touchError / 100) * span;
+  if (eT) {
+    sh.x += (Math.random() * 2 - 1) * eT;
+    sh.y += (Math.random() * 2 - 1) * eT;
+  }
+
+  // Staging follows both of them, or the approach would aim at the old plan.
+  sh.sx = sh.x - sh.dirx * back;
+  sh.sy = sh.y - sh.diry * back;
 }
 
 /* Executing a shot. The face angle is commanded from the moment the shot is
@@ -920,5 +1012,6 @@ function aiStep(w, side, dst, dt) {
      starts clean rather than resuming whatever the last one was doing. */
   if (!aiLiveBall(w)) { ai.saving = false; ai.lined = true; ai.shot = null; return; }
 
+  aiUpdateStand(dt);
   aiEmit(w, side, dst, aiDecide(w, side, dt), dt);
 }
