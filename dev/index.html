@@ -17,10 +17,16 @@
   #tag,#status{display:none}
   body.playing #status{display:block}
   body.playing.debug #tag{display:block}
-  #tag{position:fixed;bottom:66px;left:16px;font-size:11px;line-height:1.65;color:#66788f;
-       pointer-events:none;text-shadow:0 1px 3px #000}
+  #tag{position:fixed;bottom:66px;left:16px;z-index:13;font-size:11px;line-height:1.65;
+       color:#66788f;pointer-events:none;text-shadow:0 1px 3px #000}
 
-  #panel{position:fixed;top:0;left:0;right:0;z-index:10;display:none;flex-wrap:wrap;
+  /* Above #pause (12), not below it. The panel is only usable while the game
+     is paused — during play the pointer is locked to the field and a slider
+     cannot be grabbed at all — and #pause is a full-screen scrim at 74%, so at
+     z-index 10 the panel was both dimmed and click-blocked in the one state
+     where it is any use. It is a strip across the top, so it does not cover
+     the pause card sitting in the middle. #build stays above at 30. */
+  #panel{position:fixed;top:0;left:0;right:0;z-index:13;display:none;flex-wrap:wrap;
          align-items:flex-end;gap:9px 13px;padding:9px 14px 10px;font-size:10px;
          background:rgba(8,12,19,.92);border-bottom:1px solid #1a2534;backdrop-filter:blur(8px)}
   body.playing.debug #panel{display:flex}
@@ -313,10 +319,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v16.4-dev"></script>
-<script src="ai.js?v=v16.4-dev"></script>
-<script src="audio.js?v=v16.4-dev"></script>
-<script src="tutorial.js?v=v16.4-dev"></script>
+<script src="shot.js?v=v16.5-dev"></script>
+<script src="ai.js?v=v16.5-dev"></script>
+<script src="audio.js?v=v16.5-dev"></script>
+<script src="tutorial.js?v=v16.5-dev"></script>
 <script>
 'use strict';
 
@@ -392,7 +398,7 @@ const contourW = () => (VIS.linePx * 2) / view.sDev;
 
 /* Match rules. Synced with the rest of the config, because both simulations
    must agree on when a match ends or they would disagree about the result. */
-const MATCH = { target: 7, paddles: 2, deadBall: 4 };  // target 0 = endless, deadBall 0 = off
+const MATCH = { target: 7, paddles: 2, deadBall: 6 };  // target 0 = endless, deadBall 0 = off
 
 /* Latency injected into the HOST's own link to its own server. The whole
    point of a listen server is that we can raise the host's delay but can never
@@ -2413,7 +2419,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v16.4-dev';
+const BUILD = 'v16.5-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
