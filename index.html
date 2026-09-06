@@ -229,10 +229,10 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="shot.js?v=v19.7-local"></script>
-<script src="ai.js?v=v19.7-local"></script>
-<script src="audio.js?v=v19.7-local"></script>
-<script src="tutorial.js?v=v19.7-local"></script>
+<script src="shot.js?v=v19.8-local"></script>
+<script src="ai.js?v=v19.8-local"></script>
+<script src="audio.js?v=v19.8-local"></script>
+<script src="tutorial.js?v=v19.8-local"></script>
 <script>
 'use strict';
 
@@ -923,7 +923,7 @@ function resetPaddles(w) {
 
    Any paddle contact restarts the clock, whoever made it: a ball being nudged
    along the floor is being played, however badly. */
-const FLOOR_STALL = 2.0;                  // s
+const FLOOR_STALL = 4.0;                  // s
 let floorStallT = 0, floorStallEv = 0;
 onNewGame(() => { floorStallT = 0; floorStallEv = 0; });
 
@@ -2303,7 +2303,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.7-local';
+const BUILD = 'v19.8-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
