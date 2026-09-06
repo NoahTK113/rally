@@ -221,10 +221,10 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="shot.js?v=v17.9-local"></script>
-<script src="ai.js?v=v17.9-local"></script>
-<script src="audio.js?v=v17.9-local"></script>
-<script src="tutorial.js?v=v17.9-local"></script>
+<script src="shot.js?v=v18.0-local"></script>
+<script src="ai.js?v=v18.0-local"></script>
+<script src="audio.js?v=v18.0-local"></script>
+<script src="tutorial.js?v=v18.0-local"></script>
 <script>
 'use strict';
 
@@ -336,7 +336,7 @@ const COL = {
 const goalColour = side => side > 0 ? COL.blue : COL.red;
 const goalFill   = side => side > 0 ? COL.blueFill : COL.redFill;
 
-const opts = { showTarget: false, showVectors: false };
+const opts = { showTarget: false, showVectors: false, freezeOnShot: false };
 let renderAlpha = 1;
 
 // Outward glow: the same contour stroked a few times, widening and fading.
@@ -1527,9 +1527,66 @@ function drawDefensivePosition() {
   ctx.stroke();
 }
 
+/* What the shot search decided, drawn where it decided it.
+
+   Three things, colour coded:
+     blue    the ball's predicted path, up to the chosen contact
+     yellow  the contact itself, and the face angle wanted there
+     green   the solved flight afterwards, to where it crosses the goal
+
+   The blue line is SIMULATED — the real stepBall, bounces and all. The green
+   one is SOLVED, an exact parabola, because nothing accelerates the ball in
+   flight but gravity. Seeing them in different colours is the point: if the
+   green line ends somewhere other than in the goal, the solver and the
+   simulation disagree, and that is worth knowing. */
+function drawShotPlan() {
+  if (!opts.freezeOnShot || typeof shotDebug === 'undefined' || !shotDebug) return;
+  const sh = shotDebug.shot, path = shotDebug.path;
+  ctx.lineWidth = lineW();
+
+  // approach, to the contact only
+  if (path && path.length) {
+    ctx.strokeStyle = '#38bdf8';
+    ctx.beginPath();
+    let started = false;
+    for (const q of path) {
+      if (q.t > sh.t) break;
+      if (started) ctx.lineTo(q.x, q.y); else { ctx.moveTo(q.x, q.y); started = true; }
+    }
+    if (started) ctx.stroke();
+  }
+
+  // the flight afterwards, solved
+  const g = PHYS.gravity;
+  const vx = sh.dirx * sh.speed, vy = sh.diry * sh.speed;
+  ctx.strokeStyle = '#4ade80';
+  ctx.beginPath();
+  const N = 48;
+  for (let i = 0; i <= N; i++) {
+    const t = sh.flightT * i / N;
+    const x = sh.x + vx * t, y = sh.y + vy * t - 0.5 * g * t * t;
+    if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+  }
+  ctx.stroke();
+
+  // the contact, and the face wanted there
+  ctx.strokeStyle = '#fde047';
+  const r = 0.3;
+  ctx.beginPath();
+  ctx.moveTo(sh.x - r, sh.y); ctx.lineTo(sh.x + r, sh.y);
+  ctx.moveTo(sh.x, sh.y - r); ctx.lineTo(sh.x, sh.y + r);
+  ctx.stroke();
+  const half = A.paddleLength / 2;
+  ctx.beginPath();
+  ctx.moveTo(sh.x - Math.cos(sh.angle) * half, sh.y - Math.sin(sh.angle) * half);
+  ctx.lineTo(sh.x + Math.cos(sh.angle) * half, sh.y + Math.sin(sh.angle) * half);
+  ctx.stroke();
+}
+
 function drawEffects() {
   drawCursor();
   drawDefensivePosition();
+  drawShotPlan();
   if (!opts.showVectors) return;
   const p0 = me();
   arrow(p0.x, p0.y, p0.vx * VEL_SCALE, p0.vy * VEL_SCALE, 'rgba(125,211,252,.9)');
@@ -1776,6 +1833,7 @@ addEventListener('keydown', e => {
   if (k === 'r') resetRound(world, true);
   if (k === 'v') opts.showVectors = !opts.showVectors;
   if (k === 'g') opts.showTarget = !opts.showTarget;
+  if (k === 'o') opts.freezeOnShot = !opts.freezeOnShot;   // stop on a new shot
   if (k === 'h') { document.body.classList.toggle('debug'); resize(); }
 });
 addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
@@ -2129,7 +2187,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v17.9-local';
+const BUILD = 'v18.0-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that

@@ -720,7 +720,12 @@ function aiUpdateShot(w, side, dt) {
 
   const wheel = ai.outSet ? ai.outA : aiPaddle(w, side).a;
   const found = shotSearch(w, side, wheel);
-  if (found) { ai.shot = found; ai.shotAge = 0; }
+  if (found) {
+    ai.shot = found;
+    ai.shotAge = 0;
+    // Stop the world on a fresh shot, if that has been asked for. P resumes.
+    if (opts.freezeOnShot) frozen = true;
+  }
   return ai.shot;
 }
 
