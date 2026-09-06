@@ -41,6 +41,9 @@ const AI = {
   strikeDist: 1.75,   // m — inside this, commit and drive through the ball
   strikeAngle: 25,    // deg — how far our approach may sit off the line before
                       //   the strike is abandoned and we get back on it
+
+  escapeMargin: 1.0,  // multiple of the player's top paddle speed. The ball is
+                      //   beyond them when it recedes faster than this.
 };
 
 /* Long enough to cover the largest reaction the panel allows (0.6s) at the
@@ -351,19 +354,37 @@ function aiPlayerBallDistance(aiSide) {
   return Math.hypot(ball.x - p.x, ball.y - p.y);
 }
 
-/* How fast the player and the ball are converging: the closing speed along the
-   line between them, taking BOTH velocities into account. Positive means the
-   gap is shrinking.
+/* How fast the ball is receding from where the player's paddle IS.
 
-   The relative velocity is what matters, not the ball's alone. A ball drifting
-   gently toward a paddle already sprinting at it is closing fast; the same ball
-   with the paddle retreating is not closing at all. */
-function aiPlayerClosingRate(aiSide) {
+   Only the ball's velocity is used; the paddle is treated as a fixed point.
+   That is deliberate, and it is what makes the number mean something: if the
+   ball is moving away from the player's position faster than the player can
+   move, the gap grows no matter what they do. Unreachable, without predicting
+   anything — just a comparison.
+
+   Their top speed is not a guess. Both paddles run the same spring, so
+   maxPaddleSpeed is as true of the player as of us, and it is configuration
+   rather than privileged information.
+
+   The limit: this holds only while the ball's velocity holds. Gravity is
+   bending it every tick, and a bounce ends the argument entirely — a ball
+   lofted away and out of reach can arc back down into it. So this is a sound
+   test for right now, not a promise about the next second. */
+function aiBallEscapeRate(aiSide) {
   const p = aiPlayerPaddle(aiSide), ball = aiPerceived().ball;
-  const dx = p.x - ball.x, dy = p.y - ball.y;
+  const dx = ball.x - p.x, dy = ball.y - p.y;      // away from the player
   const l = Math.hypot(dx, dy);
   if (l < 1e-6) return 0;
-  return ((ball.vx - p.vx) * dx + (ball.vy - p.vy) * dy) / l;
+  return (ball.vx * dx + ball.vy * dy) / l;
+}
+
+/* Is the ball already beyond the player's reach?
+
+   The threshold is a MULTIPLE of the player's top speed rather than a figure
+   in metres per second, so retuning the spring cannot quietly invalidate it.
+   Above 1 is cautious, below 1 optimistic. */
+function aiBallEscaped(aiSide) {
+  return aiBallEscapeRate(aiSide) > AI.escapeMargin * maxPaddleSpeed();
 }
 
 /* Is the net in the way of a flat shot at the far goal?
