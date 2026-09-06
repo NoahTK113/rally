@@ -309,13 +309,20 @@ function aiGoalPoint(aiSide) {
    stays useful as the ball moves, rather than committing to crowding the ball
    or sitting on the goal.
 
-   Not clamped to the box: this is where the AI would ideally stand, which is
-   not always somewhere it may legally be. */
-function aiDefensivePosition(aiSide) {
+   Clamped to the box, and AFTER the drift error rather than before it. The
+   midpoint alone is often outside the zone the paddle may occupy, and the
+   error can push an already-legal one out; either way an unreachable target
+   is not a harder AI, it is a paddle pinned against its own boundary asking
+   to be somewhere it cannot go. Clamping first and then adding the error
+   would just reintroduce the problem it was meant to solve. */
+function aiDefensivePosition(w, aiSide) {
   const ball = aiPerceived().ball;
   const g = aiGoalPoint(aiSide);
-  return { x: (ball.x + g.x) / 2 + ai.standX,
-           y: (ball.y + g.y) / 2 + ai.standY };
+  const box = aiBox(aiPaddle(w, aiSide));
+  const x = (ball.x + g.x) / 2 + ai.standX;
+  const y = (ball.y + g.y) / 2 + ai.standY;
+  return { x: x < box.x0 ? box.x0 : x > box.x1 ? box.x1 : x,
+           y: y < box.y0 ? box.y0 : y > box.y1 ? box.y1 : y };
 }
 
 /* The standing error DRIFTS. A fresh number every tick would not be a mistake
@@ -967,7 +974,7 @@ function aiUpdateSave(side) {
 function aiSaveTarget(w, side) {
   if (aiBallDistance(w, side) > AI.clearDist) {
     ai.lined = true;                 // each new clear starts with a clean slate
-    return aiDefensivePosition(side);
+    return aiDefensivePosition(w, side);
   }
 
   /* Guard the clear while it is happening, not only when it begins. Driving
@@ -1020,7 +1027,7 @@ function aiDecide(w, side, dt) {
   }
 
   // Default: hold the defensive position.
-  const d = aiDefensivePosition(side);
+  const d = aiDefensivePosition(w, side);
   return { x: d.x, y: d.y, a: face };
 }
 
