@@ -41,9 +41,9 @@
 const SHOT = {
   horizon: 1.5,       // s of ball future to consider
   sampleDt: 1 / 60,   // s between candidate contacts along that path
-  aimPoints: 5,       // how many places across the goal mouth to try
-  speedSteps: 3,      // how many launch speeds, from the hardest downward
-  slowest: 0.65,      // the slowest of them, as a fraction of the hardest
+  angleSteps: 36,     // launch directions tried at each candidate contact
+  angleLo: -0.45,     // rad, relative to horizontal toward the goal
+  angleHi: 1.30,      // rad — a steep lob is still worth testing
   ramp: 0.10,         // s of the paddle's spin-up, unavailable for travelling
   swingTime: 0.20,    // s of swing: how long before contact the drive begins.
                       //   A guess, and tunable. Its floor is about three
@@ -110,22 +110,6 @@ function shotPath(w, aiSide) {
    ONE FLIGHT, IN CLOSED FORM
    ========================================================================== */
 
-/* Launch angles that carry a ball from (px,py) to (tx,ty) at speed s. The
-   standard projectile problem: two roots, a flat one and a lofted one, or none
-   at all when the target is out of range at that speed. */
-function shotLaunchAngles(px, py, tx, ty, s, g) {
-  const dx = tx - px, dy = ty - py;
-  const x = Math.abs(dx);
-  if (x < 1e-4) return null;
-  const s2 = s * s;
-  const disc = s2 * s2 - g * (g * x * x + 2 * dy * s2);
-  if (disc < 0) return null;
-  const root = Math.sqrt(disc);
-  return { sign: Math.sign(dx),
-           low:  Math.atan((s2 - root) / (g * x)),
-           high: Math.atan((s2 + root) / (g * x)) };
-}
-
 /* Does this launch actually score? Four evaluations of the same parabola at
    different x: it arrives, it goes in, it clears the net, it clears the
    ceiling. Returns null for a miss, or the crossing details for a goal. */
@@ -189,6 +173,7 @@ function shotSearch(w, aiSide, wheelAngle) {
   const lo = arena.goalLip + phys.ballR;
   const hi = arena.goalLip + arena.goalHeight - phys.ballR;
   const goalX = aiSide < 0 ? arena.width : 0;
+  const toGoal = aiSide < 0 ? 1 : -1;   // x direction of the goal we attack
 
   /* How much of the swing is actually spent travelling. The paddle starts
      from REST at the staging point, and the spring takes a velocity time
@@ -212,34 +197,33 @@ function shotSearch(w, aiSide, wheelAngle) {
        first. This is the cheap necessary condition. */
     if (c.t <= SHOT.swingTime + SHOT.ramp) continue;
 
-    for (let ai_ = 0; ai_ < SHOT.aimPoints; ai_++) {
-      // Across the mouth, not at its middle.
-      const f = SHOT.aimPoints === 1 ? 0.5 : ai_ / (SHOT.aimPoints - 1);
-      const aimY = lo + (hi - lo) * f;
+    for (let k = 0; k < SHOT.angleSteps; k++) {
+      /* Sweep the DIRECTION and compute what speed that direction actually
+         yields, rather than choosing a speed and solving for the angle it
+         needs. The exit speed is not ours to pick: at full swing it is fixed
+         by the contact,
 
-      for (let si = 0; si < SHOT.speedSteps; si++) {
-        const frac = SHOT.speedSteps === 1 ? 1
-          : 1 - (1 - SHOT.slowest) * (si / (SHOT.speedSteps - 1));
-        const s = hardest * frac;
+             s = (1+e)*vpMax - e*(v_in . n)
 
-        const sol = shotLaunchAngles(c.x, c.y, goalX, aimY, s, g);
-        if (!sol) continue;
+         with the face normal n along the outgoing direction. Asking for any
+         other speed meant asking the paddle to arrive at a pace it could not
+         hold, and it showed as shots that never reached the goal.
 
-        for (let r = 0; r < 2; r++) {
-          const theta = r ? sol.high : sol.low;
-          const dirx = sol.sign * Math.cos(theta), diry = Math.sin(theta);
-          const vx = dirx * s, vy = diry * s;
+         Choosing a speed also made the solve circular — the speed sets the
+         angle, and the angle sets the speed through v_in.n. Sweeping the
+         direction and evaluating the result has no such knot in it. */
+      const theta = SHOT.angleLo + (SHOT.angleHi - SHOT.angleLo) * (k / (SHOT.angleSteps - 1));
+      const dirx = toGoal * Math.cos(theta), diry = Math.sin(theta);
 
-          const flight = shotFlight(c.x, c.y, vx, vy, aiSide);
-          if (!flight) continue;
+      const vinN = c.vx * dirx + c.vy * diry;
+      const s = (1 + e) * vpMax - e * vinN;
+      if (s <= 0.5) continue;                 // no useful pace to be had here
 
-          /* Can the paddle actually produce this? Face square along the
-             outgoing direction and swing that way; a ball already moving into
-             the face does part of the work, so v_in along it reduces the swing
-             needed. Beyond what the spring can deliver, the shot is imaginary. */
-          const vinN = c.vx * dirx + c.vy * diry;
-          const swing = (s + e * vinN) / (1 + e);
-          if (swing > vpMax || !(swing >= 0)) continue;
+      const vx = dirx * s, vy = diry * s;
+      const flight = shotFlight(c.x, c.y, vx, vy, aiSide);
+      if (!flight) continue;
+
+      const swing = vpMax;                    // always the hardest we can hit
 
           /* THE STAGING POINT. Approaching a contact by the shortest route
              says nothing about the DIRECTION of approach, and the direction is
@@ -248,15 +232,15 @@ function shotSearch(w, aiSide, wheelAngle) {
              contact point was.
 
              So the paddle stands back along the shot's own line and drives
-             forward through it. How far back is the swing speed times the swing
-             time — the distance it will actually cover getting up to pace. */
+             forward through it. How far back is the swing speed times the
+             usable part of the swing. */
           const back = swing * usable;
           const sx = c.x - dirx * back, sy = c.y - diry * back;
           if (sx < box.x0 || sx > box.x1 || sy < box.y0 || sy > box.y1) continue;
 
-          /* And the deadline is now the START of the swing, not the contact.
-             Being able to reach the contact in time is no use if there was
-             never a moment to get behind it. */
+          /* The deadline is the START of the swing, not the contact. Being able
+             to reach the contact in time is no use if there was never a moment
+             to get behind it. */
           const ready = c.t - SHOT.swingTime;
           const travel = Math.hypot(sx - me.x, sy - me.y);
           if (travel / vpMax + SHOT.ramp > ready) continue;
@@ -280,9 +264,7 @@ function shotSearch(w, aiSide, wheelAngle) {
                      sx, sy, swingT: SHOT.swingTime,
                      goalY: flight.yGoal, flightT: flight.t, pass, score };
           }
-        }
       }
-    }
   }
   shotDebug = best ? { path: shotLastPath, shot: best } : null;
   return best;
