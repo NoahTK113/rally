@@ -82,6 +82,11 @@
   #setup .go:hover:not(:disabled){border-color:#22d3ee;color:#ffffff}
   #setup .go:disabled{opacity:.45;cursor:default}
   .seg{display:flex;gap:8px;margin-bottom:12px}
+  /* .seg is a flex row and align-items defaults to stretch, so whichever
+     button is taller sizes the other. The hint makes 1 two lines tall and 2
+     follows it - no fixed height, and nothing to keep in step by hand. */
+  .seg button small{display:block;margin-top:5px;font-size:12px;
+                    letter-spacing:.1em;font-weight:600;color:#ffffff}
   .seg button{flex:1;padding:11px 0;font:inherit;font-size:14px;letter-spacing:.14em;
               border-radius:9px;cursor:pointer;background:#151d2b;color:#ffffff;
               border:1px solid #263449}
@@ -272,7 +277,7 @@
       </div>
       <div class="lab">PADDLES PER PLAYER</div>
       <div class="seg">
-        <button id="pd1">1</button>
+        <button id="pd1">1<small id="pd1Hint" class="hidden">START HERE</small></button>
         <button id="pd2">2</button>
       </div>
       <div id="ptRow">
@@ -339,10 +344,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v17.2-dev"></script>
-<script src="ai.js?v=v17.2-dev"></script>
-<script src="audio.js?v=v17.2-dev"></script>
-<script src="tutorial.js?v=v17.2-dev"></script>
+<script src="shot.js?v=v17.3-dev"></script>
+<script src="ai.js?v=v17.3-dev"></script>
+<script src="audio.js?v=v17.3-dev"></script>
+<script src="tutorial.js?v=v17.3-dev"></script>
 <script>
 'use strict';
 
@@ -2505,7 +2510,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v17.2-dev';
+const BUILD = 'v17.3-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3202,6 +3207,8 @@ let pendingTutorial = false;
 function paintSetupMode() {
   $('setupTitle').textContent = pendingTutorial ? 'TUTORIAL SETUP' : 'SETUP';
   $('btnStart').textContent   = pendingTutorial ? 'START TUTORIAL' : 'START MATCH';
+  // Only a first-timer needs telling which one to pick.
+  $('pd1Hint').classList.toggle('hidden', !pendingTutorial);
 }
 
 function showSetup() {
