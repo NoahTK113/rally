@@ -45,6 +45,7 @@ const SHOT = {
   speedSteps: 3,      // how many launch speeds, from the hardest downward
   slowest: 0.65,      // the slowest of them, as a fraction of the hardest
   ramp: 0.10,         // s of the paddle's spin-up, unavailable for travelling
+  swingTime: 0.20,    // s of swing: how long before contact the drive begins
 
   // Scoring weights. What makes one shot better than another.
   wSpeed: 1.0,        // faster gives the player less time
@@ -187,16 +188,17 @@ function shotSearch(w, aiSide, wheelAngle) {
   const goalX = aiSide < 0 ? arena.width : 0;
 
   const path = shotPath(w, aiSide);
+  const box = aiBox(me);
   let best = null;
 
   for (let ci = 0; ci < path.length; ci++) {
     const c = path[ci];
 
-    /* Can we be there at all? Arriving late does not beat not going, so this
-       is a hard filter rather than a preference. The ramp is the spin-up the
-       spring spends before it is moving at speed. */
-    const travel = Math.hypot(c.x - me.x, c.y - me.y);
-    if (travel / vpMax + SHOT.ramp > c.t) continue;
+    /* Too soon to stage and swing at all. The real feasibility test is against
+       the STAGING point and happens once the direction is known — a contact is
+       only reachable in a way that is any use if the paddle can get behind it
+       first. This is the cheap necessary condition. */
+    if (c.t <= SHOT.swingTime + SHOT.ramp) continue;
 
     for (let ai_ = 0; ai_ < SHOT.aimPoints; ai_++) {
       // Across the mouth, not at its middle.
@@ -227,12 +229,31 @@ function shotSearch(w, aiSide, wheelAngle) {
           const swing = (s + e * vinN) / (1 + e);
           if (swing > vpMax || !(swing >= 0)) continue;
 
-          /* And can the WHEEL get the face there in time? A shot that is
-             geometrically perfect and needs a ninety degree turn in two tenths
-             of a second is not a shot. */
+          /* THE STAGING POINT. Approaching a contact by the shortest route
+             says nothing about the DIRECTION of approach, and the direction is
+             what decides where the ball goes: a paddle dropping onto a rising
+             ball from above drives it back into the floor however right the
+             contact point was.
+
+             So the paddle stands back along the shot's own line and drives
+             forward through it. How far back is the swing speed times the swing
+             time — the distance it will actually cover getting up to pace. */
+          const back = swing * SHOT.swingTime;
+          const sx = c.x - dirx * back, sy = c.y - diry * back;
+          if (sx < box.x0 || sx > box.x1 || sy < box.y0 || sy > box.y1) continue;
+
+          /* And the deadline is now the START of the swing, not the contact.
+             Being able to reach the contact in time is no use if there was
+             never a moment to get behind it. */
+          const ready = c.t - SHOT.swingTime;
+          const travel = Math.hypot(sx - me.x, sy - me.y);
+          if (travel / vpMax + SHOT.ramp > ready) continue;
+
+          /* The wheel answers to the same deadline: the face has to be set
+             before the drive begins, not by the moment of contact. */
           const face = shotNearAngle(Math.atan2(-dirx, diry), wheelAngle);
           const notches = Math.abs(face - wheelAngle) / STEP_FINE;
-          if (notches / AI.wheelSpeed > c.t) continue;
+          if (notches / AI.wheelSpeed > ready) continue;
 
           const pass = shotPassDistance(c.x, c.y, vx, vy, aiSide, flight.t);
           const score =
@@ -244,6 +265,7 @@ function shotSearch(w, aiSide, wheelAngle) {
           if (!best || score > best.score) {
             best = { t: c.t, x: c.x, y: c.y, vinx: c.vx, viny: c.vy,
                      dirx, diry, speed: s, swing, angle: face,
+                     sx, sy, swingT: SHOT.swingTime,
                      goalY: flight.yGoal, flightT: flight.t, pass, score };
           }
         }

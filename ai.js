@@ -752,23 +752,20 @@ function aiUpdateShot(w, side, dt) {
    paddle is still accelerating when the ball arrives. */
 function aiShotTarget(w, side) {
   const sh = ai.shot;
-  if (aiBallDistance(w, side) > AI.throughDist) return { x: sh.x, y: sh.y };
-
-  /* The offset IS the swing speed. With the error clamped the spring settles
-     at omega*d/(2*zeta) — linear in how far the target is held past the paddle
-     — so the speed the search asked for maps to a distance in closed form.
-     Full offset is exactly maxPaddleSpeed, which is why maxError and that
-     figure agree: they are the same equation.
-
-     Capped at maxError because beyond it the clamp gives nothing more. In
-     practice the search prefers fast shots, so this will usually BE the cap;
-     it earns its keep on the occasional placed ball, and the real use for
-     speed variation is flicking, which is its own project.
-
-     Approximate when the run-up is short: this is the steady speed, reached
-     about 45ms after the offset is applied, and until then the paddle is still
-     travelling in with the error clamped and moving at full pace regardless. */
   const feel = aiCfg().feel;
+
+  /* Two phases, and the switch is on TIME rather than on distance to the ball.
+     Distance was what let the paddle arrive at the contact point and sit there
+     with no regard for where the ball actually was. */
+  const remaining = sh.t - ai.shotAge;
+
+  // Stand back along the shot's own line, and wait there.
+  if (remaining > sh.swingT) return { x: sh.sx, y: sh.sy };
+
+  /* Then drive. The offset IS the swing speed: with the error clamped the
+     spring settles at omega*d/(2*zeta), linear in how far the target is held
+     past the paddle, so the speed the search asked for maps to a distance in
+     closed form. Capped at maxError, beyond which the clamp gives nothing. */
   const omega = 2 * Math.PI * feel.posFreq;
   const cap = Math.min(feel.maxError, feel.reach);
   const past = Math.min(cap, 2 * feel.posDamp * sh.swing / omega);

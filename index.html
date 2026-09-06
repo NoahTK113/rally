@@ -221,10 +221,10 @@ var SESSION_RESETS = [];
 function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
-<script src="shot.js?v=v18.1-local"></script>
-<script src="ai.js?v=v18.1-local"></script>
-<script src="audio.js?v=v18.1-local"></script>
-<script src="tutorial.js?v=v18.1-local"></script>
+<script src="shot.js?v=v18.2-local"></script>
+<script src="ai.js?v=v18.2-local"></script>
+<script src="audio.js?v=v18.2-local"></script>
+<script src="tutorial.js?v=v18.2-local"></script>
 <script>
 'use strict';
 
@@ -1569,6 +1569,26 @@ function drawShotPlan() {
   }
   ctx.stroke();
 
+  /* amber: the swing. Where the paddle stands back to, and the line it drives
+     along through the ball. This is the part that was missing — the search
+     picked a contact POINT and the paddle went there by the shortest route,
+     which is how it ended up dropping onto a rising ball from above. */
+  const feel = FEEL;
+  const omega = 2 * Math.PI * feel.posFreq;
+  const cap = Math.min(feel.maxError, feel.reach);
+  const past = Math.min(cap, 2 * feel.posDamp * sh.swing / omega);
+  ctx.strokeStyle = '#fb923c';
+  ctx.beginPath();
+  ctx.moveTo(sh.sx, sh.sy);
+  ctx.lineTo(sh.x + sh.dirx * past, sh.y + sh.diry * past);
+  ctx.stroke();
+
+  const q = 0.22;
+  ctx.beginPath();
+  ctx.moveTo(sh.sx - q, sh.sy - q); ctx.lineTo(sh.sx + q, sh.sy + q);
+  ctx.moveTo(sh.sx - q, sh.sy + q); ctx.lineTo(sh.sx + q, sh.sy - q);
+  ctx.stroke();
+
   // the contact, and the face wanted there
   ctx.strokeStyle = '#fde047';
   const r = 0.3;
@@ -2187,7 +2207,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v18.1-local';
+const BUILD = 'v18.2-local';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
