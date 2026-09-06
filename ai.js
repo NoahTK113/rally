@@ -309,6 +309,44 @@ function aiBallDistance(w, side) {
   return Math.hypot(ball.x - p.x, ball.y - p.y);
 }
 
+/* Are we on the right side of the ball to hit it AWAY from our own goal?
+
+   `side` is also the direction toward that goal, so a positive value means the
+   paddle sits between the goal and the ball — the only place a forward touch is
+   possible. Negative means we are past it, and any contact drives the ball
+   homeward. */
+function aiOnGoalSide(w, side) {
+  const p = aiPaddle(w, side), ball = aiPerceived().ball;
+  return side * (p.x - ball.x) > 0;
+}
+
+/* Getting back round the ball when we are caught on the wrong side of it.
+
+   Not the nearest point on the line: from beyond the ball that IS the ball,
+   and driving at it from there is precisely the mistake being corrected. Go
+   round instead — clear it vertically, then run back past it — because a
+   straight line to the far side passes through the ball and hits it exactly
+   the wrong way.
+
+   Whichever way has more room, so it does not climb into the ceiling. */
+function aiRoundTheBall(w, side) {
+  const p = aiPaddle(w, side), ball = aiPerceived().ball;
+  const arena = aiCfg().arena;
+  const box = aiBox(p);
+  const clear = arena.paddleLength * 0.5 + aiCfg().phys.ballR + 0.25;
+
+  const up = box.y1 - ball.y, down = ball.y - box.y0;
+  const clearY = Math.max(box.y0, Math.min(box.y1,
+                   ball.y + (up >= down ? clear : -clear)));
+
+  // Still level with the ball: get out of its line first.
+  if (Math.abs(p.y - ball.y) < clear * 0.8) return { x: p.x, y: clearY };
+
+  // Clear of it: run to the goal side, staying at that height.
+  const gap = arena.paddleLength * 0.5 + aiCfg().phys.ballR + 0.30;
+  return { x: Math.max(box.x0, Math.min(box.x1, ball.x + side * gap)), y: clearY };
+}
+
 /* The point on the line closest to us, clamped to the segment. Beyond the ball
    that is the ball itself; behind the goal point it is the goal point. */
 function aiNearestOnLine(w, side) {
@@ -603,6 +641,10 @@ function aiOpportunityOpen(w, side) {
   // Is it ours rather than theirs?
   if (aiBallDistance(w, side) >= aiPlayerBallDistance(side)) return false;
 
+  /* Are we even on the right side of it? A shot taken from beyond the ball
+     drives it at our own goal however good the trajectory looks. */
+  if (!aiOnGoalSide(w, side)) return false;
+
   /* Is the player out of it? Two ways, and the cheap definitive one is asked
      first: past their reach line the ball is simply not theirs to play, at any
      speed, so how fast it is moving stops mattering. Only when they COULD
@@ -792,7 +834,15 @@ function aiSaveTarget(w, side) {
   const off = aiClearOffAngle(w, side);
   if (ai.lined) { if (off > AI.clearAngle) ai.lined = false; }
   else if (off < AI.clearAngle * 0.6) ai.lined = true;
-  if (!ai.lined) return aiNearestOnLine(w, side);
+  if (!ai.lined) {
+    /* Two different problems wear the same symptom. Off the line but still
+       BEHIND the ball only needs sliding back onto it. Past the ball needs
+       going round it, and the nearest point on the line is useless there —
+       clamped to the segment, it returns the ball itself, so the paddle drives
+       at it from the wrong side and knocks it homeward. Which is the thing
+       that was happening. */
+    return aiOnGoalSide(w, side) ? aiNearestOnLine(w, side) : aiRoundTheBall(w, side);
+  }
 
   const ball = aiPerceived().ball;
   const g = aiGoalPoint(side);
