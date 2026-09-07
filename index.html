@@ -61,67 +61,85 @@
          background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
   #setup .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
                background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.5);text-align:center}
-  #setup h1{font-size:15px;letter-spacing:.3em;font-weight:600;color:#8fa3bd}
-  .lab{font-size:9.5px;letter-spacing:.2em;color:#4d5c72;margin-bottom:10px}
+  #setup h1{font-size:15px;letter-spacing:.3em;font-weight:600;color:#ffffff}
+  .lab{font-size:14px;letter-spacing:.2em;color:#ffffff;margin-bottom:10px}
   .stepper{display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:12px}
   .stepper button{width:38px;height:38px;padding:0;font-size:18px;line-height:1;
-                  background:#151d2b;color:#c9d4e2;border:1px solid #263449;border-radius:9px;
+                  background:#151d2b;color:#ffffff;border:1px solid #263449;border-radius:9px;
                   cursor:pointer}
   .stepper button:hover:not(:disabled){border-color:#22d3ee}
   .stepper button:disabled{opacity:.3;cursor:default}
-  #ptVal{min-width:74px;font-size:30px;font-weight:700;color:#e6edf6;font-variant-numeric:tabular-nums}
+  #ptVal{min-width:74px;font-size:30px;font-weight:700;color:#ffffff;font-variant-numeric:tabular-nums}
   #ptRange,#diffRange{-webkit-appearance:none;appearance:none;width:100%;height:3px;border-radius:2px;
            background:#22303f;outline:none;margin:0 0 10px;cursor:pointer}
   #ptRange::-webkit-slider-thumb,#diffRange::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
            background:#22d3ee;cursor:pointer}
   #ptRange:disabled::-webkit-slider-thumb{background:#3f4d61;cursor:default}
-  .hint{font-size:10px;color:#66788f;margin-bottom:22px}
-  #setup .go{width:100%;padding:12px;font:inherit;font-size:11px;letter-spacing:.14em;
-             border-radius:8px;cursor:pointer;background:#151d2b;color:#c9d4e2;
+  .hint{font-size:14px;color:#ffffff;margin-bottom:22px}
+  #setup .go{width:100%;padding:12px;font:inherit;font-size:14px;letter-spacing:.14em;
+             border-radius:8px;cursor:pointer;background:#151d2b;color:#ffffff;
              border:1px solid #263449}
-  #setup .go:hover:not(:disabled){border-color:#22d3ee;color:#e6edf6}
+  #setup .go:hover:not(:disabled){border-color:#22d3ee;color:#ffffff}
   #setup .go:disabled{opacity:.45;cursor:default}
   .seg{display:flex;gap:8px;margin-bottom:12px}
-  .seg button{flex:1;padding:11px 0;font:inherit;font-size:13px;letter-spacing:.14em;
-              border-radius:9px;cursor:pointer;background:#151d2b;color:#66788f;
+  /* .seg is a flex row and align-items defaults to stretch, so whichever
+     button is taller sizes the other. The hint makes 1 two lines tall and 2
+     follows it - no fixed height, and nothing to keep in step by hand. */
+  .seg button small{display:block;margin-top:5px;font-size:12px;
+                    letter-spacing:.1em;font-weight:600;color:#ffffff}
+  .seg button{flex:1;padding:11px 0;font:inherit;font-size:14px;letter-spacing:.14em;
+              border-radius:9px;cursor:pointer;background:#151d2b;color:#ffffff;
               border:1px solid #263449}
-  .seg button:hover:not(:disabled){color:#c9d4e2}
+  .seg button:hover:not(:disabled){color:#ffffff}
   .seg button:disabled{opacity:.3;cursor:default}
-  .seg button.on{border-color:#22d3ee;color:#e6edf6;background:#16222f}
+  .seg button.on{border-color:#22d3ee;color:#ffffff;background:#16222f}
 
   .sens{display:flex;align-items:center;gap:12px;margin-top:20px;padding-top:18px;
-        border-top:1px solid #1c2838;font-size:13px;letter-spacing:.14em;color:#4d5c72}
+        border-top:1px solid #1c2838;font-size:14px;letter-spacing:.14em;color:#ffffff}
   .sens input{-webkit-appearance:none;appearance:none;flex:1;height:3px;border-radius:2px;
               background:#22303f;outline:none;cursor:pointer}
   .sens input::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
               border-radius:50%;background:#22d3ee;cursor:pointer}
-  .sens .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:45px;text-align:right}
+  .sens .v{color:#ffffff;font-variant-numeric:tabular-nums;min-width:45px;text-align:right}
 
-  #sensBar{position:fixed;bottom:14px;right:16px;z-index:9;display:none;align-items:center;
-           gap:10px;font-size:13px;letter-spacing:.12em;color:#5b6c82;
-           text-shadow:0 1px 3px #000}
-  body.playing #sensBar{display:flex}
-  #sensBar input{-webkit-appearance:none;appearance:none;width:120px;height:3px;
-                 border-radius:2px;background:#22303f;outline:none;cursor:pointer}
-  #sensBar input::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
-                 border-radius:50%;background:#22d3ee;cursor:pointer}
-  #sensBar .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:41px}
 
   #lockHint{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9;
             display:none;padding:22px 38px;border-radius:14px;font-size:30px;
-            letter-spacing:.08em;color:#e6edf6;background:rgba(10,14,22,.93);
+            letter-spacing:.08em;color:#ffffff;background:rgba(10,14,22,.93);
             border:1px solid #2b3d57;pointer-events:none;text-align:center}
   #lockHint small{display:block;margin-top:12px;font-size:15px;letter-spacing:.1em;
-                  color:#66788f}
+                  color:#ffffff}
 
-  #tut{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:9;
+  /* Two positions, one box. Centred while an instruction is being read, and on
+     the top rail once it is being carried out - the bottom is inside the field
+     of play and the box was covering it. 34px clears the build watermark and
+     the developer flag. */
+  /* One transition serves both directions: adding .fade takes the WELL DONE
+     card out, and removing it on the next repaint brings the new
+     instruction in. */
+  #tut{position:fixed;left:50%;z-index:9;transition:opacity .3s ease;
        display:none;min-width:420px;max-width:70vw;padding:18px 26px;text-align:center;
        border-radius:12px;background:rgba(10,14,22,.92);border:1px solid #24344a;
        pointer-events:none}
   body.tutorial #tut{display:block}
-  #tutText{font-size:20px;line-height:1.45;color:#e6edf6;letter-spacing:.04em}
+  #tut.mid{top:50%;transform:translate(-50%,-50%)}
+  #tut.top{top:34px;transform:translateX(-50%)}
+  #tut.fade{opacity:0}
+  #tutDiagram{margin-top:14px}
+  #tutDiagram svg{display:block;margin:0 auto}
+  #tutCount{margin-top:12px;font-size:16px;font-weight:600;color:#22d3ee;
+            letter-spacing:.12em;font-variant-numeric:tabular-nums}
+  /* The tutorial's own box has nothing left to say once the end card is up. */
+  body.tutdone #tut{display:none!important}
+  #tutReady{margin-top:14px;font-size:14px;color:#ffffff;letter-spacing:.08em}
+  #tutReady b{color:#22d3ee;font-weight:600}
+  /* The tutorial says CLICK ANYWHERE ON THE FIELD itself. Two cards asking for
+     the same click, one centred and one below, was the first thing a new
+     player saw. */
+  body.tutorial #lockHint{display:none!important}
+  #tutText{font-size:20px;line-height:1.45;color:#ffffff;letter-spacing:.04em}
   #tutText b{color:#22d3ee;font-weight:600}
-  #tutHint{margin-top:8px;font-size:13px;color:#66788f;letter-spacing:.08em}
+  #tutHint{margin-top:8px;font-size:14px;color:#ffffff;letter-spacing:.08em}
   #tutDots{display:flex;gap:7px;justify-content:center;margin-top:14px}
   #tutDots i{width:7px;height:7px;border-radius:50%;background:#24344a;display:block}
   #tutDots i.on{background:#22d3ee}
@@ -136,45 +154,54 @@
                 background:rgba(12,17,26,.98);box-shadow:0 24px 70px rgba(0,0,0,.6);
                 text-align:center}
   #pause .pcard.hidden{display:none}
-  #pause h2{margin:0 0 18px;font-size:14px;letter-spacing:.2em;color:#e6edf6;font-weight:600}
-  #pause button{width:100%;padding:12px;margin-bottom:9px;font:inherit;font-size:11px;
+  #pause h2{margin:0 0 18px;font-size:14px;letter-spacing:.2em;color:#ffffff;font-weight:600}
+  #pause button{width:100%;padding:12px;margin-bottom:9px;font:inherit;font-size:14px;
                 letter-spacing:.13em;border-radius:8px;cursor:pointer;
-                background:#151d2b;color:#c9d4e2;border:1px solid #263449}
-  #pause button:hover{border-color:#22d3ee;color:#e6edf6}
+                background:#151d2b;color:#ffffff;border:1px solid #263449}
+  #pause button:hover{border-color:#22d3ee;color:#ffffff}
   #pause .row{display:flex;gap:9px}
   #pause .row button{flex:1}
   #pauseControls{width:440px;text-align:left}
   #pauseControls h2{text-align:center}
+  #pauseControls h3{margin:18px 0 10px;font-size:14px;letter-spacing:.2em;
+                    font-weight:600;color:#ffffff;text-align:center}
   #pauseControls dl{display:grid;grid-template-columns:auto 1fr;gap:10px 18px;
-                    margin:0 0 20px;font-size:13.5px;line-height:1.45}
+                    margin:0 0 20px;font-size:14px;line-height:1.45}
   #pauseControls dt{color:#22d3ee;font-weight:600;white-space:nowrap}
-  #pauseControls dd{margin:0;color:#c9d4e2}
-  #pause .sl{display:flex;align-items:center;gap:11px;margin-bottom:11px;font-size:10.5px;
-             letter-spacing:.14em;color:#66788f}
+  #pauseControls dd{margin:0;color:#ffffff}
+  #pause .sl{display:flex;align-items:center;gap:11px;margin-bottom:11px;font-size:14px;
+             letter-spacing:.14em;color:#ffffff}
   #pause .sl input{flex:1}
-  #pause .sl .v{color:#c9d4e2;font-variant-numeric:tabular-nums;min-width:41px;text-align:right}
-  #pause p{margin:0 0 20px;font-size:13.5px;line-height:1.6;color:#c9d4e2}
+  #pause .sl .v{color:#ffffff;font-variant-numeric:tabular-nums;min-width:41px;text-align:right}
+  #pause p{margin:0 0 20px;font-size:14px;line-height:1.6;color:#ffffff}
 
-  #setup .msg{margin-top:13px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:16px}
+  #setup .msg{margin-top:13px;font-size:14px;line-height:1.6;color:#ffffff;min-height:16px}
   #menu .card{width:340px;padding:26px 26px 22px;border:1px solid #1d2939;border-radius:14px;
               background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.6);text-align:center}
-  #menu h1,#setup h1{margin:0 0 20px;font-size:30px;letter-spacing:.32em;font-weight:700;color:#e6edf6}
-  #menu button{width:100%;padding:11px;margin-bottom:9px;font:inherit;font-size:11px;
+  #menu h1,#setup h1{margin:0 0 20px;font-size:30px;letter-spacing:.32em;font-weight:700;color:#ffffff}
+  #menu button{width:100%;padding:11px;margin-bottom:9px;font:inherit;font-size:14px;
                letter-spacing:.13em;border-radius:8px;cursor:pointer;
-               background:#151d2b;color:#c9d4e2;border:1px solid #263449}
-  #menu button:hover:not(:disabled){border-color:#22d3ee;color:#e6edf6}
+               background:#151d2b;color:#ffffff;border:1px solid #263449}
+  #menu button:hover:not(:disabled){border-color:#22d3ee;color:#ffffff}
   #menu button:disabled{opacity:.4;cursor:default}
   #menu .join{display:flex;gap:7px}
-  #menu input{flex:1;min-width:0;padding:11px;font:inherit;font-size:12px;letter-spacing:.28em;
+  #menu input{flex:1;min-width:0;padding:11px;font:inherit;font-size:14px;letter-spacing:.28em;
               text-align:center;text-transform:uppercase;border-radius:8px;
               background:#0b1119;color:#e6edf6;border:1px solid #263449;outline:none}
   #menu input:focus{border-color:#22d3ee}
   #menu .join button{width:92px;margin:0}
-  #menu .msg{margin-top:14px;font-size:10.5px;line-height:1.6;color:#66788f;min-height:30px}
+  #menu .msg{margin-top:14px;font-size:14px;line-height:1.6;color:#ffffff;min-height:30px}
   #menu .code{display:block;margin-top:6px;font-size:26px;letter-spacing:.42em;color:#22d3ee}
 
   /* Above the menu's z-index on purpose: you want to check the build BEFORE
      connecting, not after. */
+  /* Loud on purpose. Developer mode changes what the game will do and it
+     persists across sessions, so it must never be something you are in without
+     knowing. Above everything, and it does not take clicks. */
+  #devFlag{position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:31;
+           padding:4px 14px 5px;border:1px solid #b45309;border-top:0;
+           border-radius:0 0 7px 7px;background:rgba(120,53,15,.92);color:#fdba74;
+           font-size:9.5px;letter-spacing:.22em;font-weight:600;pointer-events:none}
   #build{position:fixed;top:10px;left:14px;z-index:30;font-size:10px;letter-spacing:.14em;
          color:#3f4d61;pointer-events:none;text-shadow:0 1px 3px #000}
   #status{position:fixed;top:10px;right:14px;z-index:9;font-size:10px;letter-spacing:.1em;
@@ -187,15 +214,8 @@
 <div id="panel"></div>
 <div id="tag"></div>
 <div id="build"></div>
+<div id="devFlag" class="hidden">DEVELOPER MODE</div>
 <div id="status"></div>
-<div id="sensBar">
-  <span>MOUSE</span>
-  <input id="sensPlay" type="range" min="0.2" max="3" step="0.05" value="1">
-  <span class="v" id="sensPlayVal">1.00</span>
-  <span>SOUND</span>
-  <input id="volPlay" type="range" min="0" max="1" step="0.05" value="0.7">
-  <span class="v" id="volPlayVal">70</span>
-</div>
 <div id="lockHint"><span id="lockMain">CLICK TO START</span><small id="lockSub">&nbsp;</small></div>
 <div id="pause">
   <div class="pcard" id="pauseMain">
@@ -203,6 +223,12 @@
     <button id="pResume">RESUME GAME</button>
     <button id="pControls">CONTROLS</button>
     <button id="pExit">EXIT GAME</button>
+    <div class="sl"><span>MOUSE SENSITIVITY</span>
+      <input id="sensPause" type="range" min="0.2" max="3" step="0.05" value="1">
+      <span class="v" id="sensPauseVal">1.00</span></div>
+    <div class="sl"><span>VOLUME</span>
+      <input id="volPause" type="range" min="0" max="1" step="0.05" value="0.7">
+      <span class="v" id="volPauseVal">70</span></div>
   </div>
 
   <div class="pcard hidden" id="pauseControls">
@@ -211,20 +237,47 @@
       <dt>Mouse</dt><dd>Move your paddle</dd>
       <dt>Wheel</dt><dd>Rotate your paddle</dd>
       <dt>Hold right-click</dt><dd>Finer rotation steps</dd>
-      <dt>Space</dt><dd>Switch to your other paddle</dd>
-      <dt>F</dt><dd>Serve</dd>
-      <dt>R</dt><dd>Reset the score</dd>
-      <dt>H</dt><dd>Settings panel</dd>
-      <dt>Tab</dt><dd>Swap teams (practice only)</dd>
+      <dt>Space</dt><dd>Switch paddles (two paddle mode)</dd>
       <dt>Esc</dt><dd>Pause</dd>
     </dl>
-    <div class="sl"><span>MOUSE</span>
-      <input id="sensPause" type="range" min="0.2" max="3" step="0.05" value="1">
-      <span class="v" id="sensPauseVal">1.00</span></div>
-    <div class="sl"><span>SOUND</span>
-      <input id="volPause" type="range" min="0" max="1" step="0.05" value="0.7">
-      <span class="v" id="volPauseVal">70</span></div>
+    <h3>PRACTICE ONLY</h3>
+    <dl>
+      <dt>F</dt><dd>Serve</dd>
+      <dt>R</dt><dd>Reset the score</dd>
+      <dt>H</dt><dd>Developer settings</dd>
+      <dt>Tab</dt><dd>Swap teams</dd>
+    </dl>
     <button id="pBack">BACK</button>
+  </div>
+
+  <div class="pcard hidden" id="pauseTutEnd">
+    <h2>GREAT JOB!</h2>
+    <p>That's everything. Now you can continue to practice alone, or try
+       playing against the computer to hone your skills.</p>
+    <div class="row">
+      <button id="tutPractice">PRACTICE</button>
+      <button id="tutVsAi">VS AI</button>
+    </div>
+  </div>
+
+  <div class="pcard hidden" id="pauseGauntOver">
+    <h2>GAME OVER</h2>
+    <p id="gauntOverLevel"></p>
+    <p id="gauntOverBest"></p>
+    <div class="row">
+      <button id="gauntAgain">RESTART</button>
+      <button id="gauntMenu">MAIN MENU</button>
+    </div>
+  </div>
+
+  <div class="pcard hidden" id="pauseGauntWin">
+    <h2>CONGRATULATIONS</h2>
+    <p>You beat the best AI that we have. You can continue in survival mode to
+       see how long you can stand.</p>
+    <div class="row">
+      <button id="gauntSurvive">SURVIVAL MODE</button>
+      <button id="gauntWinMenu">MAIN MENU</button>
+    </div>
   </div>
 
   <div class="pcard hidden" id="pauseExit">
@@ -239,12 +292,26 @@
 <div id="tut">
   <div id="tutText"></div>
   <div id="tutHint"></div>
+  <div id="tutDiagram"></div>
+  <div id="tutCount"></div>
+  <div id="tutReady"></div>
   <div id="tutDots"></div>
 </div>
 <div id="setup" class="hidden">
   <div class="card">
     <div id="setupOwner">
-      <h1>SETUP</h1>
+      <h1 id="setupTitle">SETUP</h1>
+      <div id="tuneRow" class="hidden">
+        <div class="lab">KEEP TUNED SETTINGS</div>
+        <div class="seg">
+          <button id="tuneNo">NO</button>
+          <button id="tuneYes">YES</button>
+        </div>
+      </div>
+      <div id="gauntBestRow" class="hidden">
+        <div class="lab">BEST LEVEL REACHED</div>
+        <div class="hint" id="gauntBestVal">none yet</div>
+      </div>
       <div id="diffRow" class="hidden">
         <div class="lab">DIFFICULTY</div>
         <input id="diffRange" type="range" min="1" max="10" step="1" value="10">
@@ -252,7 +319,7 @@
       </div>
       <div class="lab">PADDLES PER PLAYER</div>
       <div class="seg">
-        <button id="pd1">1</button>
+        <button id="pd1">1<small id="pd1Hint" class="hidden">START HERE</small></button>
         <button id="pd2">2</button>
       </div>
       <div id="ptRow">
@@ -272,12 +339,12 @@
       <div class="hint">The host is choosing the settings.</div>
     </div>
     <div class="sens">
-      <span>MOUSE</span>
+      <span>MOUSE SENSITIVITY</span>
       <input id="sensSetup" type="range" min="0.2" max="3" step="0.05" value="1">
       <span class="v" id="sensSetupVal">1.00</span>
     </div>
     <div class="sens" style="margin-top:12px;padding-top:0;border-top:0">
-      <span>SOUND</span>
+      <span>VOLUME</span>
       <input id="volSetup" type="range" min="0" max="1" step="0.05" value="0.7">
       <span class="v" id="volSetupVal">70</span>
     </div>
@@ -290,6 +357,7 @@
     <button id="btnTutorial">HOW TO PLAY</button>
     <button id="btnSolo">PRACTICE</button>
     <button id="btnAI">VS AI</button>
+    <button id="btnGauntlet">GAUNTLET</button>
     <button id="btnHost">HOST A GAME</button>
     <div class="join">
       <input id="codeIn" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false">
@@ -319,10 +387,11 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v16.5"></script>
-<script src="ai.js?v=v16.5"></script>
-<script src="audio.js?v=v16.5"></script>
-<script src="tutorial.js?v=v16.5"></script>
+<script src="shot.js?v=v18.2"></script>
+<script src="ai.js?v=v18.2"></script>
+<script src="gauntlet.js?v=v18.2"></script>
+<script src="audio.js?v=v18.2"></script>
+<script src="tutorial.js?v=v18.2"></script>
 <script>
 'use strict';
 
@@ -974,7 +1043,7 @@ const teamName = side => side > 0 ? 'BLUE' : 'RED';
    because that value is shared with the other modes and persisted. Visiting
    practice must not silently turn a hosted match endless too. */
 function inPractice() { return net.role === 'solo' && !AI.on; }
-function matchTarget() { return inPractice() ? 0 : MATCH.target; }
+function matchTarget() { return (inPractice() || gaunt.active) ? 0 : MATCH.target; }
 
 function matchOver(w) {
   const t = matchTarget();
@@ -995,6 +1064,10 @@ function award(w, side) {
   w.lastScorer = side;
   w.phase = PHASE.EXIT;
   w.phaseT = EXIT_MAX_T;
+  /* The gauntlet only reads this; it raises a flag and the frame loop acts on
+     it. Opening a menu from inside the simulation step would change the world
+     under a card that had already been drawn. */
+  gauntOnGoal(side);
 }
 
 function resetRound(w, clearScore) {
@@ -1761,6 +1834,14 @@ function drawHud() {
   const flash = world.phase !== PHASE.PLAY;
   ctx.globalAlpha = flash ? 1 : 0.75;
 
+  if (gaunt.active) {
+    drawGauntletHud(ctx, sx, sy, size);
+    drawAnnouncement();
+    drawTutorialGoals(ctx);
+    paintLockHint();
+    return;
+  }
+
   ctx.textAlign = 'right';
   ctx.fillStyle = world.lastScorer === -1 && flash ? '#ffffff' : goalColour(-1);
   ctx.fillText(String(scores['-1']), sx - gap, sy);
@@ -1782,6 +1863,7 @@ function drawHud() {
   }
 
   drawAnnouncement();
+  drawTutorialGoals(ctx);
   paintLockHint();
 }
 
@@ -1837,12 +1919,14 @@ function drawAnnouncement() {
   if (world.phase === PHASE.ANNOUNCE) {
     const size = Math.max(16, Math.round(view.scale * 0.55));
     ctx.font = `700 ${size}px ui-monospace, Consolas, monospace`;
+    const lvl = gauntAnnounce();
     const dead = !world.lastScorer;
-    ctx.fillStyle = dead ? '#8fa3bd' : goalColour(world.lastScorer);
+    ctx.fillStyle = lvl ? '#ffffff' : dead ? '#8fa3bd' : goalColour(world.lastScorer);
     // brief fade-in so it does not just snap on
     ctx.globalAlpha = Math.min(1, (ANNOUNCE_T - world.phaseT) / 0.18);
-    ctx.fillText(dead ? 'DEAD BALL — RE-SERVE'
-                      : `${teamName(world.lastScorer)} TEAM SCORED`, cx, cy);
+    ctx.fillText(lvl ? lvl
+                     : dead ? 'DEAD BALL — RE-SERVE'
+                            : `${teamName(world.lastScorer)} TEAM SCORED`, cx, cy);
   } else {
     const n = Math.max(1, Math.ceil(world.phaseT));
     const frac = world.phaseT - Math.floor(world.phaseT);      // 1 -> 0 within each second
@@ -1876,14 +1960,14 @@ function buildReadout() {
   const f = (n, d = 2) => n.toFixed(d).padStart(6);
   const out =
     `${fps.toFixed(0).padStart(3)} fps   ${String(stepsLastFrame).padStart(2)} steps/frame` +
-    (frozen ? '   <b style="color:#fdba74">FROZEN</b>' : '') + '<br>' +
+    (frozen && devTools() ? '   <b style="color:#fdba74">FROZEN</b>' : '') + '<br>' +
     `pos   ${f(p.x)}, ${f(p.y)} m<br>` +
     `angle ${f(p.a / DEG, 1)}&deg;  (target ${(p.ta / DEG).toFixed(1)})<br>` +
     `vel   ${f(Math.hypot(p.vx, p.vy))} m/s   max ${f(maxPaddleSpeed())}<br>` +
     `omega ${f(p.w / DEG, 1)} &deg;/s<br>` +
     `tip   ${f(Math.hypot(tip.vx, tip.vy))} m/s<br>` +
     `ball  ${f(Math.hypot(ball.vx, ball.vy))} m/s   spin ${f(ball.w / DEG, 0)} °/s<br>` +
-    `tick  srv ${server.active ? server.world.tick : '-'}   shown ${world.tick}<br>` +
+    `tick  ${soloDirect() ? 'solo' : 'srv'} ${soloDirect() ? world.tick : (server.active ? server.world.tick : '-')}   shown ${world.tick}<br>` +
     `pred  lead ${client.leadMin}-${client.leadMax} / want ${client.ahead}   ` +
     `drift ${client.drift}   replay ${client.replayed}<br>` +
     `err   ball ${(client.errBall * 1000).toFixed(0)}mm   ` +
@@ -1965,21 +2049,79 @@ canvas.addEventListener('wheel', e => {
   tutOnTurn(intent.ta - was, fineRotate);
 }, { passive: false });
 
+/* ---- THE DEVELOPER UNLOCK ------------------------------------------------
+   Every diagnostic is either an unfair advantage or a way to break a match, so
+   none of them answers outside practice unless this is armed.
+
+   Type the word anywhere - menu, setup or mid-match - and it toggles. It is
+   remembered per machine, so it is done once and not every session, and the
+   build watermark gains a DEV suffix so the state is never a guess.
+
+   No letter of the word is bound to anything, so spelling it cannot fire a
+   diagnostic on the way past.
+
+   Deliberately NOT in PREFS_KEYS: a version bump wipes stored settings whose
+   meaning changed, and this one has no meaning to get out of date. Being
+   re-locked by an unrelated upgrade would just be baffling. */
+const DEV_WORD = 'banjolab';
+let devUnlocked = false;
+try { devUnlocked = localStorage.getItem('banjoball.dev') === '1'; } catch (e) {}
+let devTyped = '';
+
+// Practice is always open; everywhere else needs the word.
+const devTools = () => inPractice() || devUnlocked;
+
+function paintBuild() {
+  $('build').textContent = BUILD;
+  $('devFlag').classList.toggle('hidden', !devUnlocked);
+}
+
+addEventListener('keydown', e => {
+  if (e.key.length !== 1) return;
+  devTyped = (devTyped + e.key.toLowerCase()).slice(-DEV_WORD.length);
+  if (devTyped !== DEV_WORD) return;
+  devTyped = '';
+  devUnlocked = !devUnlocked;
+  try { localStorage.setItem('banjoball.dev', devUnlocked ? '1' : '0'); } catch (e) {}
+  if (!devUnlocked) { document.body.classList.remove('debug'); frozen = false;
+                      keepTuning = false; resize(); }
+  paintTuning();
+  paintBuild();
+});
+
 addEventListener('keydown', e => {
   if (!running) return;          // menu keys are the menu's business
   const k = e.key.toLowerCase();
   if (k === ' ' || k === '.' || k === 'tab') e.preventDefault();
   if (e.repeat) return;
   keys.add(k);
-  if (k === 'p') frozen = !frozen;      // space now switches paddles
-  if (k === '.') { stepOnce = true; frozen = true; }
+  /* P and . stop the local simulation, which against another machine is a
+     silent desync rather than a pause. Behind the unlock with the rest. */
+  if ((k === 'p' || k === '.') && devTools()) {
+    if (k === 'p') frozen = !frozen;
+    else { stepOnce = true; frozen = true; }
+  }
   /* Practice only: take over the other team. The server reaches its clients
      through transport ends and each end is tagged with the side it drives, so
      switching means retagging our end — the simulation needs no notion of a
      player changing seats. */
   if (!controlsLive() && (k === ' ' || k === 'tab')) return;
 
-  if (k === 'tab' && net.role === 'solo') {
+  /* The diagnostics: serve on demand, wipe the score, the tuning panel,
+     change sides, and the two overlays that show what an opponent cannot see.
+     Each is either an unfair advantage or an outright desync, so none of them
+     answers outside practice unless the unlock is armed. Tab used to test only
+     for `solo`, which included VS AI, so it would hand you the computer's
+     paddles mid-match. */
+  if (!devTools() && (k === 'f' || k === 'r' || k === 'h' || k === 'tab' ||
+                      k === 'v' || k === 'g')) return;
+
+  // Tab swaps sides, and the tutorial names the goal it wants you to aim at by
+  // colour. Halfway through that is not the moment for the colours to change
+  // hands, so it is refused for the duration.
+  if (k === 'tab' && tutBlocksTab()) return;
+
+  if (k === 'tab') {
     mySide = -mySide;
     for (const l of server.links) if (l.kind === 'loopback') l.side = mySide;
 
@@ -1993,6 +2135,10 @@ addEventListener('keydown', e => {
     intent.tx = np.x; intent.ty = np.y; intent.ta = np.a;
     updateStatus();
   }
+
+  // A brief takes the space bar first, or the press that starts the
+  // switch-paddles step would also switch the paddles.
+  if (k === ' ' && tutSpace()) return;
 
   if (k === ' ' && MATCH.paddles > 1) {
     /* Take hold of the other paddle. The cursor moves to it rather than the
@@ -2009,8 +2155,9 @@ addEventListener('keydown', e => {
   if (k === '[') setSens(MOUSE.sens - 0.05);   // capture blocks the slider,
   if (k === ']') setSens(MOUSE.sens + 0.05);   // so keys work mid-match too
   if (k === 'escape') { if (paused) resumeGame(); else leaveGame(); return; }
-  if (k === 'f') { if (server.active) resetRound(server.world, false); }
-  if (k === 'r') { if (server.active) resetRound(server.world, true); }
+  const mayServe = running && (soloDirect() || server.active);
+  if (k === 'f') { if (mayServe) { resetRound(authWorld(), false); tutOnServe(); } }
+  if (k === 'r') { if (mayServe) resetRound(authWorld(), true); }
   if (k === 'v') opts.showVectors = !opts.showVectors;
   if (k === 'g') opts.showTarget = !opts.showTarget;
   if (k === 'h') { document.body.classList.toggle('debug'); resize(); }
@@ -2159,6 +2306,60 @@ function buildPanel() {
 }
 
 
+/* SOLO IS STEPPED IN PLACE.
+
+   Host and guest need an authoritative world and a predicted copy of it,
+   because two machines have to agree about a past they saw differently. One
+   machine has nothing to reconcile with, so solo does not pay for any of it:
+   no server, no client, no loopback, no input ring, no snapshots, no replay.
+   Just the world, stepped.
+
+   That is not a shortcut. The predicted copy was a SECOND world that agreed
+   with the first to within a tick, and every question about the AI or the
+   tutorial had to name which one it meant. Now there is one, and `world` means
+   what it says.
+
+   What stays shared is everything that IS the game: both paths end in
+   stepWorld, so physics, phases, goals and the dead-ball rule exist once. What
+   forks is only how a tick's inputs are gathered and who decides play may
+   begin. */
+function soloDirect() { return net.role === 'solo'; }
+
+/* The world that is allowed to change. Anything writing a rule into the
+   simulation - a re-serve, a dead ball - asks for this rather than naming a
+   world, so it is right in both modes without knowing which it is in. */
+function authWorld() { return soloDirect() ? world : server.world; }
+
+function stepLocal(dt) {
+  captureInto(liveInput[String(mySide)], dt);
+
+  /* Observe before stepping, so an observation is the world at the START of
+     the tick the AI would have been acting on. It runs whether or not an
+     opponent is switched on: perception costs almost nothing, and a ring that
+     only filled while the AI played would start every match blind. */
+  aiStep(world, -mySide, liveInput[String(-mySide)], dt);
+
+  // The ready gate. With one player at this keyboard the question of who still
+  // has to click in answers itself.
+  if (world.phase === PHASE.READY && intent.rdy) {
+    world.phase = PHASE.COUNT;
+    world.phaseT = COUNT_T;
+    pushEvent(world, 'count', 5, A.width / 2);
+  }
+
+  stepWorld(world, liveInput, dt);
+  checkDeadBall(world, dt);
+}
+
+// One tick, whichever shape this session is.
+function simStep(dt) {
+  simClock++;
+  if (soloDirect()) { stepLocal(dt); return; }
+  pumpLinks();
+  serverStepOnce(dt);
+  clientStepOnce(dt);
+}
+
 /* ---- loop -----------------------------------------------------------------
    Physics runs at a fixed rate, decoupled from the display, and the renderer
    interpolates between the last two poses. Variable-dt physics would make
@@ -2243,6 +2444,12 @@ function startGame(asTutorial) {
   if (running) return;
   running = true;
   document.body.classList.add('playing');
+  /* The debug view is a practice tool and body.debug survives a match, so
+     opening it in practice and then starting a real game would have carried
+     the panel straight in - past the H gate, which only stops you TOGGLING it.
+     Cleared on entry to anything that is not practice. */
+  if (!devTools()) document.body.classList.remove('debug');
+  if (!inPractice() && !(devUnlocked && keepTuning)) restoreTuning();
   hideMenu();
   hideSetup();
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -2277,16 +2484,28 @@ function startGame(asTutorial) {
   }
 
   if (asTutorial) tutStart(); else tutStop();
+  /* After restoreTuning, which resets AI and SHOT to their defaults - the
+     gauntlet's level has to be written on top of that, not under it. */
+  if (gaunt.armed) gauntStart(); else gauntStop();
 
-  if (net.role === 'guest') {
+  if (soloDirect()) {
+    /* Nothing to wire. The world set up above is the one that will be stepped,
+       so the phase it starts in is set here rather than inside serverStart. */
+    serverStop();
+    client.link = null;
+    world.phase = tut.active ? PHASE.HOLD : PHASE.READY;
+    world.phaseT = 0;
+    world.ballHidden = true;
+    for (const k of ['-1', '1']) liveInput[k].rdy = 0;
+  } else if (net.role === 'guest') {
     serverStop();
     clientAttach(net.link);
   } else {
-    serverStart(net.role === 'solo');
+    serverStart();
     const pair = makeLoopbackPair();
     serverAttach(pair[0], mySide);
     clientAttach(pair[1]);
-    if (net.role === 'host' && net.link) serverAttach(net.link, -mySide);
+    if (net.link) serverAttach(net.link, -mySide);
   }
 
   last = performance.now() / 1000;   // no giant first dt
@@ -2357,24 +2576,27 @@ function frame(nowMs) {
   if (fpsAcc > 0.25) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
 
   let steps = 0;
-  const holdSim = paused && !net.up;   // a local match stops; an online one cannot
+  // A local match stops; an online one cannot. A tutorial brief stops too:
+  // it is always solo, and reading is not something to do against a clock.
+  const holdSim = (paused && !net.up) || tutHold();
+
+  /* Read through devTools rather than the flag itself. opts.freezeOnShot sets
+     `frozen` from inside ai.js on every shot the AI commits to, and it is
+     reachable from the console with no key to gate it - so the gate goes on
+     the EFFECT, not only on the ways in. */
+  const froze = frozen && devTools();
+
   if (holdSim) {
     accumulator = 0;
-  } else if (!frozen) {
+  } else if (!froze) {
     accumulator += dt;
     while (accumulator >= FIXED_DT && steps < MAX_STEPS) {
-      simClock++;
-      pumpLinks();
-      serverStepOnce(FIXED_DT);
-      clientStepOnce(FIXED_DT);
+      simStep(FIXED_DT);
       accumulator -= FIXED_DT; steps++;
     }
     if (steps >= MAX_STEPS) accumulator = 0;
-  } else if (stepOnce) {
-    simClock++;
-    pumpLinks();
-    serverStepOnce(FIXED_DT);
-    clientStepOnce(FIXED_DT);
+  } else if (stepOnce && devTools()) {
+    simStep(FIXED_DT);
     steps = 1; stepOnce = false; accumulator = 0;
   }
   stepsLastFrame = steps;
@@ -2388,8 +2610,9 @@ function frame(nowMs) {
 
   pumpEvents();
   pumpTutorial(dt);
+  pumpGauntlet(dt);
 
-  renderAlpha = (frozen || holdSim) ? 1 : accumulator / FIXED_DT;
+  renderAlpha = (froze || holdSim) ? 1 : accumulator / FIXED_DT;
   render();
 
   if (world.phase === PHASE.WIN && world.phaseT <= 0) { endMatch(); return; }
@@ -2419,7 +2642,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v16.5';
+const BUILD = 'v18.2';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2527,7 +2750,7 @@ function unpackWorld(w, a) {
   }
 }
 
-function serverStart(soloish) {
+function serverStart() {
   const w = server.world;
   copyWorld(w, makeWorld());
   if (tut.active) {
@@ -3100,13 +3323,37 @@ const randomCode = () => Array.from({ length: 4 },
 
 function setMsg(html) { $('netMsg').innerHTML = html; }
 function hideMenu() { $('menu').classList.add('hidden'); }
-function showMenu() { $('menu').classList.remove('hidden'); hideSetup(); }
+function showMenu() { pendingTutorial = false; pendingGauntlet = false;
+                     $('menu').classList.remove('hidden'); hideSetup(); }
 function hideSetup() { $('setup').classList.add('hidden'); }
 
 /* The lobby. Reached once there is someone to play against — or straight away
    in practice — and returned to after a match. The host owns the settings and
    the guest waits, which avoids having to resolve two people editing the same
    number. */
+/* Which lobby the setup card is currently being. Cleared by every other way
+   into it, so a tutorial abandoned at the card cannot start the next game as a
+   tutorial. */
+let pendingTutorial = false;
+let pendingGauntlet = false;
+
+function paintSetupMode() {
+  $('setupTitle').textContent = pendingTutorial ? 'TUTORIAL SETUP'
+                              : pendingGauntlet ? 'GAUNTLET SETUP' : 'SETUP';
+  $('btnStart').textContent   = pendingTutorial ? 'START TUTORIAL'
+                              : pendingGauntlet ? 'START GAUNTLET' : 'START MATCH';
+  // Only a first-timer needs telling which one to pick.
+  $('pd1Hint').classList.toggle('hidden', !pendingTutorial);
+
+  // The gauntlet sets its own difficulty and has no target to reach, so both
+  // of those rows are meaningless on its card. The best level takes their place.
+  $('gauntBestRow').classList.toggle('hidden', !pendingGauntlet);
+  if (pendingGauntlet) {
+    const b = gauntLoadBest();
+    $('gauntBestVal').textContent = b ? 'level ' + b : 'none yet';
+  }
+}
+
 function showSetup() {
   hideMenu();
   $('setup').classList.remove('hidden');
@@ -3116,7 +3363,8 @@ function showSetup() {
   $('setupOwner').classList.toggle('hidden', !owner);
   $('setupWait').classList.toggle('hidden', owner);
   $('setupMsg').innerHTML = '';
-  if (owner) { paintTarget(); paintPaddles(); paintDifficulty(); }
+  paintSetupMode();
+  if (owner) { paintTarget(); paintPaddles(); paintDifficulty(); paintTuning(); }
 }
 
 /* ==========================================================================
@@ -3140,13 +3388,19 @@ function pausePanel(which) {
   $('pauseMain').classList.toggle('hidden', which !== 'main');
   $('pauseControls').classList.toggle('hidden', which !== 'controls');
   $('pauseExit').classList.toggle('hidden', which !== 'exit');
+  $('pauseTutEnd').classList.toggle('hidden', which !== 'tutend');
+  $('pauseGauntOver').classList.toggle('hidden', which !== 'gauntover');
+  $('pauseGauntWin').classList.toggle('hidden', which !== 'gauntwin');
 }
 
 function openPause() {
   if (paused) return;
   paused = true;
   document.body.classList.add('paused');
-  pausePanel('main');
+  /* A finished tutorial releases the mouse, which lands here - the lock is
+     lost, so the game pauses. That is the right behaviour and the wrong card:
+     the player is not pausing, they are done. Same menu, different panel. */
+  pausePanel(tutFinished() ? 'tutend' : 'main');
   $('pResume').textContent = net.up ? 'RETURN TO GAME' : 'RESUME GAME';
 }
 
@@ -3154,6 +3408,9 @@ function openPause() {
    success. Closing it here instead would leave a player with no menu and no
    control on the browser's brief refusal to re-lock right after an escape. */
 function resumeGame() {
+  // There is nothing to resume into once the tutorial is over, and re-taking
+  // the mouse would strand the player with no menu and no lesson.
+  if (tutFinished() || gauntShown()) return;
   if (canvas.requestPointerLock) canvas.requestPointerLock();
 }
 
@@ -3162,26 +3419,28 @@ $('pControls').addEventListener('click', () => pausePanel('controls'));
 $('pBack').addEventListener('click', () => pausePanel('main'));
 $('pExit').addEventListener('click', () => pausePanel('exit'));
 $('pExitNo').addEventListener('click', () => pausePanel('main'));
+$('tutPractice').addEventListener('click', () => tutFinishTo(false));
+$('tutVsAi').addEventListener('click', () => tutFinishTo(true));
+$('gauntAgain').addEventListener('click', gauntRestart);
+$('gauntMenu').addEventListener('click', gauntQuit);
+$('gauntSurvive').addEventListener('click', gauntContinueSurvival);
+$('gauntWinMenu').addEventListener('click', gauntQuit);
 $('pExitYes').addEventListener('click', () => { paused = false;
   document.body.classList.remove('paused'); leaveGame(); });
 
 function paintSens() {
   const v = MOUSE.sens.toFixed(2);
   $('sensSetup').value = MOUSE.sens;
-  $('sensPlay').value = MOUSE.sens;
   $('sensPause').value = MOUSE.sens;
   $('sensSetupVal').textContent = v;
-  $('sensPlayVal').textContent = v;
   $('sensPauseVal').textContent = v;
 }
 
 function paintVolume() {
   const pct = Math.round(AUDIO.vol * 100);
   $('volSetup').value = AUDIO.vol;
-  $('volPlay').value = AUDIO.vol;
   $('volPause').value = AUDIO.vol;
   $('volSetupVal').textContent = pct;
-  $('volPlayVal').textContent = pct;
   $('volPauseVal').textContent = pct;
 }
 
@@ -3194,8 +3453,38 @@ function setSens(v) {
 /* Only meaningful against the computer, so it is hidden the rest of the time
    rather than greyed — there is no version of a two-human match where a
    difficulty setting means anything. */
+/* Tuning is a practice tool, so it does not follow you into a real game: the
+   panel values go back to the file defaults on entry to anything that is not
+   practice. Without that, an evening spent moving sliders in practice would
+   quietly become the physics of the next match - and on a HOST it is worse
+   than quietly, because sendConfig pushes A, FEEL, PHYS and MATCH to the guest
+   every second, so your tuning becomes theirs too.
+
+   Developer mode can opt out, since testing a change means playing with it.
+   Session-only and defaulting to NO: a persisted YES is exactly the setting
+   you would forget you had left on. */
+let keepTuning = false;
+
+function paintTuning() {
+  $('tuneRow').classList.toggle('hidden', !devUnlocked);
+  $('tuneNo').classList.toggle('on', !keepTuning);
+  $('tuneYes').classList.toggle('on', keepTuning);
+}
+
+function setKeepTuning(v) { keepTuning = v; paintTuning(); }
+
+/* The difficulty CHOICE is a game setting, not tuning, so it survives the
+   restore - the defaults put AI and SHOT back to level 10 and the chosen level
+   is then re-applied over them. */
+function restoreTuning() {
+  const lv = aiLevel;
+  for (const [k, v] of DEFAULTS) k.o[k.k] = v;
+  aiSetLevel(lv);
+  syncPanel();
+}
+
 function paintDifficulty() {
-  $('diffRow').classList.toggle('hidden', !AI.on);
+  $('diffRow').classList.toggle('hidden', !AI.on || pendingGauntlet);
   $('diffRange').value = aiLevel;
   $('diffHint').textContent = aiLevel === 10 ? 'level 10 — as hard as it plays'
                             : aiLevel === 1  ? 'level 1 — slow, and misses a lot'
@@ -3232,7 +3521,7 @@ function paintTarget() {
   /* Practice alone has nobody to beat, so a target to beat them to is noise on
      the card. Hidden for that mode only — against the computer it is a real
      setting, and in a hosted match it is the whole shape of the game. */
-  $('ptRow').classList.toggle('hidden', inPractice());
+  $('ptRow').classList.toggle('hidden', inPractice() || pendingGauntlet);
 
   const t = MATCH.target;
   $('ptVal').textContent = t === 0 ? '∞' : t;
@@ -3251,7 +3540,10 @@ function beginMatch() {
   if (net.role === 'guest') return;             // only the host may start
   if (net.role === 'host') send({ t: 'start', m: MATCH });
   hideSetup();
-  startGame();
+  if (pendingGauntlet) { gauntBegin(); return; }
+  const asTut = pendingTutorial;
+  pendingTutorial = false;
+  startGame(asTut);
 }
 
 function updateStatus() {
@@ -3312,7 +3604,7 @@ function hostGame() {
   if (!peerAvailable()) return;
   net.role = 'host';
   mySide = 1;
-  AI.on = false;                      // a human is on the way
+  AI.on = false; pendingTutorial = pendingGauntlet = false;    // a human is on the way
   net.code = randomCode();
   setMsg('Opening room&hellip;');
   net.peer = new Peer(PEER_PREFIX + net.code, PEER_OPTS);
@@ -3336,7 +3628,7 @@ function joinGame() {
   if (code.length !== 4) { setMsg('Enter the four-character room code.'); return; }
   net.role = 'guest';
   mySide = -1;
-  AI.on = false;
+  AI.on = false; pendingTutorial = pendingGauntlet = false;
   net.code = code;
   setMsg('Connecting to ' + code + '&hellip;');
   net.peer = new Peer(undefined, PEER_OPTS);
@@ -3422,28 +3714,45 @@ function onData(d) {
   }
 }
 
-$('build').textContent = BUILD;
+paintBuild();
 
 $('btnSolo').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; AI.on = false; updateStatus(); showSetup();
+  net.role = 'solo'; mySide = 1; AI.on = false;
+  pendingTutorial = pendingGauntlet = false;
+  updateStatus(); showSetup();
 });
 
 /* AI.on selects the mode and is deliberately NOT reset per match: finishing a
    match returns to the lobby, and starting another there should keep you
    playing whoever you chose to play. The menu handlers are the only thing that
    changes it. */
-$('btnAI').addEventListener('click', function () {
+$('btnGauntlet').addEventListener('click', function () {
   net.role = 'solo'; mySide = 1; AI.on = true;
+  pendingGauntlet = true; pendingTutorial = false;
   aiInit();
   updateStatus(); showSetup();
 });
 
+$('btnAI').addEventListener('click', function () {
+  net.role = 'solo'; mySide = 1; AI.on = true;
+  pendingTutorial = pendingGauntlet = false;
+  aiInit();
+  updateStatus(); showSetup();
+});
+
+/* The tutorial used to go straight in, on the reasoning that a lobby is one
+   more thing to explain before explaining anything. It gets one now: paddles
+   per player changes what the tutorial is teaching, and sensitivity and volume
+   are worth setting before a lesson rather than during one.
+
+   Same card as practice, so there is nothing new to learn about it - only the
+   title and the start button read differently. Difficulty and points to win
+   hide themselves already: the first wants AI.on, the second is hidden
+   whenever inPractice(), and a tutorial is practice by that test. */
 $('btnTutorial').addEventListener('click', function () {
-  // Straight in: a lobby would be one more thing to explain before explaining
-  // anything.
-  net.role = 'solo'; mySide = 1; AI.on = false; updateStatus();
-  hideMenu();
-  startGame(true);
+  net.role = 'solo'; mySide = 1; AI.on = false;
+  pendingTutorial = true; pendingGauntlet = false;
+  updateStatus(); showSetup();
 });
 $('btnStart').addEventListener('click', beginMatch);
 $('pd1').addEventListener('click', () => setPaddles(1));
@@ -3452,10 +3761,10 @@ $('ptMinus').addEventListener('click', () => setTarget(MATCH.target - 1));
 $('ptPlus').addEventListener('click', () => setTarget(MATCH.target + 1));
 $('ptRange').addEventListener('input', e => setTarget(parseInt(e.target.value, 10)));
 $('diffRange').addEventListener('input', e => setDifficulty(parseInt(e.target.value, 10)));
+$('tuneNo').addEventListener('click', () => setKeepTuning(false));
+$('tuneYes').addEventListener('click', () => setKeepTuning(true));
 $('sensSetup').addEventListener('input', e => setSens(parseFloat(e.target.value)));
-$('sensPlay').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 $('volSetup').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
-$('volPlay').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
 $('sensPause').addEventListener('input', e => setSens(parseFloat(e.target.value)));
 $('volPause').addEventListener('input', e => setVolume(parseFloat(e.target.value)));
 

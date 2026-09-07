@@ -114,14 +114,22 @@ let aiLevel = 10;             // what the defaults already are, so nothing to ap
    Whether linear is RIGHT is a separate question and a tuning one: reaction in
    particular has outsized effect and may want a curve, which would go here as
    a per-key easing rather than as a different structure. */
-function aiSetLevel(n) {
-  const lvl = Math.max(1, Math.min(10, Math.round(n)));
-  const t = (lvl - 1) / 9;
+/* The ladder as a FRACTION of itself: 0 is level 1, 1 is level 10. The
+   difficulty slider works in whole levels and the gauntlet works in hundredths
+   of the same line, so both end up here - one interpolation, one pair of
+   endpoints, and no way for the two to drift apart. */
+function aiSetLevelT(t) {
+  const f = t < 0 ? 0 : t > 1 ? 1 : t;
   const lo = AI_LEVELS[1], hi = AI_LEVELS[10];
   for (const [name, obj] of [['AI', AI], ['SHOT', SHOT]]) {
     const a = lo[name], b = hi[name];
-    for (const k in a) obj[k] = a[k] + (b[k] - a[k]) * t;
+    for (const k in a) obj[k] = a[k] + (b[k] - a[k]) * f;
   }
+}
+
+function aiSetLevel(n) {
+  const lvl = Math.max(1, Math.min(10, Math.round(n)));
+  aiSetLevelT((lvl - 1) / 9);
   aiLevel = lvl;
 }
 
