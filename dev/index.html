@@ -362,10 +362,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v17.9-dev"></script>
-<script src="ai.js?v=v17.9-dev"></script>
-<script src="audio.js?v=v17.9-dev"></script>
-<script src="tutorial.js?v=v17.9-dev"></script>
+<script src="shot.js?v=v18.0-dev"></script>
+<script src="ai.js?v=v18.0-dev"></script>
+<script src="audio.js?v=v18.0-dev"></script>
+<script src="tutorial.js?v=v18.0-dev"></script>
 <script>
 'use strict';
 
@@ -1927,7 +1927,7 @@ function buildReadout() {
     `omega ${f(p.w / DEG, 1)} &deg;/s<br>` +
     `tip   ${f(Math.hypot(tip.vx, tip.vy))} m/s<br>` +
     `ball  ${f(Math.hypot(ball.vx, ball.vy))} m/s   spin ${f(ball.w / DEG, 0)} °/s<br>` +
-    `tick  srv ${server.active ? server.world.tick : '-'}   shown ${world.tick}<br>` +
+    `tick  ${soloDirect() ? 'solo' : 'srv'} ${soloDirect() ? world.tick : (server.active ? server.world.tick : '-')}   shown ${world.tick}<br>` +
     `pred  lead ${client.leadMin}-${client.leadMax} / want ${client.ahead}   ` +
     `drift ${client.drift}   replay ${client.replayed}<br>` +
     `err   ball ${(client.errBall * 1000).toFixed(0)}mm   ` +
@@ -2115,8 +2115,9 @@ addEventListener('keydown', e => {
   if (k === '[') setSens(MOUSE.sens - 0.05);   // capture blocks the slider,
   if (k === ']') setSens(MOUSE.sens + 0.05);   // so keys work mid-match too
   if (k === 'escape') { if (paused) resumeGame(); else leaveGame(); return; }
-  if (k === 'f') { if (server.active) { resetRound(server.world, false); tutOnServe(); } }
-  if (k === 'r') { if (server.active) resetRound(server.world, true); }
+  const mayServe = running && (soloDirect() || server.active);
+  if (k === 'f') { if (mayServe) { resetRound(authWorld(), false); tutOnServe(); } }
+  if (k === 'r') { if (mayServe) resetRound(authWorld(), true); }
   if (k === 'v') opts.showVectors = !opts.showVectors;
   if (k === 'g') opts.showTarget = !opts.showTarget;
   if (k === 'h') { document.body.classList.toggle('debug'); resize(); }
@@ -2265,6 +2266,60 @@ function buildPanel() {
 }
 
 
+/* SOLO IS STEPPED IN PLACE.
+
+   Host and guest need an authoritative world and a predicted copy of it,
+   because two machines have to agree about a past they saw differently. One
+   machine has nothing to reconcile with, so solo does not pay for any of it:
+   no server, no client, no loopback, no input ring, no snapshots, no replay.
+   Just the world, stepped.
+
+   That is not a shortcut. The predicted copy was a SECOND world that agreed
+   with the first to within a tick, and every question about the AI or the
+   tutorial had to name which one it meant. Now there is one, and `world` means
+   what it says.
+
+   What stays shared is everything that IS the game: both paths end in
+   stepWorld, so physics, phases, goals and the dead-ball rule exist once. What
+   forks is only how a tick's inputs are gathered and who decides play may
+   begin. */
+function soloDirect() { return net.role === 'solo'; }
+
+/* The world that is allowed to change. Anything writing a rule into the
+   simulation - a re-serve, a dead ball - asks for this rather than naming a
+   world, so it is right in both modes without knowing which it is in. */
+function authWorld() { return soloDirect() ? world : server.world; }
+
+function stepLocal(dt) {
+  captureInto(liveInput[String(mySide)], dt);
+
+  /* Observe before stepping, so an observation is the world at the START of
+     the tick the AI would have been acting on. It runs whether or not an
+     opponent is switched on: perception costs almost nothing, and a ring that
+     only filled while the AI played would start every match blind. */
+  aiStep(world, -mySide, liveInput[String(-mySide)], dt);
+
+  // The ready gate. With one player at this keyboard the question of who still
+  // has to click in answers itself.
+  if (world.phase === PHASE.READY && intent.rdy) {
+    world.phase = PHASE.COUNT;
+    world.phaseT = COUNT_T;
+    pushEvent(world, 'count', 5, A.width / 2);
+  }
+
+  stepWorld(world, liveInput, dt);
+  checkDeadBall(world, dt);
+}
+
+// One tick, whichever shape this session is.
+function simStep(dt) {
+  simClock++;
+  if (soloDirect()) { stepLocal(dt); return; }
+  pumpLinks();
+  serverStepOnce(dt);
+  clientStepOnce(dt);
+}
+
 /* ---- loop -----------------------------------------------------------------
    Physics runs at a fixed rate, decoupled from the display, and the renderer
    interpolates between the last two poses. Variable-dt physics would make
@@ -2390,15 +2445,24 @@ function startGame(asTutorial) {
 
   if (asTutorial) tutStart(); else tutStop();
 
-  if (net.role === 'guest') {
+  if (soloDirect()) {
+    /* Nothing to wire. The world set up above is the one that will be stepped,
+       so the phase it starts in is set here rather than inside serverStart. */
+    serverStop();
+    client.link = null;
+    world.phase = tut.active ? PHASE.HOLD : PHASE.READY;
+    world.phaseT = 0;
+    world.ballHidden = true;
+    for (const k of ['-1', '1']) liveInput[k].rdy = 0;
+  } else if (net.role === 'guest') {
     serverStop();
     clientAttach(net.link);
   } else {
-    serverStart(net.role === 'solo');
+    serverStart();
     const pair = makeLoopbackPair();
     serverAttach(pair[0], mySide);
     clientAttach(pair[1]);
-    if (net.role === 'host' && net.link) serverAttach(net.link, -mySide);
+    if (net.link) serverAttach(net.link, -mySide);
   }
 
   last = performance.now() / 1000;   // no giant first dt
@@ -2484,18 +2548,12 @@ function frame(nowMs) {
   } else if (!froze) {
     accumulator += dt;
     while (accumulator >= FIXED_DT && steps < MAX_STEPS) {
-      simClock++;
-      pumpLinks();
-      serverStepOnce(FIXED_DT);
-      clientStepOnce(FIXED_DT);
+      simStep(FIXED_DT);
       accumulator -= FIXED_DT; steps++;
     }
     if (steps >= MAX_STEPS) accumulator = 0;
   } else if (stepOnce && devTools()) {
-    simClock++;
-    pumpLinks();
-    serverStepOnce(FIXED_DT);
-    clientStepOnce(FIXED_DT);
+    simStep(FIXED_DT);
     steps = 1; stepOnce = false; accumulator = 0;
   }
   stepsLastFrame = steps;
@@ -2540,7 +2598,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v17.9-dev';
+const BUILD = 'v18.0-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -2648,7 +2706,7 @@ function unpackWorld(w, a) {
   }
 }
 
-function serverStart(soloish) {
+function serverStart() {
   const w = server.world;
   copyWorld(w, makeWorld());
   if (tut.active) {
