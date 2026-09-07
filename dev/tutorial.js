@@ -82,6 +82,7 @@ const TUT_SPIN_ARC    = Math.PI;     // radians inside the window
 const TUT_SPIN_WINDOW = 0.5;         // seconds
 const TUT_SPIN_LOCK   = 0.35;        // one flick counts once, however long it runs on
 const TUT_SPINS       = 3;
+const TUT_HITS        = 3;
 const TUT_GOALS       = 3;
 
 /* The wheel turns in 30 degree steps. A tolerance under half a fine step keeps
@@ -190,17 +191,22 @@ const STEPS = [
     skip: () => MATCH.paddles < 2,
   },
   {
-    text: 'Now <b>hit the ball</b>.',
-    hint: 'swing into it — a moving paddle adds pace, a still one only returns it',
-    enter: () => { const w = server.world; w.phase = PHASE.PLAY; w.ballHidden = false; serve(w); },
-    done: () => tut.hits >= 3,
-  },
-  {
+    /* This is what puts the ball in play, so nothing auto-serves. The world has
+       been in PHASE.HOLD since the tutorial began; F calls resetRound, which
+       serves and starts it. Being the first ball of the lesson and the lesson
+       about F at the same time means the player never watches a serve they did
+       not ask for. */
     text: '<b>During practice mode</b>, you can press <b>F</b> to re-serve the ball. Try it now.',
     hint: 'the ball drops again from the middle, whatever it was doing',
     hold: 0.5,
-    praise: false,          // straight on: the next card is the reason for this one
+    praise: false,          // straight on: hitting it is the point of serving it
     done: () => tut.serves >= 1,
+  },
+  {
+    text: 'Now <b>hit the ball</b>.',
+    hint: 'press <b>F</b> to re-serve the ball if you need to reset',
+    count: () => 'Touches ' + Math.min(tut.hits, TUT_HITS) + '/' + TUT_HITS,
+    done: () => tut.hits >= TUT_HITS,
   },
   {
     /* Red is safe to name because Tab is disabled for the whole tutorial, so
