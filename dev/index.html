@@ -127,7 +127,17 @@
   #tut.fade{opacity:0}
   #tutDiagram{margin-top:14px}
   #tutDiagram svg{display:block;margin:0 auto}
+  #tutCount{margin-top:12px;font-size:16px;font-weight:600;color:#22d3ee;
+            letter-spacing:.12em;font-variant-numeric:tabular-nums}
   #tutReady{margin-top:14px;font-size:14px;color:#ffffff;letter-spacing:.08em}
+  #tutButtons{display:flex;gap:9px;margin-top:18px}
+  #tutButtons button{flex:1;padding:12px;font:inherit;font-size:14px;letter-spacing:.13em;
+                     border-radius:8px;cursor:pointer;background:#151d2b;color:#ffffff;
+                     border:1px solid #263449}
+  #tutButtons button:hover{border-color:#22d3ee}
+  /* The box ignores the mouse everywhere except the finish card, which is the
+     only one with anything to press. */
+  #tut.act{pointer-events:auto}
   #tutReady b{color:#22d3ee;font-weight:600}
   /* The tutorial says CLICK ANYWHERE ON THE FIELD itself. Two cards asking for
      the same click, one centred and one below, was the first thing a new
@@ -259,7 +269,9 @@
   <div id="tutText"></div>
   <div id="tutHint"></div>
   <div id="tutDiagram"></div>
+  <div id="tutCount"></div>
   <div id="tutReady"></div>
+  <div id="tutButtons"></div>
   <div id="tutDots"></div>
 </div>
 <div id="setup" class="hidden">
@@ -347,10 +359,10 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v17.6-dev"></script>
-<script src="ai.js?v=v17.6-dev"></script>
-<script src="audio.js?v=v17.6-dev"></script>
-<script src="tutorial.js?v=v17.6-dev"></script>
+<script src="shot.js?v=v17.7-dev"></script>
+<script src="ai.js?v=v17.7-dev"></script>
+<script src="audio.js?v=v17.7-dev"></script>
+<script src="tutorial.js?v=v17.7-dev"></script>
 <script>
 'use strict';
 
@@ -2061,6 +2073,11 @@ addEventListener('keydown', e => {
   if (!devTools() && (k === 'f' || k === 'r' || k === 'h' || k === 'tab' ||
                       k === 'v' || k === 'g')) return;
 
+  // Tab swaps sides, and the tutorial names the goal it wants you to aim at by
+  // colour. Halfway through that is not the moment for the colours to change
+  // hands, so it is refused for the duration.
+  if (k === 'tab' && tutBlocksTab()) return;
+
   if (k === 'tab') {
     mySide = -mySide;
     for (const l of server.links) if (l.kind === 'loopback') l.side = mySide;
@@ -2095,7 +2112,7 @@ addEventListener('keydown', e => {
   if (k === '[') setSens(MOUSE.sens - 0.05);   // capture blocks the slider,
   if (k === ']') setSens(MOUSE.sens + 0.05);   // so keys work mid-match too
   if (k === 'escape') { if (paused) resumeGame(); else leaveGame(); return; }
-  if (k === 'f') { if (server.active) resetRound(server.world, false); }
+  if (k === 'f') { if (server.active) { resetRound(server.world, false); tutOnServe(); } }
   if (k === 'r') { if (server.active) resetRound(server.world, true); }
   if (k === 'v') opts.showVectors = !opts.showVectors;
   if (k === 'g') opts.showTarget = !opts.showTarget;
@@ -2520,7 +2537,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v17.6-dev';
+const BUILD = 'v17.7-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
