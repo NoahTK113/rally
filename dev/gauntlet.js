@@ -226,13 +226,10 @@ function drawGauntletHud(ctx, sx, sy, size) {
   ctx.fillStyle = '#ffffff';
   ctx.fillText('LEVEL ' + gaunt.level, sx, sy);
 
-  /* One subtitle slot, and survival outranks it: a run at the top of the
-     ladder has earned the more interesting label. Otherwise say plainly that
-     nothing is being recorded, rather than letting someone find out at the
-     end. */
-  const sub = gaunt.survival ? 'SURVIVAL MODE — MAXIMUM DIFFICULTY REACHED'
-            : runRanked()    ? ''
-                             : 'UNRANKED';
+  /* Ranked or not is said by the badge at the top of the window, which is up
+     for the whole run rather than only while the scoreboard is being read. All
+     that is left here is survival. */
+  const sub = gaunt.survival ? 'SURVIVAL MODE — MAXIMUM DIFFICULTY REACHED' : '';
   if (!sub) return;
   ctx.font = `600 ${Math.max(9, Math.round(size * 0.28))}px ui-monospace, Consolas, monospace`;
   ctx.fillStyle = '#ffffff';

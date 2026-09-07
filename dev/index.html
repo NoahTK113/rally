@@ -236,10 +236,16 @@
   /* Loud on purpose. Developer mode changes what the game will do and it
      persists across sessions, so it must never be something you are in without
      knowing. Above everything, and it does not take clicks. */
-  #devFlag{position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:31;
-           padding:4px 14px 5px;border:1px solid #b45309;border-top:0;
-           border-radius:0 0 7px 7px;background:rgba(120,53,15,.92);color:#fdba74;
-           font-size:9.5px;letter-spacing:.22em;font-weight:600;pointer-events:none}
+  /* Both badges share one strip. They used to be able to occupy the same
+     point, and a developer session is exactly the case where both are showing.
+     Above everything, and neither takes a click. */
+  #topFlags{position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:31;
+            display:flex;gap:8px;pointer-events:none}
+  #topFlags > div{padding:4px 14px 5px;border-top:0;border-radius:0 0 7px 7px;
+                  font-size:11px;letter-spacing:.22em;font-weight:600}
+  #devFlag{border:1px solid #b45309;background:rgba(120,53,15,.92);color:#fdba74}
+  #rankFlag{border:1px solid #0e7490;background:rgba(8,51,68,.94);color:#67e8f9}
+  #rankFlag.off{border-color:#b45309;background:rgba(120,53,15,.92);color:#fdba74}
   #build{position:fixed;top:10px;left:14px;z-index:30;font-size:10px;letter-spacing:.14em;
          color:#3f4d61;pointer-events:none;text-shadow:0 1px 3px #000}
   #status{position:fixed;top:10px;right:14px;z-index:9;font-size:10px;letter-spacing:.1em;
@@ -252,7 +258,10 @@
 <div id="panel"></div>
 <div id="tag"></div>
 <div id="build"></div>
-<div id="devFlag" class="hidden">DEVELOPER MODE</div>
+<div id="topFlags">
+  <div id="devFlag" class="hidden">DEVELOPER MODE</div>
+  <div id="rankFlag" class="hidden">UNRANKED</div>
+</div>
 <div id="status"></div>
 <div id="lockHint"><span id="lockMain">CLICK TO START</span><small id="lockSub">&nbsp;</small></div>
 <div id="pause">
@@ -458,12 +467,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v19.6-dev"></script>
-<script src="ai.js?v=v19.6-dev"></script>
-<script src="gauntlet.js?v=v19.6-dev"></script>
-<script src="profile.js?v=v19.6-dev"></script>
-<script src="audio.js?v=v19.6-dev"></script>
-<script src="tutorial.js?v=v19.6-dev"></script>
+<script src="shot.js?v=v19.7-dev"></script>
+<script src="ai.js?v=v19.7-dev"></script>
+<script src="gauntlet.js?v=v19.7-dev"></script>
+<script src="profile.js?v=v19.7-dev"></script>
+<script src="audio.js?v=v19.7-dev"></script>
+<script src="tutorial.js?v=v19.7-dev"></script>
 <script>
 'use strict';
 
@@ -2143,6 +2152,23 @@ let devTyped = '';
 // Practice is always open; everywhere else needs the word.
 const devTools = () => inPractice() || devUnlocked;
 
+/* RANKED or UNRANKED, always, wherever the run is. It is the one thing about
+   a gauntlet you cannot work out by looking at the field, and finding out at
+   the end is finding out too late.
+
+   Only during a gauntlet: everywhere else it would be answering a question
+   nobody asked. */
+function paintRankFlag() {
+  const el = $('rankFlag');
+  if (!el) return;
+  const show = running && gaunt.active;
+  el.classList.toggle('hidden', !show);
+  if (!show) return;
+  const ok = runRanked();
+  el.textContent = ok ? 'RANKED' : 'UNRANKED';
+  el.classList.toggle('off', !ok);
+}
+
 function paintBuild() {
   $('build').textContent = BUILD;
   $('devFlag').classList.toggle('hidden', !devUnlocked);
@@ -2679,7 +2705,7 @@ function frame(nowMs) {
   // The status chip carries live measurements now, so it has to be rewritten
   // rather than being painted once on connect.
   statusAcc += dt;
-  if (statusAcc > 0.25) { statusAcc = 0; updateStatus(); }
+  if (statusAcc > 0.25) { statusAcc = 0; updateStatus(); paintRankFlag(); }
 
   readoutAcc += dt;
   if (readoutAcc > 0.18) { readoutAcc = 0; readoutHold = buildReadout(); }
@@ -2754,7 +2780,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.6-dev';
+const BUILD = 'v19.7-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
