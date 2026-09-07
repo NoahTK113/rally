@@ -89,6 +89,7 @@
              letter-spacing:.14em;border-radius:8px;cursor:pointer;background:#151d2b;
              color:#ffffff;border:1px solid #22d3ee}
   #login .msg{margin-top:13px;font-size:14px;line-height:1.5;color:#fdba74;min-height:20px}
+  #login .hint{margin:16px 0 0;font-size:14px;line-height:1.5;text-align:left}
   /* Set apart from the menu proper: it is about you, not about starting a
      game, and the gap says so. */
   #account{margin-top:26px;padding-top:20px;border-top:1px solid #1c2838}
@@ -346,17 +347,17 @@
 
 <div id="login" class="hidden">
   <div class="card">
-    <h1>PROFILE</h1>
+    <h1 id="loginTitle">LOG IN</h1>
     <div class="lab">USERNAME</div>
     <input id="loginUser" maxlength="20" autocomplete="username"
            placeholder="username" spellcheck="false">
     <div class="lab" style="margin-top:14px">PASSWORD</div>
     <input id="loginPass" type="password" maxlength="72"
            autocomplete="current-password" placeholder="password">
+    <div class="hint" id="loginRules"></div>
     <div class="msg" id="loginMsg"></div>
     <button class="go" id="loginGo">LOG IN</button>
     <div class="row">
-      <button id="loginNew">CREATE ACCOUNT</button>
       <button id="loginBack">BACK</button>
     </div>
   </div>
@@ -457,12 +458,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v19.4-dev"></script>
-<script src="ai.js?v=v19.4-dev"></script>
-<script src="gauntlet.js?v=v19.4-dev"></script>
-<script src="profile.js?v=v19.4-dev"></script>
-<script src="audio.js?v=v19.4-dev"></script>
-<script src="tutorial.js?v=v19.4-dev"></script>
+<script src="shot.js?v=v19.5-dev"></script>
+<script src="ai.js?v=v19.5-dev"></script>
+<script src="gauntlet.js?v=v19.5-dev"></script>
+<script src="profile.js?v=v19.5-dev"></script>
+<script src="audio.js?v=v19.5-dev"></script>
+<script src="tutorial.js?v=v19.5-dev"></script>
 <script>
 'use strict';
 
@@ -2753,7 +2754,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.4-dev';
+const BUILD = 'v19.5-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3476,7 +3477,29 @@ function gateThrough() {
   showMenu();
 }
 
-function showLogin() {
+/* One card, two jobs. Signing in and signing up ask for the same two fields
+   and mean quite different things by them, so the card says which it is doing
+   rather than offering both and letting the player pick afterwards.
+
+   The rules belong to sign-up alone. On the way in they are noise - you either
+   know your password or you do not, and being told its shape does not help. */
+let loginMode = 'in';           // 'in' | 'new'
+
+function paintLogin() {
+  const isNew = loginMode === 'new';
+  $('loginTitle').textContent = isNew ? 'CREATE ACCOUNT' : 'LOG IN';
+  $('loginGo').textContent    = isNew ? 'CREATE ACCOUNT' : 'LOG IN';
+  // so a password manager offers to save on the way in, not on the way back
+  $('loginPass').setAttribute('autocomplete', isNew ? 'new-password' : 'current-password');
+  $('loginRules').innerHTML = isNew
+    ? 'Username: 3 to 20 characters, using lowercase letters, numbers, - or _.'
+      + '<br>Password: at least 8 characters.'
+    : '';
+  $('loginRules').style.display = isNew ? '' : 'none';
+}
+
+function showLogin(mode) {
+  loginMode = (mode === 'new') ? 'new' : 'in';
   /* The gate sits at z-index 21 and the login card at 19, so revealing the
      card without standing the gate down leaves it underneath: every click
      lands, nothing appears to happen. Whatever opens this has to close the
@@ -3486,6 +3509,7 @@ function showLogin() {
   $('login').classList.remove('hidden');
   $('loginMsg').textContent = '';
   $('loginPass').value = '';
+  paintLogin();
   $('loginUser').focus();
 }
 
@@ -4003,10 +4027,10 @@ paintDifficulty();
 paintSens();
 $('btnProfile').addEventListener('click', function () {
   if (signedIn()) { authSignOut(); return; }   // paintGate puts the door back
-  showLogin();
+  showLogin('in');
 });
-$('gateLogin').addEventListener('click', showLogin);
-$('gateNew').addEventListener('click', showLogin);
+$('gateLogin').addEventListener('click', () => showLogin('in'));
+$('gateNew').addEventListener('click', () => showLogin('new'));
 $('gateSkip').addEventListener('click', gateThrough);
 $('loginBack').addEventListener('click', function () {
   hideLogin();
@@ -4022,11 +4046,12 @@ function loginAttempt(fn) {
     showMenu();          // paintGate has already stood down
   });
 }
-$('loginGo').addEventListener('click', () => loginAttempt(authSignIn));
-$('loginNew').addEventListener('click', () => loginAttempt(authSignUp));
-$('loginPass').addEventListener('keydown', e => {
-  if (e.key === 'Enter') loginAttempt(authSignIn);
-});
+function loginSubmit() {
+  loginAttempt(loginMode === 'new' ? authSignUp : authSignIn);
+}
+$('loginGo').addEventListener('click', loginSubmit);
+$('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') loginSubmit(); });
+$('loginUser').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginPass').focus(); });
 
 $('btnHost').addEventListener('click', hostGame);
 $('btnJoin').addEventListener('click', joinGame);
