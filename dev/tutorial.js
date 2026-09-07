@@ -16,14 +16,21 @@
    no idea a tutorial is running, and every step is a text prompt plus a
    predicate over ordinary game state.
 
-   FOUR KINDS OF CARD, because a step that asks for something and a step that
+   FIVE KINDS OF CARD, because a step that asks for something and a step that
    only tells you something want different screens:
 
      brief   centred, world held      instruction, then "press space"
      task    top rail, world RUNNING  the same instruction while you do it
      praise  centred, world held      "Well done", three seconds, fades
      note    top rail, world held     something to read, space to move on
-     finish  centred, world held      the sign-off, with buttons out
+     finish  the PAUSE menu           the sign-off, with buttons out
+
+   The finish is the odd one. Every other card is read with the mouse captured
+   and dismissed with a key, so the box can ignore the pointer entirely. The
+   last one has buttons, which needs the mouse back - and releasing it pauses
+   the game, because losing the lock is exactly what pausing means here. So
+   rather than fight that, the finish IS a pause panel: the same menu the
+   player already knows, showing a different card.
 
    Reading wants the world still and the words in the middle where the eye
    already is. Doing wants the world running and the words out of the way,
@@ -230,7 +237,12 @@ function tutStop() {
   tut.active = false;
   tut.phase = 'start';
   document.body.classList.remove('tutorial');
+  document.body.classList.remove('tutdone');
 }
+
+// Whether the end card is the one showing. Read by openPause, which must offer
+// the sign-off rather than RESUME, and by resumeGame, which must refuse.
+function tutFinished() { return tut.active && tut.phase === 'finish'; }
 
 /* Counters are zeroed as a step BEGINS, not as it is set up. The mouse still
    moves while a brief is being read — the pointer is captured and the cursor
@@ -281,10 +293,17 @@ function tutEnterStep() {
   const kind = tutKindOf(s);
   tut.held = 0;
   tut.phase = kind === 'note' ? 'note' : kind === 'finish' ? 'finish' : 'brief';
-  /* The finish card has buttons, and a captured pointer cannot click one. The
-     lock is released as the card appears rather than when a button is pressed,
-     because the player has to be able to reach it. */
-  if (kind === 'finish' && document.exitPointerLock) document.exitPointerLock();
+  /* The finish hands over to the pause menu. Releasing the pointer is what
+     makes the buttons clickable, and it also pauses the game on its own - the
+     lock-loss handler treats a lost lock as a pause. Both calls are here
+     because whichever arrives first, the other is a no-op: openPause returns
+     early if already paused, and pausePanel only sets which card is up. */
+  if (kind === 'finish') {
+    document.body.classList.add('tutdone');
+    if (document.exitPointerLock) document.exitPointerLock();
+    openPause();
+    pausePanel('tutend');
+  }
   paintTutorial();
 }
 
@@ -315,21 +334,12 @@ function paintTutorial() {
   $('tutReady').innerHTML = brief ? TUT_READY : '';
   $('tutReady').style.display = brief ? '' : 'none';
 
-  $('tutButtons').innerHTML = finish
-    ? '<button id="tutPractice">PRACTICE</button><button id="tutVsAi">VS AI</button>'
-    : '';
-  $('tutButtons').style.display = finish ? '' : 'none';
-  if (finish) {
-    $('tutPractice').addEventListener('click', () => tutFinishTo(false));
-    $('tutVsAi').addEventListener('click', () => tutFinishTo(true));
-  }
-
   /* Centred for the cards that are only words; on the top rail for the ones
-     with something on the field to look at, whether or not it is moving. */
+     with something on the field to look at, whether or not it is moving. The
+     finish is neither — it is a pause panel, and body.tutdone hides this box. */
   const centred = start || brief || praise || finish;
   box.classList.toggle('mid', centred);
   box.classList.toggle('top', !centred);
-  box.classList.toggle('act', finish);       // only this one takes clicks
 
   let dots = '';
   for (let i = 0; i < STEPS.length; i++) {
@@ -342,6 +352,9 @@ function paintTutorial() {
    tears the session down and returns to the menu, so the mode is set after it
    rather than before, or showMenu would clear it again. */
 function tutFinishTo(vsAi) {
+  // Out of the pause the finish borrowed, before the session goes away.
+  paused = false;
+  document.body.classList.remove('paused');
   tutStop();
   leaveGame();
   net.role = 'solo';
