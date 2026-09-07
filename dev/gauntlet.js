@@ -25,6 +25,7 @@ const gaunt = {
   pending: null,    // 'over' | 'win' — raised inside the step, acted on next frame
   shown: false,     // a panel is up and the run is suspended
   best: 0,
+  cheated: false,   // the level was set by hand, so the high score must not learn from it
 };
 
 const GAUNT_TOP = 100;          // the strongest AI there is
@@ -63,6 +64,10 @@ function gauntLoadBest() {
 }
 
 function gauntSaveBest(L) {
+  /* A level reached by dragging a slider is not a level reached. The developer
+     panel can move the run wherever it likes; it just cannot write the record
+     while doing it. Cleared only by starting a fresh run. */
+  if (gaunt.cheated) return;
   if (L <= gaunt.best) return;
   gaunt.best = L;
   try { localStorage.setItem('banjoball.best', L); } catch (e) {}
@@ -75,6 +80,7 @@ function gauntStart() {
   gaunt.survival = false;
   gaunt.pending = null;
   gaunt.shown = false;
+  gaunt.cheated = false;
   gauntLoadBest();
   gauntApply();
 }
@@ -102,6 +108,18 @@ function gauntOnGoal(side) {
 
   gaunt.level++;
   gauntSaveBest(gaunt.level);
+  gauntApply();
+  syncPanel();       // the developer slider reads gaunt.level; keep it honest
+}
+
+/* The developer slider writes gaunt.level directly, so the opponent has to be
+   moved to match. Outside a run there is nothing to move and gauntStart resets
+   the level to 1 anyway, so it does nothing there rather than quietly
+   redefining the difficulty of a VS AI match. */
+function gauntSetLevelManually() {
+  gaunt.level = Math.max(1, Math.round(gaunt.level));
+  if (!gaunt.active) return;
+  gaunt.cheated = true;
   gauntApply();
 }
 
