@@ -185,9 +185,15 @@ function drawGauntletHud(ctx, sx, sy, size) {
   ctx.fillText('SURVIVAL MODE — MAXIMUM DIFFICULTY REACHED', sx, sy + size * 0.72);
 }
 
-// What the banner says when a goal goes in: the level you just reached, not
-// which team scored. There is only one team that can.
+/* What the banner says when YOU score: the level you just reached, rather than
+   which team scored.
+
+   Only when you score. lastScorer is 0 for a dead ball and -mySide when the AI
+   scores, and neither of those is a level change - a dead ball reads DEAD BALL
+   here exactly as it does in every other mode, because it means the same thing
+   in all of them. Claiming the banner for every announcement was the bug. */
 function gauntAnnounce() {
   if (!gaunt.active) return null;
+  if (world.lastScorer !== mySide) return null;
   return 'LEVEL ' + gaunt.level;
 }
