@@ -97,6 +97,24 @@
   #whoami b{color:#22d3ee;font-weight:600}
   #setup{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;
          background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
+  /* Absolutely positioned INSIDE #setup, so it is out of the flex flow and
+     the setup card stays centred in the window exactly as it was. The panel
+     occupies everything to the right of that card - half the window minus half
+     its width - and centres the leaderboard within it. */
+  #lbPanel{position:absolute;top:0;bottom:0;left:calc(50% + 170px);right:0;
+           display:flex;align-items:center;justify-content:center}
+  #lbCard{width:280px;display:flex;flex-direction:column}
+  #lbCard h1{font-size:15px !important;letter-spacing:.24em;margin:0 0 18px}
+  #lbTable{width:100%;border-collapse:collapse;font-size:14px;
+           font-variant-numeric:tabular-nums}
+  #lbTable th{font-size:14px;font-weight:600;letter-spacing:.1em;color:#ffffff;
+              text-align:left;padding:0 0 9px;border-bottom:1px solid #1c2838}
+  #lbTable th:last-child,#lbTable td:last-child{text-align:right}
+  #lbTable td{padding:6px 0;color:#ffffff}
+  #lbTable tr.you td{color:#22d3ee;font-weight:600}
+  /* The list scrolls; the card does not grow. Its height is matched to the
+     setup card in script, because that card's height depends on its contents. */
+  #lbScroll{overflow-y:auto;flex:1;min-height:0}
   #setup .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
                background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.5);text-align:center}
   #setup h1{font-size:15px;letter-spacing:.3em;font-weight:600;color:#ffffff}
@@ -425,6 +443,19 @@
     </div>
     <div class="msg" id="setupMsg"></div>
   </div>
+
+  <div id="lbPanel" class="hidden">
+    <div class="card" id="lbCard">
+      <h1>LEADERBOARD</h1>
+      <div id="lbScroll">
+        <table id="lbTable">
+          <thead><tr><th>USERNAME</th><th>HIGHEST LEVEL</th></tr></thead>
+          <tbody id="lbBody"></tbody>
+        </table>
+      </div>
+      <div class="hint" id="lbMsg"></div>
+    </div>
+  </div>
 </div>
 <div id="menu" class="hidden">
   <div class="card">
@@ -467,12 +498,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v19.7-dev"></script>
-<script src="ai.js?v=v19.7-dev"></script>
-<script src="gauntlet.js?v=v19.7-dev"></script>
-<script src="profile.js?v=v19.7-dev"></script>
-<script src="audio.js?v=v19.7-dev"></script>
-<script src="tutorial.js?v=v19.7-dev"></script>
+<script src="shot.js?v=v19.8-dev"></script>
+<script src="ai.js?v=v19.8-dev"></script>
+<script src="gauntlet.js?v=v19.8-dev"></script>
+<script src="profile.js?v=v19.8-dev"></script>
+<script src="audio.js?v=v19.8-dev"></script>
+<script src="tutorial.js?v=v19.8-dev"></script>
 <script>
 'use strict';
 
@@ -2161,7 +2192,7 @@ const devTools = () => inPractice() || devUnlocked;
 function paintRankFlag() {
   const el = $('rankFlag');
   if (!el) return;
-  const show = running && gaunt.active;
+  const show = running && gaunt.active && !gaunt.shown;
   el.classList.toggle('hidden', !show);
   if (!show) return;
   const ok = runRanked();
@@ -2780,7 +2811,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.7-dev';
+const BUILD = 'v19.8-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3463,7 +3494,10 @@ function setMsg(html) { $('netMsg').innerHTML = html; }
 function hideMenu() { $('menu').classList.add('hidden'); }
 function showMenu() { pendingTutorial = false; pendingGauntlet = false;
                      $('menu').classList.remove('hidden'); hideSetup(); }
-function hideSetup() { $('setup').classList.add('hidden'); }
+function hideSetup() {
+  $('setup').classList.add('hidden');
+  $('lbPanel').classList.add('hidden');
+}
 function hideLogin() { $('login').classList.add('hidden'); }
 
 /* THE DOOR.
@@ -3565,6 +3599,40 @@ function paintAccount() {
 let pendingTutorial = false;
 let pendingGauntlet = false;
 
+/* Usernames come out of a database, and the column they live in is
+   constrained to [a-z0-9_-]. Escaped anyway: a constraint is a rule about what
+   should be there, not a guarantee about what is, and it is one line. */
+function esc(t) {
+  return String(t).replace(/[&<>]/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
+
+/* Beside the gauntlet card only. Other modes will want their own boards one
+   day, and a leaderboard with no mode attached would have to mean something. */
+function paintLeaderboard() {
+  const show = pendingGauntlet;
+  $('lbPanel').classList.toggle('hidden', !show);
+  if (!show) return;
+
+  // Match the card next to it. Read rather than assumed: the setup card's
+  // height depends on which rows it is showing.
+  const card = document.querySelector('#setup .card');
+  if (card && card.offsetHeight) $('lbCard').style.height = card.offsetHeight + 'px';
+
+  $('lbBody').innerHTML = '';
+  $('lbMsg').textContent = authReady() ? 'loading...' : 'offline';
+  if (!authReady()) return;
+
+  lbFetch().then(rows => {
+    if (!pendingGauntlet) return;          // they left while it was in flight
+    $('lbMsg').textContent = rows.length ? '' : 'nobody has finished a run yet';
+    $('lbBody').innerHTML = rows.map(r =>
+      '<tr' + (r.username === authName() ? ' class="you"' : '') + '>' +
+      '<td>' + esc(r.username) + '</td><td>' + (r.best_level | 0) + '</td></tr>'
+    ).join('');
+  });
+}
+
 function paintSetupMode() {
   $('setupTitle').textContent = pendingTutorial ? 'TUTORIAL SETUP'
                               : pendingGauntlet ? 'GAUNTLET SETUP' : 'SETUP';
@@ -3594,6 +3662,7 @@ function showSetup() {
   $('setupWait').classList.toggle('hidden', owner);
   $('setupMsg').innerHTML = '';
   paintSetupMode();
+  paintLeaderboard();
   if (owner) { paintTarget(); paintPaddles(); paintDifficulty(); paintTuning(); }
 }
 
