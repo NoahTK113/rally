@@ -52,25 +52,20 @@ function gauntDifficulty(L) {
 // The ladder takes a fraction of itself; the curve decides which fraction.
 function gauntApply() { aiSetLevelT((gauntDifficulty(gaunt.level) - 1) / 9); }
 
-/* Kept out of PREFS_KEYS on purpose. A version bump exists to clear settings
-   whose MEANING changed, and a high score has no meaning to go stale — losing
-   it to an unrelated upgrade would just be a loss. */
-function gauntLoadBest() {
-  try {
-    const v = parseInt(localStorage.getItem('banjoball.best'), 10);
-    gaunt.best = (v >= 1) ? v : 0;
-  } catch (e) { gaunt.best = 0; }
-  return gaunt.best;
-}
+/* The record comes from the PROFILE, not from this machine. It briefly lived
+   in localStorage, which made it the single easiest thing in the game to cheat
+   - one line in the console, no code to read. There is now nothing local to
+   edit: the server owns the number and the client is only told it.
 
+   So this reads rather than loads. A guest, or anyone offline, has no record
+   because there is nowhere to keep one. */
+function gauntBest() { return signedIn() ? authBest() : 0; }
+
+/* Kept for the shape of the call site until runs report to the server; the
+   record is written by record_goal in the database, never here. */
 function gauntSaveBest(L) {
-  /* A level reached by dragging a slider is not a level reached. The developer
-     panel can move the run wherever it likes; it just cannot write the record
-     while doing it. Cleared only by starting a fresh run. */
   if (gaunt.cheated) return;
-  if (L <= gaunt.best) return;
-  gaunt.best = L;
-  try { localStorage.setItem('banjoball.best', L); } catch (e) {}
+  if (L > gaunt.best) gaunt.best = L;
 }
 
 function gauntStart() {
@@ -81,7 +76,7 @@ function gauntStart() {
   gaunt.pending = null;
   gaunt.shown = false;
   gaunt.cheated = false;
-  gauntLoadBest();
+  gaunt.best = gauntBest();
   gauntApply();
 }
 
@@ -137,7 +132,9 @@ function pumpGauntlet(dt) {
     gauntSaveBest(gaunt.level);
     $('gauntOverLevel').textContent = 'You reached level ' + gaunt.level + '.';
     $('gauntOverBest').textContent =
-      gaunt.best ? 'Best: level ' + gaunt.best : '';
+      !signedIn()  ? 'Sign in to record a best.'
+      : gaunt.best ? 'Best: level ' + gaunt.best
+      : '';
   }
 
   if (document.exitPointerLock) document.exitPointerLock();

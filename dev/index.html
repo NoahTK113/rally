@@ -89,7 +89,10 @@
              letter-spacing:.14em;border-radius:8px;cursor:pointer;background:#151d2b;
              color:#ffffff;border:1px solid #22d3ee}
   #login .msg{margin-top:13px;font-size:14px;line-height:1.5;color:#fdba74;min-height:20px}
-  #whoami{margin:-10px 0 18px;font-size:14px;letter-spacing:.1em;color:#ffffff}
+  /* Set apart from the menu proper: it is about you, not about starting a
+     game, and the gap says so. */
+  #account{margin-top:26px;padding-top:20px;border-top:1px solid #1c2838}
+  #whoami{margin:0 0 10px;font-size:14px;letter-spacing:.1em;color:#ffffff}
   #whoami b{color:#22d3ee;font-weight:600}
   #setup{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;
          background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
@@ -416,8 +419,6 @@
 <div id="menu" class="hidden">
   <div class="card">
     <h1>BANJOBALL</h1>
-    <div id="whoami"></div>
-    <button id="btnProfile">LOG IN</button>
     <button id="btnTutorial">HOW TO PLAY</button>
     <button id="btnSolo">PRACTICE</button>
     <button id="btnAI">VS AI</button>
@@ -428,6 +429,10 @@
       <button id="btnJoin">JOIN</button>
     </div>
     <div class="msg" id="netMsg"></div>
+    <div id="account">
+      <div id="whoami"></div>
+      <button id="btnProfile">LOG IN</button>
+    </div>
   </div>
 </div>
 <script>
@@ -452,12 +457,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v19.2-dev"></script>
-<script src="ai.js?v=v19.2-dev"></script>
-<script src="gauntlet.js?v=v19.2-dev"></script>
-<script src="profile.js?v=v19.2-dev"></script>
-<script src="audio.js?v=v19.2-dev"></script>
-<script src="tutorial.js?v=v19.2-dev"></script>
+<script src="shot.js?v=v19.3-dev"></script>
+<script src="ai.js?v=v19.3-dev"></script>
+<script src="gauntlet.js?v=v19.3-dev"></script>
+<script src="profile.js?v=v19.3-dev"></script>
+<script src="audio.js?v=v19.3-dev"></script>
+<script src="tutorial.js?v=v19.3-dev"></script>
 <script>
 'use strict';
 
@@ -2748,7 +2753,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.2-dev';
+const BUILD = 'v19.3-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3522,8 +3527,10 @@ function paintSetupMode() {
   // of those rows are meaningless on its card. The best level takes their place.
   $('gauntBestRow').classList.toggle('hidden', !pendingGauntlet);
   if (pendingGauntlet) {
-    const b = gauntLoadBest();
-    $('gauntBestVal').textContent = b ? 'level ' + b : 'none yet';
+    const b = gauntBest();
+    $('gauntBestVal').textContent = !signedIn() ? 'sign in to record one'
+                                  : b           ? 'level ' + b
+                                                : 'none yet';
   }
 }
 
@@ -4026,6 +4033,10 @@ $('btnJoin').addEventListener('click', joinGame);
 $('codeIn').addEventListener('keydown', function (e) { if (e.key === 'Enter') joinGame(); });
 updateStatus();
 
+/* banjoball.best was the local high score before the server owned it. It is
+   removed rather than ignored: a stale key that nothing reads is a trap for
+   whoever finds it next. */
+try { localStorage.removeItem('banjoball.best'); } catch (e) {}
 authInit();
 paintAccount();
 paintGate();
