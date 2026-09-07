@@ -452,12 +452,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v19.1-dev"></script>
-<script src="ai.js?v=v19.1-dev"></script>
-<script src="gauntlet.js?v=v19.1-dev"></script>
-<script src="profile.js?v=v19.1-dev"></script>
-<script src="audio.js?v=v19.1-dev"></script>
-<script src="tutorial.js?v=v19.1-dev"></script>
+<script src="shot.js?v=v19.2-dev"></script>
+<script src="ai.js?v=v19.2-dev"></script>
+<script src="gauntlet.js?v=v19.2-dev"></script>
+<script src="profile.js?v=v19.2-dev"></script>
+<script src="audio.js?v=v19.2-dev"></script>
+<script src="tutorial.js?v=v19.2-dev"></script>
 <script>
 'use strict';
 
@@ -2155,8 +2155,26 @@ addEventListener('keydown', e => {
   paintBuild();
 });
 
+/* ESCAPE GOES BACK, from wherever you are to wherever you came from.
+
+   The menus are handled before the `running` guard below, because they exist
+   precisely when nothing is running. The gate and the main menu are roots and
+   have nowhere to go back to, so escape does nothing there rather than
+   guessing. */
+function escapeMenus() {
+  if (!$('login').classList.contains('hidden')) {
+    hideLogin();
+    if (signedIn()) showMenu(); else paintGate();
+    return;
+  }
+  if (!$('setup').classList.contains('hidden')) { hideSetup(); showMenu(); }
+}
+
 addEventListener('keydown', e => {
-  if (!running) return;          // menu keys are the menu's business
+  if (!running) {
+    if (e.key.toLowerCase() === 'escape') escapeMenus();
+    return;                      // menu keys are otherwise the menu's business
+  }
   const k = e.key.toLowerCase();
   if (k === ' ' || k === '.' || k === 'tab') e.preventDefault();
   if (e.repeat) return;
@@ -2220,7 +2238,17 @@ addEventListener('keydown', e => {
   }
   if (k === '[') setSens(MOUSE.sens - 0.05);   // capture blocks the slider,
   if (k === ']') setSens(MOUSE.sens + 0.05);   // so keys work mid-match too
-  if (k === 'escape') { if (paused) resumeGame(); else leaveGame(); return; }
+  if (k === 'escape') {
+    if (!paused) { leaveGame(); return; }
+    /* A sub-card goes back to the pause menu proper rather than straight into
+       the game - escape means back, not out. The terminal cards (tutorial
+       finish, gauntlet over) are not stepped back from at all: resumeGame
+       already refuses them, because there is nothing behind them to return
+       to. */
+    if (pauseWhich === 'controls' || pauseWhich === 'exit') { pausePanel('main'); return; }
+    resumeGame();
+    return;
+  }
   const mayServe = running && (soloDirect() || server.active);
   if (k === 'f') { if (mayServe) { resetRound(authWorld(), false); tutOnServe(); } }
   if (k === 'r') { if (mayServe) resetRound(authWorld(), true); }
@@ -2720,7 +2748,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.1-dev';
+const BUILD = 'v19.2-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3444,6 +3472,11 @@ function gateThrough() {
 }
 
 function showLogin() {
+  /* The gate sits at z-index 21 and the login card at 19, so revealing the
+     card without standing the gate down leaves it underneath: every click
+     lands, nothing appears to happen. Whatever opens this has to close the
+     door behind it. */
+  $('gate').classList.add('hidden');
   hideMenu();
   $('login').classList.remove('hidden');
   $('loginMsg').textContent = '';
@@ -3524,7 +3557,10 @@ function showSetup() {
 let paused = false;
 onNewGame(() => { paused = false; document.body.classList.remove('paused'); });
 
+let pauseWhich = 'main';        // which card the pause menu is showing
+
 function pausePanel(which) {
+  pauseWhich = which;
   $('pauseMain').classList.toggle('hidden', which !== 'main');
   $('pauseControls').classList.toggle('hidden', which !== 'controls');
   $('pauseExit').classList.toggle('hidden', which !== 'exit');
