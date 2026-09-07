@@ -57,6 +57,28 @@
      did. A utility class that means "not displayed, whatever else says" has to
      outrank the layout rules it is switching off. */
   .hidden{display:none!important}
+  #login{position:fixed;inset:0;z-index:19;display:flex;align-items:center;
+         justify-content:center;
+         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
+  #login .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
+               background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.5);
+               text-align:center}
+  #login h1{margin:0 0 20px;font-size:30px;letter-spacing:.32em;font-weight:700;color:#ffffff}
+  #login input{width:100%;box-sizing:border-box;padding:11px;font:inherit;font-size:14px;
+               letter-spacing:.06em;border-radius:8px;background:#0e141f;color:#ffffff;
+               border:1px solid #263449;text-align:center}
+  #login input:focus{outline:none;border-color:#22d3ee}
+  #login .row{display:flex;gap:9px}
+  #login .row button{flex:1;padding:12px;font:inherit;font-size:14px;letter-spacing:.13em;
+                     border-radius:8px;cursor:pointer;background:#151d2b;color:#ffffff;
+                     border:1px solid #263449}
+  #login .row button:hover{border-color:#22d3ee}
+  #login .go{width:100%;padding:12px;margin:16px 0 9px;font:inherit;font-size:14px;
+             letter-spacing:.14em;border-radius:8px;cursor:pointer;background:#151d2b;
+             color:#ffffff;border:1px solid #22d3ee}
+  #login .msg{margin-top:13px;font-size:14px;line-height:1.5;color:#fdba74;min-height:20px}
+  #whoami{margin:-10px 0 18px;font-size:14px;letter-spacing:.1em;color:#ffffff}
+  #whoami b{color:#22d3ee;font-weight:600}
   #setup{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;
          background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
   #setup .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
@@ -297,6 +319,28 @@
   <div id="tutReady"></div>
   <div id="tutDots"></div>
 </div>
+<div id="login" class="hidden">
+  <div class="card">
+    <h1>PROFILE</h1>
+    <div class="lab">USERNAME</div>
+    <input id="loginUser" maxlength="20" autocomplete="username"
+           placeholder="username" spellcheck="false">
+    <div class="lab" style="margin-top:14px">PASSWORD</div>
+    <input id="loginPass" type="password" maxlength="72"
+           autocomplete="current-password" placeholder="password">
+    <div class="msg" id="loginMsg"></div>
+    <button class="go" id="loginGo">LOG IN</button>
+    <div class="row">
+      <button id="loginNew">CREATE ACCOUNT</button>
+      <button id="loginBack">BACK</button>
+    </div>
+    <div class="hint" style="margin-top:16px">
+      An account only carries your gauntlet record. Everything in the game is
+      playable without one.
+    </div>
+  </div>
+</div>
+
 <div id="setup" class="hidden">
   <div class="card">
     <div id="setupOwner">
@@ -354,6 +398,8 @@
 <div id="menu">
   <div class="card">
     <h1>BANJOBALL</h1>
+    <div id="whoami"></div>
+    <button id="btnProfile">LOG IN</button>
     <button id="btnTutorial">HOW TO PLAY</button>
     <button id="btnSolo">PRACTICE</button>
     <button id="btnAI">VS AI</button>
@@ -387,11 +433,13 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v18.3-dev"></script>
-<script src="ai.js?v=v18.3-dev"></script>
-<script src="gauntlet.js?v=v18.3-dev"></script>
-<script src="audio.js?v=v18.3-dev"></script>
-<script src="tutorial.js?v=v18.3-dev"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="shot.js?v=v19.0-dev"></script>
+<script src="ai.js?v=v19.0-dev"></script>
+<script src="gauntlet.js?v=v19.0-dev"></script>
+<script src="profile.js?v=v19.0-dev"></script>
+<script src="audio.js?v=v19.0-dev"></script>
+<script src="tutorial.js?v=v19.0-dev"></script>
 <script>
 'use strict';
 
@@ -2654,7 +2702,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v18.3-dev';
+const BUILD = 'v19.0-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3338,6 +3386,30 @@ function hideMenu() { $('menu').classList.add('hidden'); }
 function showMenu() { pendingTutorial = false; pendingGauntlet = false;
                      $('menu').classList.remove('hidden'); hideSetup(); }
 function hideSetup() { $('setup').classList.add('hidden'); }
+function hideLogin() { $('login').classList.add('hidden'); }
+
+function showLogin() {
+  hideMenu();
+  $('login').classList.remove('hidden');
+  $('loginMsg').textContent = '';
+  $('loginPass').value = '';
+  $('loginUser').focus();
+}
+
+/* The menu's own line about who you are. Three states, and the middle one
+   matters: no client at all, because the library did not load or there is no
+   network. Saying "log in" then would be an invitation to something that
+   cannot work. */
+function paintAccount() {
+  const el = $('whoami');
+  if (!el) return;
+  if (!authReady())    el.innerHTML = 'offline &mdash; playing as a guest';
+  else if (signedIn()) el.innerHTML = 'signed in as <b>' + (authName() || '...') + '</b>';
+  else                 el.innerHTML = 'playing as a guest';
+  const btn = $('btnProfile');
+  if (btn) btn.textContent = signedIn() ? 'LOG OUT' : 'LOG IN';
+  if (btn) btn.disabled = !authReady();
+}
 
 /* The lobby. Reached once there is someone to play against — or straight away
    in practice — and returned to after a match. The host owns the settings and
@@ -3830,11 +3902,34 @@ paintTarget();
 paintPaddles();
 paintDifficulty();
 paintSens();
+$('btnProfile').addEventListener('click', function () {
+  if (signedIn()) { authSignOut(); return; }
+  showLogin();
+});
+$('loginBack').addEventListener('click', function () { hideLogin(); showMenu(); });
+
+function loginAttempt(fn) {
+  $('loginMsg').textContent = 'working...';
+  fn($('loginUser').value, $('loginPass').value).then(err => {
+    if (err) { $('loginMsg').textContent = err; return; }
+    $('loginPass').value = '';
+    hideLogin();
+    showMenu();
+  });
+}
+$('loginGo').addEventListener('click', () => loginAttempt(authSignIn));
+$('loginNew').addEventListener('click', () => loginAttempt(authSignUp));
+$('loginPass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') loginAttempt(authSignIn);
+});
+
 $('btnHost').addEventListener('click', hostGame);
 $('btnJoin').addEventListener('click', joinGame);
 $('codeIn').addEventListener('keydown', function (e) { if (e.key === 'Enter') joinGame(); });
 updateStatus();
 
+authInit();
+paintAccount();
 buildPanel();
 serve(world);
 resize();
