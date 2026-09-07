@@ -260,6 +260,26 @@
     </div>
   </div>
 
+  <div class="pcard hidden" id="pauseGauntOver">
+    <h2>GAME OVER</h2>
+    <p id="gauntOverLevel"></p>
+    <p id="gauntOverBest"></p>
+    <div class="row">
+      <button id="gauntAgain">RESTART</button>
+      <button id="gauntMenu">MAIN MENU</button>
+    </div>
+  </div>
+
+  <div class="pcard hidden" id="pauseGauntWin">
+    <h2>CONGRATULATIONS</h2>
+    <p>You beat the best AI that we have. You can continue in survival mode to
+       see how long you can stand.</p>
+    <div class="row">
+      <button id="gauntSurvive">SURVIVAL MODE</button>
+      <button id="gauntWinMenu">MAIN MENU</button>
+    </div>
+  </div>
+
   <div class="pcard hidden" id="pauseExit">
     <h2>EXIT GAME</h2>
     <p>Are you sure you want to exit the game?</p>
@@ -287,6 +307,10 @@
           <button id="tuneNo">NO</button>
           <button id="tuneYes">YES</button>
         </div>
+      </div>
+      <div id="gauntBestRow" class="hidden">
+        <div class="lab">BEST LEVEL REACHED</div>
+        <div class="hint" id="gauntBestVal">none yet</div>
       </div>
       <div id="diffRow" class="hidden">
         <div class="lab">DIFFICULTY</div>
@@ -333,6 +357,7 @@
     <button id="btnTutorial">HOW TO PLAY</button>
     <button id="btnSolo">PRACTICE</button>
     <button id="btnAI">VS AI</button>
+    <button id="btnGauntlet">GAUNTLET</button>
     <button id="btnHost">HOST A GAME</button>
     <div class="join">
       <input id="codeIn" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false">
@@ -362,10 +387,11 @@ function onNewGame(fn) { SESSION_RESETS.push(fn); }
 function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSION_RESETS[i](); }
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="shot.js?v=v18.0-dev"></script>
-<script src="ai.js?v=v18.0-dev"></script>
-<script src="audio.js?v=v18.0-dev"></script>
-<script src="tutorial.js?v=v18.0-dev"></script>
+<script src="shot.js?v=v18.1-dev"></script>
+<script src="ai.js?v=v18.1-dev"></script>
+<script src="gauntlet.js?v=v18.1-dev"></script>
+<script src="audio.js?v=v18.1-dev"></script>
+<script src="tutorial.js?v=v18.1-dev"></script>
 <script>
 'use strict';
 
@@ -1017,7 +1043,7 @@ const teamName = side => side > 0 ? 'BLUE' : 'RED';
    because that value is shared with the other modes and persisted. Visiting
    practice must not silently turn a hosted match endless too. */
 function inPractice() { return net.role === 'solo' && !AI.on; }
-function matchTarget() { return inPractice() ? 0 : MATCH.target; }
+function matchTarget() { return (inPractice() || gaunt.active) ? 0 : MATCH.target; }
 
 function matchOver(w) {
   const t = matchTarget();
@@ -1038,6 +1064,10 @@ function award(w, side) {
   w.lastScorer = side;
   w.phase = PHASE.EXIT;
   w.phaseT = EXIT_MAX_T;
+  /* The gauntlet only reads this; it raises a flag and the frame loop acts on
+     it. Opening a menu from inside the simulation step would change the world
+     under a card that had already been drawn. */
+  gauntOnGoal(side);
 }
 
 function resetRound(w, clearScore) {
@@ -1804,6 +1834,14 @@ function drawHud() {
   const flash = world.phase !== PHASE.PLAY;
   ctx.globalAlpha = flash ? 1 : 0.75;
 
+  if (gaunt.active) {
+    drawGauntletHud(ctx, sx, sy, size);
+    drawAnnouncement();
+    drawTutorialGoals(ctx);
+    paintLockHint();
+    return;
+  }
+
   ctx.textAlign = 'right';
   ctx.fillStyle = world.lastScorer === -1 && flash ? '#ffffff' : goalColour(-1);
   ctx.fillText(String(scores['-1']), sx - gap, sy);
@@ -1881,12 +1919,14 @@ function drawAnnouncement() {
   if (world.phase === PHASE.ANNOUNCE) {
     const size = Math.max(16, Math.round(view.scale * 0.55));
     ctx.font = `700 ${size}px ui-monospace, Consolas, monospace`;
+    const lvl = gauntAnnounce();
     const dead = !world.lastScorer;
-    ctx.fillStyle = dead ? '#8fa3bd' : goalColour(world.lastScorer);
+    ctx.fillStyle = lvl ? '#ffffff' : dead ? '#8fa3bd' : goalColour(world.lastScorer);
     // brief fade-in so it does not just snap on
     ctx.globalAlpha = Math.min(1, (ANNOUNCE_T - world.phaseT) / 0.18);
-    ctx.fillText(dead ? 'DEAD BALL — RE-SERVE'
-                      : `${teamName(world.lastScorer)} TEAM SCORED`, cx, cy);
+    ctx.fillText(lvl ? lvl
+                     : dead ? 'DEAD BALL — RE-SERVE'
+                            : `${teamName(world.lastScorer)} TEAM SCORED`, cx, cy);
   } else {
     const n = Math.max(1, Math.ceil(world.phaseT));
     const frac = world.phaseT - Math.floor(world.phaseT);      // 1 -> 0 within each second
@@ -2444,6 +2484,9 @@ function startGame(asTutorial) {
   }
 
   if (asTutorial) tutStart(); else tutStop();
+  /* After restoreTuning, which resets AI and SHOT to their defaults - the
+     gauntlet's level has to be written on top of that, not under it. */
+  if (gaunt.armed) gauntStart(); else gauntStop();
 
   if (soloDirect()) {
     /* Nothing to wire. The world set up above is the one that will be stepped,
@@ -2567,6 +2610,7 @@ function frame(nowMs) {
 
   pumpEvents();
   pumpTutorial(dt);
+  pumpGauntlet(dt);
 
   renderAlpha = (froze || holdSim) ? 1 : accumulator / FIXED_DT;
   render();
@@ -2598,7 +2642,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v18.0-dev';
+const BUILD = 'v18.1-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3279,7 +3323,7 @@ const randomCode = () => Array.from({ length: 4 },
 
 function setMsg(html) { $('netMsg').innerHTML = html; }
 function hideMenu() { $('menu').classList.add('hidden'); }
-function showMenu() { pendingTutorial = false;
+function showMenu() { pendingTutorial = false; pendingGauntlet = false;
                      $('menu').classList.remove('hidden'); hideSetup(); }
 function hideSetup() { $('setup').classList.add('hidden'); }
 
@@ -3291,12 +3335,23 @@ function hideSetup() { $('setup').classList.add('hidden'); }
    into it, so a tutorial abandoned at the card cannot start the next game as a
    tutorial. */
 let pendingTutorial = false;
+let pendingGauntlet = false;
 
 function paintSetupMode() {
-  $('setupTitle').textContent = pendingTutorial ? 'TUTORIAL SETUP' : 'SETUP';
-  $('btnStart').textContent   = pendingTutorial ? 'START TUTORIAL' : 'START MATCH';
+  $('setupTitle').textContent = pendingTutorial ? 'TUTORIAL SETUP'
+                              : pendingGauntlet ? 'GAUNTLET SETUP' : 'SETUP';
+  $('btnStart').textContent   = pendingTutorial ? 'START TUTORIAL'
+                              : pendingGauntlet ? 'START GAUNTLET' : 'START MATCH';
   // Only a first-timer needs telling which one to pick.
   $('pd1Hint').classList.toggle('hidden', !pendingTutorial);
+
+  // The gauntlet sets its own difficulty and has no target to reach, so both
+  // of those rows are meaningless on its card. The best level takes their place.
+  $('gauntBestRow').classList.toggle('hidden', !pendingGauntlet);
+  if (pendingGauntlet) {
+    const b = gauntLoadBest();
+    $('gauntBestVal').textContent = b ? 'level ' + b : 'none yet';
+  }
 }
 
 function showSetup() {
@@ -3334,6 +3389,8 @@ function pausePanel(which) {
   $('pauseControls').classList.toggle('hidden', which !== 'controls');
   $('pauseExit').classList.toggle('hidden', which !== 'exit');
   $('pauseTutEnd').classList.toggle('hidden', which !== 'tutend');
+  $('pauseGauntOver').classList.toggle('hidden', which !== 'gauntover');
+  $('pauseGauntWin').classList.toggle('hidden', which !== 'gauntwin');
 }
 
 function openPause() {
@@ -3353,7 +3410,7 @@ function openPause() {
 function resumeGame() {
   // There is nothing to resume into once the tutorial is over, and re-taking
   // the mouse would strand the player with no menu and no lesson.
-  if (tutFinished()) return;
+  if (tutFinished() || gauntShown()) return;
   if (canvas.requestPointerLock) canvas.requestPointerLock();
 }
 
@@ -3364,6 +3421,10 @@ $('pExit').addEventListener('click', () => pausePanel('exit'));
 $('pExitNo').addEventListener('click', () => pausePanel('main'));
 $('tutPractice').addEventListener('click', () => tutFinishTo(false));
 $('tutVsAi').addEventListener('click', () => tutFinishTo(true));
+$('gauntAgain').addEventListener('click', gauntRestart);
+$('gauntMenu').addEventListener('click', gauntQuit);
+$('gauntSurvive').addEventListener('click', gauntContinueSurvival);
+$('gauntWinMenu').addEventListener('click', gauntQuit);
 $('pExitYes').addEventListener('click', () => { paused = false;
   document.body.classList.remove('paused'); leaveGame(); });
 
@@ -3423,7 +3484,7 @@ function restoreTuning() {
 }
 
 function paintDifficulty() {
-  $('diffRow').classList.toggle('hidden', !AI.on);
+  $('diffRow').classList.toggle('hidden', !AI.on || pendingGauntlet);
   $('diffRange').value = aiLevel;
   $('diffHint').textContent = aiLevel === 10 ? 'level 10 — as hard as it plays'
                             : aiLevel === 1  ? 'level 1 — slow, and misses a lot'
@@ -3460,7 +3521,7 @@ function paintTarget() {
   /* Practice alone has nobody to beat, so a target to beat them to is noise on
      the card. Hidden for that mode only — against the computer it is a real
      setting, and in a hosted match it is the whole shape of the game. */
-  $('ptRow').classList.toggle('hidden', inPractice());
+  $('ptRow').classList.toggle('hidden', inPractice() || pendingGauntlet);
 
   const t = MATCH.target;
   $('ptVal').textContent = t === 0 ? '∞' : t;
@@ -3479,9 +3540,10 @@ function beginMatch() {
   if (net.role === 'guest') return;             // only the host may start
   if (net.role === 'host') send({ t: 'start', m: MATCH });
   hideSetup();
-  const tut = pendingTutorial;
+  if (pendingGauntlet) { gauntBegin(); return; }
+  const asTut = pendingTutorial;
   pendingTutorial = false;
-  startGame(tut);
+  startGame(asTut);
 }
 
 function updateStatus() {
@@ -3542,7 +3604,7 @@ function hostGame() {
   if (!peerAvailable()) return;
   net.role = 'host';
   mySide = 1;
-  AI.on = false; pendingTutorial = false;                      // a human is on the way
+  AI.on = false; pendingTutorial = pendingGauntlet = false;    // a human is on the way
   net.code = randomCode();
   setMsg('Opening room&hellip;');
   net.peer = new Peer(PEER_PREFIX + net.code, PEER_OPTS);
@@ -3566,7 +3628,7 @@ function joinGame() {
   if (code.length !== 4) { setMsg('Enter the four-character room code.'); return; }
   net.role = 'guest';
   mySide = -1;
-  AI.on = false; pendingTutorial = false;
+  AI.on = false; pendingTutorial = pendingGauntlet = false;
   net.code = code;
   setMsg('Connecting to ' + code + '&hellip;');
   net.peer = new Peer(undefined, PEER_OPTS);
@@ -3655,7 +3717,8 @@ function onData(d) {
 paintBuild();
 
 $('btnSolo').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; AI.on = false; pendingTutorial = false;
+  net.role = 'solo'; mySide = 1; AI.on = false;
+  pendingTutorial = pendingGauntlet = false;
   updateStatus(); showSetup();
 });
 
@@ -3663,8 +3726,16 @@ $('btnSolo').addEventListener('click', function () {
    match returns to the lobby, and starting another there should keep you
    playing whoever you chose to play. The menu handlers are the only thing that
    changes it. */
+$('btnGauntlet').addEventListener('click', function () {
+  net.role = 'solo'; mySide = 1; AI.on = true;
+  pendingGauntlet = true; pendingTutorial = false;
+  aiInit();
+  updateStatus(); showSetup();
+});
+
 $('btnAI').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; AI.on = true; pendingTutorial = false;
+  net.role = 'solo'; mySide = 1; AI.on = true;
+  pendingTutorial = pendingGauntlet = false;
   aiInit();
   updateStatus(); showSetup();
 });
@@ -3679,7 +3750,8 @@ $('btnAI').addEventListener('click', function () {
    hide themselves already: the first wants AI.on, the second is hidden
    whenever inPractice(), and a tutorial is practice by that test. */
 $('btnTutorial').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; AI.on = false; pendingTutorial = true;
+  net.role = 'solo'; mySide = 1; AI.on = false;
+  pendingTutorial = true; pendingGauntlet = false;
   updateStatus(); showSetup();
 });
 $('btnStart').addEventListener('click', beginMatch);
