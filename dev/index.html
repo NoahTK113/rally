@@ -260,7 +260,7 @@
     <h2>PAUSED</h2>
     <button id="pResume">RESUME GAME</button>
     <button id="pControls">CONTROLS</button>
-    <button id="pExit">EXIT GAME</button>
+    <button id="pExit">END GAME</button>
     <div class="sl"><span>MOUSE SENSITIVITY</span>
       <input id="sensPause" type="range" min="0.2" max="3" step="0.05" value="1">
       <span class="v" id="sensPauseVal">1.00</span></div>
@@ -319,8 +319,8 @@
   </div>
 
   <div class="pcard hidden" id="pauseExit">
-    <h2>EXIT GAME</h2>
-    <p>Are you sure you want to exit the game?</p>
+    <h2>END GAME</h2>
+    <p>Are you sure you want to end the game?</p>
     <div class="row">
       <button id="pExitYes">YES</button>
       <button id="pExitNo">NO</button>
@@ -458,12 +458,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v19.5-dev"></script>
-<script src="ai.js?v=v19.5-dev"></script>
-<script src="gauntlet.js?v=v19.5-dev"></script>
-<script src="profile.js?v=v19.5-dev"></script>
-<script src="audio.js?v=v19.5-dev"></script>
-<script src="tutorial.js?v=v19.5-dev"></script>
+<script src="shot.js?v=v19.6-dev"></script>
+<script src="ai.js?v=v19.6-dev"></script>
+<script src="gauntlet.js?v=v19.6-dev"></script>
+<script src="profile.js?v=v19.6-dev"></script>
+<script src="audio.js?v=v19.6-dev"></script>
+<script src="tutorial.js?v=v19.6-dev"></script>
 <script>
 'use strict';
 
@@ -2754,7 +2754,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.5-dev';
+const BUILD = 'v19.6-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3632,8 +3632,17 @@ $('gauntAgain').addEventListener('click', gauntRestart);
 $('gauntMenu').addEventListener('click', gauntQuit);
 $('gauntSurvive').addEventListener('click', gauntContinueSurvival);
 $('gauntWinMenu').addEventListener('click', gauntQuit);
-$('pExitYes').addEventListener('click', () => { paused = false;
-  document.body.classList.remove('paused'); leaveGame(); });
+$('pExitYes').addEventListener('click', () => {
+  /* A gauntlet does not walk out of the pause menu. Ending it deliberately is
+     still ending it, so it goes through the same card as losing - the run gets
+     closed, the record gets written, and the level reached is on screen.
+     pumpGauntlet raises it on the next frame, which is why the pause is left
+     standing rather than cleared here. */
+  if (gauntEndByPlayer()) return;
+  paused = false;
+  document.body.classList.remove('paused');
+  leaveGame();
+});
 
 function paintSens() {
   const v = MOUSE.sens.toFixed(2);

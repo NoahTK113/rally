@@ -160,6 +160,20 @@ function pumpGauntlet(dt) {
   pausePanel(which === 'over' ? 'gauntover' : 'gauntwin');
 }
 
+/* Ending a run on purpose is still ending a run. Quitting used to walk out
+   through leaveGame, which never told the server the run was over and never
+   raised the card - so a deliberate stop at level 30 recorded nothing, while
+   losing at level 3 recorded that. The same 'over' the AI's goal raises, so
+   there is one path to the game-over card and one place that closes a run.
+
+   Answers whether it took responsibility, because the caller has to know
+   whether to leave the game itself. */
+function gauntEndByPlayer() {
+  if (!gaunt.active || gaunt.shown || gaunt.pending) return false;
+  gaunt.pending = 'over';
+  return true;
+}
+
 /* Past the top. The difficulty is already pinned by gauntDifficulty, so
    nothing about the opponent changes from here — only how long you last. */
 function gauntContinueSurvival() {
