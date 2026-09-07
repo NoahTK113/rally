@@ -57,6 +57,18 @@
      did. A utility class that means "not displayed, whatever else says" has to
      outrank the layout rules it is switching off. */
   .hidden{display:none!important}
+  #gate{position:fixed;inset:0;z-index:21;display:flex;align-items:center;
+        justify-content:center;
+        background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
+  #gate .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
+              background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.5);
+              text-align:center}
+  #gate h1{margin:0 0 22px;font-size:30px;letter-spacing:.32em;font-weight:700;color:#ffffff}
+  #gate button{width:100%;padding:12px;margin-bottom:9px;font:inherit;font-size:14px;
+               letter-spacing:.13em;border-radius:8px;cursor:pointer;
+               background:#151d2b;color:#ffffff;border:1px solid #263449}
+  #gate button:hover{border-color:#22d3ee}
+  #gateMsg{margin:-8px 0 18px;font-size:14px;line-height:1.5;color:#ffffff;min-height:20px}
   #login{position:fixed;inset:0;z-index:19;display:flex;align-items:center;
          justify-content:center;
          background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
@@ -319,6 +331,16 @@
   <div id="tutReady"></div>
   <div id="tutDots"></div>
 </div>
+<div id="gate">
+  <div class="card">
+    <h1>BANJOBALL</h1>
+    <div id="gateMsg"></div>
+    <button id="gateLogin">LOG IN</button>
+    <button id="gateNew">CREATE ACCOUNT</button>
+    <button id="gateSkip" class="hidden">CONTINUE</button>
+  </div>
+</div>
+
 <div id="login" class="hidden">
   <div class="card">
     <h1>PROFILE</h1>
@@ -333,10 +355,6 @@
     <div class="row">
       <button id="loginNew">CREATE ACCOUNT</button>
       <button id="loginBack">BACK</button>
-    </div>
-    <div class="hint" style="margin-top:16px">
-      An account only carries your gauntlet record. Everything in the game is
-      playable without one.
     </div>
   </div>
 </div>
@@ -395,7 +413,7 @@
     <div class="msg" id="setupMsg"></div>
   </div>
 </div>
-<div id="menu">
+<div id="menu" class="hidden">
   <div class="card">
     <h1>BANJOBALL</h1>
     <div id="whoami"></div>
@@ -434,12 +452,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v19.0-dev"></script>
-<script src="ai.js?v=v19.0-dev"></script>
-<script src="gauntlet.js?v=v19.0-dev"></script>
-<script src="profile.js?v=v19.0-dev"></script>
-<script src="audio.js?v=v19.0-dev"></script>
-<script src="tutorial.js?v=v19.0-dev"></script>
+<script src="shot.js?v=v19.1-dev"></script>
+<script src="ai.js?v=v19.1-dev"></script>
+<script src="gauntlet.js?v=v19.1-dev"></script>
+<script src="profile.js?v=v19.1-dev"></script>
+<script src="audio.js?v=v19.1-dev"></script>
+<script src="tutorial.js?v=v19.1-dev"></script>
 <script>
 'use strict';
 
@@ -2702,7 +2720,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.0-dev';
+const BUILD = 'v19.1-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3388,6 +3406,43 @@ function showMenu() { pendingTutorial = false; pendingGauntlet = false;
 function hideSetup() { $('setup').classList.add('hidden'); }
 function hideLogin() { $('login').classList.add('hidden'); }
 
+/* THE DOOR.
+
+   The first screen is the gate, not the menu. It resolves into one of three
+   things and only ever acts while nobody is playing - an auth event can arrive
+   at any moment, including mid-match when a token refreshes, and yanking a
+   player out of a game to show them a menu would be worse than any of the
+   states this is choosing between.
+
+   The third state is the one that matters: with no client at all there is
+   nothing to log into, so the door offers CONTINUE rather than two buttons
+   that cannot work. Nobody is ever locked out of a game by their own wifi. */
+function paintGate() {
+  if (running) return;
+  const g = $('gate');
+  if (!g) return;
+
+  if (signedIn()) { g.classList.add('hidden'); showMenu(); return; }
+
+  g.classList.remove('hidden');
+  $('menu').classList.add('hidden');
+
+  const waiting = !authIsChecked();
+  const offline = authIsChecked() && !authReady();
+  $('gateMsg').textContent =
+      waiting ? 'checking...'
+    : offline ? 'No connection. You can play, but scores will not be saved.'
+    : '';
+  $('gateLogin').classList.toggle('hidden', waiting || offline);
+  $('gateNew').classList.toggle('hidden', waiting || offline);
+  $('gateSkip').classList.toggle('hidden', !offline);
+}
+
+function gateThrough() {
+  $('gate').classList.add('hidden');
+  showMenu();
+}
+
 function showLogin() {
   hideMenu();
   $('login').classList.remove('hidden');
@@ -3409,6 +3464,7 @@ function paintAccount() {
   const btn = $('btnProfile');
   if (btn) btn.textContent = signedIn() ? 'LOG OUT' : 'LOG IN';
   if (btn) btn.disabled = !authReady();
+  paintGate();
 }
 
 /* The lobby. Reached once there is someone to play against — or straight away
@@ -3903,10 +3959,16 @@ paintPaddles();
 paintDifficulty();
 paintSens();
 $('btnProfile').addEventListener('click', function () {
-  if (signedIn()) { authSignOut(); return; }
+  if (signedIn()) { authSignOut(); return; }   // paintGate puts the door back
   showLogin();
 });
-$('loginBack').addEventListener('click', function () { hideLogin(); showMenu(); });
+$('gateLogin').addEventListener('click', showLogin);
+$('gateNew').addEventListener('click', showLogin);
+$('gateSkip').addEventListener('click', gateThrough);
+$('loginBack').addEventListener('click', function () {
+  hideLogin();
+  if (signedIn()) showMenu(); else paintGate();
+});
 
 function loginAttempt(fn) {
   $('loginMsg').textContent = 'working...';
@@ -3914,7 +3976,7 @@ function loginAttempt(fn) {
     if (err) { $('loginMsg').textContent = err; return; }
     $('loginPass').value = '';
     hideLogin();
-    showMenu();
+    showMenu();          // paintGate has already stood down
   });
 }
 $('loginGo').addEventListener('click', () => loginAttempt(authSignIn));
@@ -3930,6 +3992,9 @@ updateStatus();
 
 authInit();
 paintAccount();
+paintGate();
+/* A network that never answers must not leave the door closed for ever. */
+setTimeout(() => { if (!authIsChecked()) { authGiveUp(); paintGate(); } }, 4000);
 buildPanel();
 serve(world);
 resize();

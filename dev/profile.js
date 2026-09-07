@@ -28,9 +28,15 @@ const USERNAME_RE = /^[a-z0-9_-]{3,20}$/;   // must survive becoming an address
 const PASSWORD_MIN = 8;
 
 let sb = null;                               // the client, or null if unavailable
+let authChecked = false;                     // the session question has been answered
 const acct = { id: null, username: null, best: 0 };
 
-function authReady()  { return !!sb; }
+function authReady()   { return !!sb; }
+function authIsChecked() { return authChecked; }
+
+/* Stop waiting. Called by a timeout at startup, because a hanging network must
+   not leave someone staring at a door that never opens. */
+function authGiveUp() { authChecked = true; }
 function signedIn()   { return !!acct.id; }
 function authName()   { return acct.username; }
 function authBest()   { return acct.best; }
@@ -41,19 +47,20 @@ function authBest()   { return acct.best; }
    layer this session. */
 function authInit() {
   try {
-    if (typeof supabase === 'undefined' || !supabase.createClient) return;
+    if (typeof supabase === 'undefined' || !supabase.createClient) { authChecked = true; return; }
     sb = supabase.createClient(SB_URL, SB_KEY);
-  } catch (e) { sb = null; return; }
+  } catch (e) { sb = null; authChecked = true; return; }
 
   sb.auth.onAuthStateChange((_ev, session) => authAdopt(session));
   sb.auth.getSession()
-    .then(r => authAdopt(r.data && r.data.session))
-    .catch(() => {});
+    .then(r => { authChecked = true; authAdopt(r.data && r.data.session); })
+    .catch(() => { authChecked = true; paintAccount(); });
 }
 
 /* A session arrived, or went away. The username and best level live in the
    profiles row rather than the token, so they are fetched rather than decoded. */
 function authAdopt(session) {
+  authChecked = true;
   if (!session || !session.user) {
     acct.id = null; acct.username = null; acct.best = 0;
     paintAccount();
