@@ -68,6 +68,14 @@ function gauntSaveBest(L) {
   if (L > gaunt.best) gaunt.best = L;
 }
 
+/* Whether this run may claim the leaderboard. Being signed in is necessary and
+   not sufficient: an unlocked developer session has a slider that moves the
+   level directly, so it is disqualified before it starts rather than caught
+   afterwards. */
+function gauntEligible() {
+  return authReady() && signedIn() && !devUnlocked;
+}
+
 function gauntStart() {
   gaunt.active = true;
   gaunt.armed = false;
@@ -78,9 +86,11 @@ function gauntStart() {
   gaunt.cheated = false;
   gaunt.best = gauntBest();
   gauntApply();
+  runStart(gauntEligible());
 }
 
 function gauntStop() {
+  if (gaunt.active) runEnd();     // idempotent; a closed run closes once
   gaunt.active = false;
   gaunt.armed = false;
   gaunt.pending = null;
@@ -105,6 +115,12 @@ function gauntOnGoal(side) {
   gauntSaveBest(gaunt.level);
   gauntApply();
   syncPanel();       // the developer slider reads gaunt.level; keep it honest
+
+  /* The server keeps its own count and is not asked what it thinks. Displaying
+     its answer would make every level-up wait for a round trip, and the two
+     cannot disagree in honest play - if they ever do, the reply fails and the
+     run stops being ranked, which is the outcome that matters. */
+  runGoal();
 }
 
 /* The developer slider writes gaunt.level directly, so the opponent has to be
@@ -115,6 +131,7 @@ function gauntSetLevelManually() {
   gaunt.level = Math.max(1, Math.round(gaunt.level));
   if (!gaunt.active) return;
   gaunt.cheated = true;
+  runDisqualify();          // the run may continue; its record may not
   gauntApply();
 }
 
@@ -129,6 +146,7 @@ function pumpGauntlet(dt) {
   gaunt.shown = true;
 
   if (which === 'over') {
+    runEnd();
     gauntSaveBest(gaunt.level);
     $('gauntOverLevel').textContent = 'You reached level ' + gaunt.level + '.';
     $('gauntOverBest').textContent =
@@ -194,10 +212,17 @@ function drawGauntletHud(ctx, sx, sy, size) {
   ctx.fillStyle = '#ffffff';
   ctx.fillText('LEVEL ' + gaunt.level, sx, sy);
 
-  if (!gaunt.survival) return;
+  /* One subtitle slot, and survival outranks it: a run at the top of the
+     ladder has earned the more interesting label. Otherwise say plainly that
+     nothing is being recorded, rather than letting someone find out at the
+     end. */
+  const sub = gaunt.survival ? 'SURVIVAL MODE — MAXIMUM DIFFICULTY REACHED'
+            : runRanked()    ? ''
+                             : 'UNRANKED';
+  if (!sub) return;
   ctx.font = `600 ${Math.max(9, Math.round(size * 0.28))}px ui-monospace, Consolas, monospace`;
   ctx.fillStyle = '#ffffff';
-  ctx.fillText('SURVIVAL MODE — MAXIMUM DIFFICULTY REACHED', sx, sy + size * 0.72);
+  ctx.fillText(sub, sx, sy + size * 0.72);
 }
 
 /* What the banner says when YOU score: the level you just reached, rather than

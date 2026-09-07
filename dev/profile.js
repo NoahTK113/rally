@@ -139,6 +139,60 @@ async function authSignOut() {
   authAdopt(null);
 }
 
+/* ==========================================================================
+   RUNS
+
+   The client does not report a score. It opens a run, says "I scored" as it
+   goes, and is told what level it is now on. There is no number to forge,
+   because it never sends one.
+
+   Every call is fire-and-forget from the game's point of view: a goal is
+   worth the same whether or not the reply arrives, and nothing waits.
+
+   One failure ends the ranking for that run, permanently. Not out of
+   strictness - a run that goes quiet for thirty seconds and comes back leaves
+   a gap the six-second rule cannot judge, and a record that might be wrong is
+   worse than no record. The run continues; only its claim to the leaderboard
+   stops.
+   ========================================================================== */
+const run = { id: null, ranked: false, level: 0 };
+
+function runRanked() { return !!run.id && run.ranked; }
+
+/* `eligible` is the caller's business, not ours: it knows about developer
+   unlocks and level sliders, and this knows about the network. */
+async function runStart(eligible) {
+  run.id = null; run.ranked = false; run.level = 0;
+  if (!sb || !signedIn() || !eligible) return;
+  try {
+    const r = await sb.rpc('start_run');
+    if (r.error || !r.data) return;
+    run.id = r.data; run.ranked = true; run.level = 1;
+  } catch (e) { run.id = null; run.ranked = false; }
+}
+
+async function runGoal() {
+  if (!runRanked()) return;
+  try {
+    const r = await sb.rpc('record_goal', { p_run: run.id });
+    if (r.error || r.data == null) { run.ranked = false; return; }
+    run.level = r.data;
+  } catch (e) { run.ranked = false; }
+}
+
+/* Stop claiming the leaderboard without stopping the run. Called when the
+   player does something the record cannot honestly include. */
+function runDisqualify() { run.ranked = false; }
+
+async function runEnd() {
+  const id = run.id;
+  run.id = null; run.ranked = false;
+  if (!sb || !id) return;
+  try { await sb.rpc('end_run', { p_run: id }); } catch (e) {}
+  authRefreshProfile();          // the best may have moved
+}
+
+
 /* The top hundred, for whenever there is somewhere to show it. Resolves to an
    array, empty on any failure - a leaderboard that cannot be fetched is an
    empty leaderboard, not an error dialog over a game. */
