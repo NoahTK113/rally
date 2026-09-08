@@ -97,18 +97,24 @@
   #whoami b{color:#22d3ee;font-weight:600}
   #setup{position:fixed;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;
          background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
-  /* Absolutely positioned INSIDE #setup, so it is out of the flex flow and
-     the setup card stays centred in the window exactly as it was. The panel
-     occupies everything to the right of that card - half the window minus half
-     its width - and centres the leaderboard within it. */
-  #lbPanel{position:absolute;top:0;bottom:0;left:calc(50% + 170px);right:0;
+  /* Beside whichever card is up, never over it. The menu and setup cards are
+     both 340px, so one offset serves both: the panel takes everything right of
+     centre-plus-half-a-card and centres the board in that.
+
+     box-sizing matters here. There is no global border-box rule, so a height
+     assigned in script is CONTENT height - and matching it to a neighbour's
+     offsetHeight, which includes 26px of padding each side and a border, made
+     this card 54px taller than the thing it was copying. */
+  #lbPanel{position:fixed;top:0;bottom:0;left:calc(50% + 170px);right:0;z-index:20;
            display:flex;align-items:center;justify-content:center}
-  #lbCard{width:280px;display:flex;flex-direction:column}
-  #lbCard h1{font-size:15px !important;letter-spacing:.24em;margin:0 0 18px}
+  #lbCard{width:168px;padding:16px;box-sizing:border-box;display:flex;
+          flex-direction:column}
+  #lbCard h1{font-size:14px !important;letter-spacing:.12em;line-height:1.5;margin:0 0 14px}
   #lbTable{width:100%;border-collapse:collapse;font-size:14px;
            font-variant-numeric:tabular-nums}
-  #lbTable th{font-size:14px;font-weight:600;letter-spacing:.1em;color:#ffffff;
-              text-align:left;padding:0 0 9px;border-bottom:1px solid #1c2838}
+  #lbTable th{font-size:14px;font-weight:600;letter-spacing:.04em;color:#ffffff;
+              text-align:left;padding:0 0 9px;border-bottom:1px solid #1c2838;
+              white-space:normal;vertical-align:bottom}
   #lbTable th:last-child,#lbTable td:last-child{text-align:right}
   #lbTable td{padding:6px 0;color:#ffffff}
   #lbTable tr.you td{color:#22d3ee;font-weight:600}
@@ -362,6 +368,19 @@
   <div id="tutReady"></div>
   <div id="tutDots"></div>
 </div>
+<div id="lbPanel" class="hidden">
+  <div class="card" id="lbCard">
+    <h1>GAUNTLET LEADERBOARD</h1>
+    <div id="lbScroll">
+      <table id="lbTable">
+        <thead><tr><th>USERNAME</th><th>HIGHEST LEVEL</th></tr></thead>
+        <tbody id="lbBody"></tbody>
+      </table>
+    </div>
+    <div class="hint" id="lbMsg"></div>
+  </div>
+</div>
+
 <div id="gate">
   <div class="card">
     <h1>BANJOBALL</h1>
@@ -444,18 +463,6 @@
     <div class="msg" id="setupMsg"></div>
   </div>
 
-  <div id="lbPanel" class="hidden">
-    <div class="card" id="lbCard">
-      <h1>LEADERBOARD</h1>
-      <div id="lbScroll">
-        <table id="lbTable">
-          <thead><tr><th>USERNAME</th><th>HIGHEST LEVEL</th></tr></thead>
-          <tbody id="lbBody"></tbody>
-        </table>
-      </div>
-      <div class="hint" id="lbMsg"></div>
-    </div>
-  </div>
 </div>
 <div id="menu" class="hidden">
   <div class="card">
@@ -498,12 +505,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v19.8-dev"></script>
-<script src="ai.js?v=v19.8-dev"></script>
-<script src="gauntlet.js?v=v19.8-dev"></script>
-<script src="profile.js?v=v19.8-dev"></script>
-<script src="audio.js?v=v19.8-dev"></script>
-<script src="tutorial.js?v=v19.8-dev"></script>
+<script src="shot.js?v=v19.9-dev"></script>
+<script src="ai.js?v=v19.9-dev"></script>
+<script src="gauntlet.js?v=v19.9-dev"></script>
+<script src="profile.js?v=v19.9-dev"></script>
+<script src="audio.js?v=v19.9-dev"></script>
+<script src="tutorial.js?v=v19.9-dev"></script>
 <script>
 'use strict';
 
@@ -2811,7 +2818,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.8-dev';
+const BUILD = 'v19.9-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3491,12 +3498,16 @@ const randomCode = () => Array.from({ length: 4 },
   () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
 function setMsg(html) { $('netMsg').innerHTML = html; }
-function hideMenu() { $('menu').classList.add('hidden'); }
-function showMenu() { pendingTutorial = false; pendingGauntlet = false;
-                     $('menu').classList.remove('hidden'); hideSetup(); }
+function hideMenu() { $('menu').classList.add('hidden'); paintLeaderboard(); }
+function showMenu() {
+  pendingTutorial = false; pendingGauntlet = false;
+  $('menu').classList.remove('hidden');
+  hideSetup();
+  paintLeaderboard();
+}
 function hideSetup() {
   $('setup').classList.add('hidden');
-  $('lbPanel').classList.add('hidden');
+  paintLeaderboard();
 }
 function hideLogin() { $('login').classList.add('hidden'); }
 
@@ -3607,16 +3618,29 @@ function esc(t) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
 
-/* Beside the gauntlet card only. Other modes will want their own boards one
-   day, and a leaderboard with no mode attached would have to mean something. */
-function paintLeaderboard() {
-  const show = pendingGauntlet;
-  $('lbPanel').classList.toggle('hidden', !show);
-  if (!show) return;
+/* One switch. Turn it off and the main menu has no board beside it; nothing
+   else changes, and the gauntlet setup keeps its own. Here rather than buried
+   in the painter because the point of it is being easy to find. */
+const MENU_LEADERBOARD = true;
 
-  // Match the card next to it. Read rather than assumed: the setup card's
-  // height depends on which rows it is showing.
-  const card = document.querySelector('#setup .card');
+/* Which card the board should stand beside, or nothing. The gauntlet setup
+   always has one; the main menu has one only while the switch above says so.
+   Anywhere else - mid-game, at the door, on another mode's setup - there is no
+   card to sit next to and no question being asked. */
+function lbTarget() {
+  if (!$('setup').classList.contains('hidden')) return pendingGauntlet ? 'setup' : null;
+  if (!$('menu').classList.contains('hidden'))  return MENU_LEADERBOARD ? 'menu' : null;
+  return null;
+}
+
+function paintLeaderboard() {
+  const where = lbTarget();
+  $('lbPanel').classList.toggle('hidden', !where);
+  if (!where) return;
+
+  // Match the card beside it. Read rather than assumed: both cards' heights
+  // depend on what they are currently showing.
+  const card = document.querySelector('#' + where + ' .card');
   if (card && card.offsetHeight) $('lbCard').style.height = card.offsetHeight + 'px';
 
   $('lbBody').innerHTML = '';
@@ -3624,7 +3648,7 @@ function paintLeaderboard() {
   if (!authReady()) return;
 
   lbFetch().then(rows => {
-    if (!pendingGauntlet) return;          // they left while it was in flight
+    if (!lbTarget()) return;               // they left while it was in flight
     $('lbMsg').textContent = rows.length ? '' : 'nobody has finished a run yet';
     $('lbBody').innerHTML = rows.map(r =>
       '<tr' + (r.username === authName() ? ' class="you"' : '') + '>' +
