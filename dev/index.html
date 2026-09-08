@@ -57,7 +57,7 @@
      did. A utility class that means "not displayed, whatever else says" has to
      outrank the layout rules it is switching off. */
   .hidden{display:none!important}
-  #gate{position:fixed;inset:0;z-index:21;display:flex;align-items:center;
+  #gate{position:fixed;inset:0;z-index:25;display:flex;align-items:center;
         justify-content:center;
         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
   #gate .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
@@ -105,9 +105,13 @@
      assigned in script is CONTENT height - and matching it to a neighbour's
      offsetHeight, which includes 26px of padding each side and a border, made
      this card 54px taller than the thing it was copying. */
-  #lbPanel{position:fixed;top:0;bottom:0;left:calc(50% + 170px);right:0;z-index:20;
+  /* 21, above #menu at 20. Both #menu and #setup are full-screen elements with
+     opaque backgrounds, so a panel that merely SITS BESIDE the card still has
+     to outrank the sheet the card is drawn on - at equal z-index the later
+     element in the document wins, and the menu is later. */
+  #lbPanel{position:fixed;top:0;bottom:0;left:calc(50% + 170px);right:0;z-index:21;
            display:flex;align-items:center;justify-content:center}
-  #lbCard{width:168px;padding:16px;box-sizing:border-box;display:flex;
+  #lbCard{width:200px;padding:16px;box-sizing:border-box;display:flex;
           flex-direction:column}
   #lbCard h1{font-size:14px !important;letter-spacing:.12em;line-height:1.5;margin:0 0 14px}
   #lbTable{width:100%;border-collapse:collapse;font-size:14px;
@@ -505,12 +509,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v19.9-dev"></script>
-<script src="ai.js?v=v19.9-dev"></script>
-<script src="gauntlet.js?v=v19.9-dev"></script>
-<script src="profile.js?v=v19.9-dev"></script>
-<script src="audio.js?v=v19.9-dev"></script>
-<script src="tutorial.js?v=v19.9-dev"></script>
+<script src="shot.js?v=v20.0-dev"></script>
+<script src="ai.js?v=v20.0-dev"></script>
+<script src="gauntlet.js?v=v20.0-dev"></script>
+<script src="profile.js?v=v20.0-dev"></script>
+<script src="audio.js?v=v20.0-dev"></script>
+<script src="tutorial.js?v=v20.0-dev"></script>
 <script>
 'use strict';
 
@@ -2818,7 +2822,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v19.9-dev';
+const BUILD = 'v20.0-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
