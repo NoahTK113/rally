@@ -25,6 +25,7 @@ const gaunt = {
   pending: null,    // 'over' | 'win' — raised inside the step, acted on next frame
   shown: false,     // a panel is up and the run is suspended
   best: 0,
+  cheated: false,   // the level was set by hand, so the high score must not learn from it
 };
 
 const GAUNT_TOP = 100;          // the strongest AI there is
@@ -51,21 +52,28 @@ function gauntDifficulty(L) {
 // The ladder takes a fraction of itself; the curve decides which fraction.
 function gauntApply() { aiSetLevelT((gauntDifficulty(gaunt.level) - 1) / 9); }
 
-/* Kept out of PREFS_KEYS on purpose. A version bump exists to clear settings
-   whose MEANING changed, and a high score has no meaning to go stale — losing
-   it to an unrelated upgrade would just be a loss. */
-function gauntLoadBest() {
-  try {
-    const v = parseInt(localStorage.getItem('banjoball.best'), 10);
-    gaunt.best = (v >= 1) ? v : 0;
-  } catch (e) { gaunt.best = 0; }
-  return gaunt.best;
+/* The record comes from the PROFILE, not from this machine. It briefly lived
+   in localStorage, which made it the single easiest thing in the game to cheat
+   - one line in the console, no code to read. There is now nothing local to
+   edit: the server owns the number and the client is only told it.
+
+   So this reads rather than loads. A guest, or anyone offline, has no record
+   because there is nowhere to keep one. */
+function gauntBest() { return signedIn() ? authBest() : 0; }
+
+/* Kept for the shape of the call site until runs report to the server; the
+   record is written by record_goal in the database, never here. */
+function gauntSaveBest(L) {
+  if (gaunt.cheated) return;
+  if (L > gaunt.best) gaunt.best = L;
 }
 
-function gauntSaveBest(L) {
-  if (L <= gaunt.best) return;
-  gaunt.best = L;
-  try { localStorage.setItem('banjoball.best', L); } catch (e) {}
+/* Whether this run may claim the leaderboard. Being signed in is necessary and
+   not sufficient: an unlocked developer session has a slider that moves the
+   level directly, so it is disqualified before it starts rather than caught
+   afterwards. */
+function gauntEligible() {
+  return authReady() && signedIn() && !devUnlocked;
 }
 
 function gauntStart() {
@@ -75,11 +83,14 @@ function gauntStart() {
   gaunt.survival = false;
   gaunt.pending = null;
   gaunt.shown = false;
-  gauntLoadBest();
+  gaunt.cheated = false;
+  gaunt.best = gauntBest();
   gauntApply();
+  runStart(gauntEligible());
 }
 
 function gauntStop() {
+  if (gaunt.active) runEnd();     // idempotent; a closed run closes once
   gaunt.active = false;
   gaunt.armed = false;
   gaunt.pending = null;
@@ -103,6 +114,25 @@ function gauntOnGoal(side) {
   gaunt.level++;
   gauntSaveBest(gaunt.level);
   gauntApply();
+  syncPanel();       // the developer slider reads gaunt.level; keep it honest
+
+  /* The server keeps its own count and is not asked what it thinks. Displaying
+     its answer would make every level-up wait for a round trip, and the two
+     cannot disagree in honest play - if they ever do, the reply fails and the
+     run stops being ranked, which is the outcome that matters. */
+  runGoal();
+}
+
+/* The developer slider writes gaunt.level directly, so the opponent has to be
+   moved to match. Outside a run there is nothing to move and gauntStart resets
+   the level to 1 anyway, so it does nothing there rather than quietly
+   redefining the difficulty of a VS AI match. */
+function gauntSetLevelManually() {
+  gaunt.level = Math.max(1, Math.round(gaunt.level));
+  if (!gaunt.active) return;
+  gaunt.cheated = true;
+  runDisqualify();          // the run may continue; its record may not
+  gauntApply();
 }
 
 /* Raising the card is a frame-loop job, next to the tutorial's. Releasing the
@@ -116,15 +146,32 @@ function pumpGauntlet(dt) {
   gaunt.shown = true;
 
   if (which === 'over') {
+    runEnd();
     gauntSaveBest(gaunt.level);
     $('gauntOverLevel').textContent = 'You reached level ' + gaunt.level + '.';
     $('gauntOverBest').textContent =
-      gaunt.best ? 'Best: level ' + gaunt.best : '';
+      !signedIn()  ? 'Sign in to record a best.'
+      : gaunt.best ? 'Best: level ' + gaunt.best
+      : '';
   }
 
   if (document.exitPointerLock) document.exitPointerLock();
   openPause();
   pausePanel(which === 'over' ? 'gauntover' : 'gauntwin');
+}
+
+/* Ending a run on purpose is still ending a run. Quitting used to walk out
+   through leaveGame, which never told the server the run was over and never
+   raised the card - so a deliberate stop at level 30 recorded nothing, while
+   losing at level 3 recorded that. The same 'over' the AI's goal raises, so
+   there is one path to the game-over card and one place that closes a run.
+
+   Answers whether it took responsibility, because the caller has to know
+   whether to leave the game itself. */
+function gauntEndByPlayer() {
+  if (!gaunt.active || gaunt.shown || gaunt.pending) return false;
+  gaunt.pending = 'over';
+  return true;
 }
 
 /* Past the top. The difficulty is already pinned by gauntDifficulty, so
@@ -179,10 +226,14 @@ function drawGauntletHud(ctx, sx, sy, size) {
   ctx.fillStyle = '#ffffff';
   ctx.fillText('LEVEL ' + gaunt.level, sx, sy);
 
-  if (!gaunt.survival) return;
+  /* Ranked or not is said by the badge at the top of the window, which is up
+     for the whole run rather than only while the scoreboard is being read. All
+     that is left here is survival. */
+  const sub = gaunt.survival ? 'SURVIVAL MODE — MAXIMUM DIFFICULTY REACHED' : '';
+  if (!sub) return;
   ctx.font = `600 ${Math.max(9, Math.round(size * 0.28))}px ui-monospace, Consolas, monospace`;
   ctx.fillStyle = '#ffffff';
-  ctx.fillText('SURVIVAL MODE — MAXIMUM DIFFICULTY REACHED', sx, sy + size * 0.72);
+  ctx.fillText(sub, sx, sy + size * 0.72);
 }
 
 /* What the banner says when YOU score: the level you just reached, rather than
