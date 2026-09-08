@@ -111,14 +111,21 @@
      element in the document wins, and the menu is later. */
   #lbPanel{position:fixed;top:0;bottom:0;left:calc(50% + 170px);right:0;z-index:21;
            display:flex;align-items:center;justify-content:center}
-  #lbCard{width:200px;padding:16px;box-sizing:border-box;display:flex;
-          flex-direction:column}
+  /* Its own card styling, spelled out. Every other .card rule in this sheet is
+     scoped to the screen it belongs to - #setup .card, #menu .card - so moving
+     this one to the top level left it matching nothing and rendering as bare
+     text on the field. Carries the same border, radius, ground and shadow as
+     the cards it sits beside. */
+  #lbCard{width:240px;padding:16px;box-sizing:border-box;display:flex;
+          flex-direction:column;border:1px solid #1d2939;border-radius:14px;
+          background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.5);
+          text-align:center}
   #lbCard h1{font-size:14px !important;letter-spacing:.12em;line-height:1.5;margin:0 0 14px}
   #lbTable{width:100%;border-collapse:collapse;font-size:14px;
            font-variant-numeric:tabular-nums}
   #lbTable th{font-size:14px;font-weight:600;letter-spacing:.04em;color:#ffffff;
               text-align:left;padding:0 0 9px;border-bottom:1px solid #1c2838;
-              white-space:normal;vertical-align:bottom}
+              white-space:nowrap}
   #lbTable th:last-child,#lbTable td:last-child{text-align:right}
   #lbTable td{padding:6px 0;color:#ffffff}
   #lbTable tr.you td{color:#22d3ee;font-weight:600}
@@ -509,12 +516,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v20.0-dev"></script>
-<script src="ai.js?v=v20.0-dev"></script>
-<script src="gauntlet.js?v=v20.0-dev"></script>
-<script src="profile.js?v=v20.0-dev"></script>
-<script src="audio.js?v=v20.0-dev"></script>
-<script src="tutorial.js?v=v20.0-dev"></script>
+<script src="shot.js?v=v20.1-dev"></script>
+<script src="ai.js?v=v20.1-dev"></script>
+<script src="gauntlet.js?v=v20.1-dev"></script>
+<script src="profile.js?v=v20.1-dev"></script>
+<script src="audio.js?v=v20.1-dev"></script>
+<script src="tutorial.js?v=v20.1-dev"></script>
 <script>
 'use strict';
 
@@ -2822,7 +2829,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v20.0-dev';
+const BUILD = 'v20.1-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
