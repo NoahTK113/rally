@@ -516,32 +516,68 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v20.1-dev"></script>
-<script src="ai.js?v=v20.1-dev"></script>
-<script src="gauntlet.js?v=v20.1-dev"></script>
-<script src="profile.js?v=v20.1-dev"></script>
-<script src="audio.js?v=v20.1-dev"></script>
-<script src="tutorial.js?v=v20.1-dev"></script>
+<script src="shot.js?v=v20.2-dev"></script>
+<script src="ai.js?v=v20.2-dev"></script>
+<script src="gauntlet.js?v=v20.2-dev"></script>
+<script src="profile.js?v=v20.2-dev"></script>
+<script src="audio.js?v=v20.2-dev"></script>
+<script src="tutorial.js?v=v20.2-dev"></script>
 <script>
 'use strict';
 
 // ---- arena, all in metres -------------------------------------------------
-const A = {
-  width: 20, height: 12,    // inner playing area
-  netHeight: 2.95, netT: 0.10,
-  goalLip: 3.00,            // gap between the floor and the bottom of the opening
-  goalHeight: 3.00,         // size of the opening
-  goalDepth: 0.70,          // how far the box extends outside the field
-  cornerR: 0.11,            // rounding on the arena contour. WORLD units, not
-                            // derived from the hairline, so collision geometry
-                            // never changes when the window resizes.
-  crossFrac: 0.35,         // how far the OFFENCE paddle may reach into the far
-                            // half, as a fraction of that half's width
-  defFrac: 0.65,            // share of a player's own half reserved for defence
-  paddleLength: 0.85,
-  paddleT: 0.05,
-  margin: 0.9,
+/* ==========================================================================
+   THE ARENA, AS DATA
+
+   The field is a named set of numbers rather than a set of numbers. Everything
+   still reads `A`, which is the arena currently loaded - so no call site
+   changes and nothing about how the game plays moves. What changes is that
+   there can be more than one entry.
+
+   Two things follow from doing it this way rather than by branching on an
+   arena id at each site. A second arena cannot break the first, because the
+   first is just another entry. And a transition between two arenas is
+   interpolation between two tables, which is the same shape as AI_LEVELS -
+   there is no morph to write, only a `t` to drive.
+
+   PADDLE LENGTH AND THICKNESS ARE NOT IN HERE. The paddle is the instrument;
+   the arena is the room. A player who learns to time a swing in one field
+   should arrive in the next knowing exactly what they know, and that only
+   holds if the thing in their hand never changes when the room does.
+   ========================================================================== */
+const ARENAS = {
+  1: {
+    width: 20, height: 12,    // inner playing area
+    netHeight: 2.95, netT: 0.10,
+    goalLip: 3.00,            // gap between the floor and the bottom of the opening
+    goalHeight: 3.00,         // size of the opening
+    goalDepth: 0.70,          // how far the box extends outside the field
+    cornerR: 0.11,            // rounding on the arena contour. WORLD units, not
+                              // derived from the hairline, so collision geometry
+                              // never changes when the window resizes.
+    crossFrac: 0.35,          // how far the OFFENCE paddle may reach into the far
+                              // half, as a fraction of that half's width
+    defFrac: 0.65,            // share of a player's own half reserved for defence
+    margin: 0.9,              // camera padding around the contour
+  },
 };
+
+let arenaId = 1;
+
+const A = {
+  paddleLength: 0.85,         // the instrument, not the room
+  paddleT: 0.05,
+};
+
+/* Writes into the live A rather than replacing it, because everything holds a
+   reference to that object - the tuning panel, the config the host sends a
+   guest, and every closure that reads A.width. */
+function arenaSet(n) {
+  if (!ARENAS[n]) return;
+  Object.assign(A, ARENAS[n]);
+  arenaId = n;
+}
+arenaSet(1);
 
 /* Paddle response. Springs are given as (frequency, damping ratio) rather than
    (k, c) because those are the numbers you can reason about: frequency is how
@@ -2829,7 +2865,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v20.1-dev';
+const BUILD = 'v20.2-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
