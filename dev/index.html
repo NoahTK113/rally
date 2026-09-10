@@ -516,13 +516,13 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v20.3-dev"></script>
-<script src="ai.js?v=v20.3-dev"></script>
-<script src="space.js?v=v20.3-dev"></script>
-<script src="gauntlet.js?v=v20.3-dev"></script>
-<script src="profile.js?v=v20.3-dev"></script>
-<script src="audio.js?v=v20.3-dev"></script>
-<script src="tutorial.js?v=v20.3-dev"></script>
+<script src="shot.js?v=v20.4-dev"></script>
+<script src="ai.js?v=v20.4-dev"></script>
+<script src="space.js?v=v20.4-dev"></script>
+<script src="gauntlet.js?v=v20.4-dev"></script>
+<script src="profile.js?v=v20.4-dev"></script>
+<script src="audio.js?v=v20.4-dev"></script>
+<script src="tutorial.js?v=v20.4-dev"></script>
 <script>
 'use strict';
 
@@ -1642,8 +1642,11 @@ function stepBall(w, dt, collide = true, skipPaddles = false) {
           collidePaddle(w, pd);
         }
       }
-      collideNet(w);
-      collideArena(w);      // last, so the ball can never be left inside a wall
+      /* One call for every surface in the world - net, walls, corners - in the
+         order collideNet and collideArena resolved them, so a frame with two
+         contacts in it comes out the same. Walls last, so the ball can never
+         be left inside one. */
+      spaceCollide(w);
       // Only while the ball is meant to be on the court: during a goal it is
       // supposed to leave through the back of the net.
       if (w.phase === PHASE.PLAY) containBall(b);
@@ -2866,7 +2869,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v20.3-dev';
+const BUILD = 'v20.4-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that

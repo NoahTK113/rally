@@ -201,7 +201,27 @@ function spaceBuildPieces() {
 }
 
 let spacePieces = [];
+let spaceOrder = [];      // every capsule, flat, in the order they are resolved
 let _spaceKey = '';
+
+/* THE ORDER MATTERS, and it is not the order the pieces happen to be in.
+
+   Contacts are resolved as they are found, so when the ball touches two
+   surfaces in one substep - a corner, or the foot of the net - which is
+   handled first changes the result. The old code ran collideNet, then every
+   arena segment, then every arc. Iterating piece by piece would interleave
+   those, and the geometry would be identical while the play was not.
+
+   So the capsules are flattened once into that same order: the net, then all
+   the flat surfaces, then all the rounded corners. */
+function spaceBuildOrder() {
+  const flat = [];
+  for (const p of spacePieces)
+    for (const cap of p.caps) flat.push({ p, cap });
+
+  const rank = e => e.p.id === 'net' ? 0 : e.cap.r > 0 ? 2 : 1;
+  return flat.sort((a, b) => rank(a) - rank(b));
+}
 
 /* Rebuilt only when the dimensions behind it change, the same bargain
    arenaFeatures struck - the tuning panel may move a wall, and nothing else
@@ -213,6 +233,7 @@ function spaceEnsure() {
   if (key === _spaceKey && spacePieces.length) return;
   _spaceKey = key;
   spacePieces = spaceBuildPieces();
+  spaceOrder = spaceBuildOrder();
 }
 
 /* --------------------------------------------------------------------------
@@ -228,33 +249,33 @@ function spaceCollide(w) {
   spaceEnsure();
   const b = w.ball, R = PHYS.ballR;
 
-  for (const p of spacePieces) {
+  for (const e of spaceOrder) {
+    const p = e.p, cap = e.cap;
     const c = Math.cos(p.a), s = Math.sin(p.a);
-    for (const cap of p.caps) {
-      // capsule ends in world space
-      const ax = p.x + cap.ax * c - cap.ay * s, ay = p.y + cap.ax * s + cap.ay * c;
-      const bx = p.x + cap.bx * c - cap.by * s, by = p.y + cap.bx * s + cap.by * c;
 
-      const ex = bx - ax, ey = by - ay;
-      const len2 = ex * ex + ey * ey;
-      let t = len2 > 0 ? ((b.x - ax) * ex + (b.y - ay) * ey) / len2 : 0;
-      t = t < 0 ? 0 : t > 1 ? 1 : t;
-      const qx = ax + ex * t, qy = ay + ey * t;
+    // capsule ends in world space
+    const ax = p.x + cap.ax * c - cap.ay * s, ay = p.y + cap.ax * s + cap.ay * c;
+    const bx = p.x + cap.bx * c - cap.by * s, by = p.y + cap.bx * s + cap.by * c;
 
-      let dx = b.x - qx, dy = b.y - qy;
-      let d = Math.hypot(dx, dy);
-      const sum = R + cap.r;
-      if (d >= sum) continue;
-      if (d < 1e-9) { dx = 0; dy = 1; d = 1e-9; }
+    const ex = bx - ax, ey = by - ay;
+    const len2 = ex * ex + ey * ey;
+    let t = len2 > 0 ? ((b.x - ax) * ex + (b.y - ay) * ey) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const qx = ax + ex * t, qy = ay + ey * t;
 
-      // where the contact point is going, if the piece is going anywhere
-      const rx = qx - p.x, ry = qy - p.y;
-      const svx = p.vx - p.w * ry, svy = p.vy + p.w * rx;
+    let dx = b.x - qx, dy = b.y - qy;
+    let d = Math.hypot(dx, dy);
+    const sum = R + cap.r;
+    if (d >= sum) continue;
+    if (d < 1e-9) { dx = 0; dy = 1; d = 1e-9; }
 
-      const j = resolveContact(b, dx / d, dy / d, sum - d,
-                               PHYS.restitution, PHYS.friction, svx, svy);
-      if (j > EV_MIN) pushEvent(w, cap.r > 0 && p.id === 'net' ? 'net' : 'wall', j, b.x);
-    }
+    // where the contact point is going, if the piece is going anywhere
+    const rx = qx - p.x, ry = qy - p.y;
+    const svx = p.vx - p.w * ry, svy = p.vy + p.w * rx;
+
+    const j = resolveContact(b, dx / d, dy / d, sum - d,
+                             PHYS.restitution, PHYS.friction, svx, svy);
+    if (j > EV_MIN) pushEvent(w, p.id === 'net' ? 'net' : 'wall', j, b.x);
   }
 }
 
