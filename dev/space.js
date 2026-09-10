@@ -393,10 +393,10 @@ function spaceView(w, side, out) {
   /* Never tighter than the court itself. Without this the camera would close
      right in during a rally at the centre circle, and a game that breathes in
      and out on every exchange is unreadable. */
-  const b = bounds();
-  if (out.x0 > b.minX) out.x0 = b.minX;
-  if (out.x1 < b.maxX) out.x1 = b.maxX;
-  if (out.y0 > b.minY) out.y0 = b.minY;
-  if (out.y1 < b.maxY) out.y1 = b.maxY;
+  const court = bounds();
+  if (out.x0 > court.minX) out.x0 = court.minX;
+  if (out.x1 < court.maxX) out.x1 = court.maxX;
+  if (out.y0 > court.minY) out.y0 = court.minY;
+  if (out.y1 < court.maxY) out.y1 = court.maxY;
   return out;
 }
