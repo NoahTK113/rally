@@ -73,23 +73,25 @@
    of the court it is not gravity at all - it is a thing at the centre that
    everything falls toward, from every direction.
 
-   AND IT HAS A SURFACE. A point mass has none, which makes it a black hole:
-   acceleration climbs without limit as the ball approaches, and the numbers
-   stop resembling any object you could stand on. Real bodies cannot do that,
-   because inside a body only the mass BELOW you pulls - so gravity peaks at
-   the surface and falls linearly to zero at the centre.
+   AND IT IS SOLID. The source is a body: a disc of radius R that the ball
+   bounces off, added to the world as a piece like any other. A zero-length
+   capsule with a radius already IS a disc, so it needed no new collision code
+   at all - only an entry in the piece list.
 
-       outside   a = g * ref^2 / d^2
-       inside    a = (g * ref^2 / R^2) * (d / R)
+   That is what stops the numbers looking like a neutron star. A point mass has
+   no surface, so acceleration climbs without limit as the ball approaches; a
+   body has one, and the closest the ball can ever get is R. The peak is
+   whatever the field reads at the surface, and radius is the dial:
 
-   The two agree exactly at d = R, and the singularity is gone rather than
-   clamped: there is no special case, only the other half of the same law. It
-   also gives the source something to be - a ball that falls through it comes
-   out the far side and oscillates, which is what falling through a planet
-   actually does.
+       a(surface) = g * ref^2 / R^2
 
-   Radius is therefore a real quantity now, not a drawing size. Bigger radius,
-   same mass, gentler well.
+   so it falls as 1/R^2. Same mass, bigger body, gentler well.
+
+   The interior law - linear to zero at the centre - is kept as a BACKSTOP
+   rather than as a feature. The ball cannot get inside now, but gravity is
+   sampled at the start of a substep and resolved at the end, so it can be
+   fractionally inside for one sample. Without the interior branch that sample
+   would be reading a singularity.
    -------------------------------------------------------------------------- */
 /* ZONES ARE OFF.
 
@@ -304,6 +306,15 @@ function spaceBuildPieces() {
   add('net', { ax: A.width / 2, ay: 0,
                bx: A.width / 2, by: Math.max(0, A.netHeight - rNet), r: rNet });
 
+  /* The body, when there is one. A zero-length capsule is a disc, so this is a
+     collider by construction rather than by a special case - and it moves with
+     the source because it is rebuilt from it. */
+  const src = SPACE.gravity;
+  if (src.kind === 'point') {
+    const R = PHYS.ballR * src.rMul;
+    add('source', { ax: src.x, ay: src.y, bx: src.x, by: src.y, r: R });
+  }
+
   return Object.keys(groups).map(id => spaceMakePiece(id, groups[id]));
 }
 
@@ -335,8 +346,12 @@ function spaceBuildOrder() {
    does yet. Once pieces start moving under their own steam this becomes a
    build-once, and the transform is what varies. */
 function spaceEnsure() {
+  /* The source is a piece, so the piece list has to be rebuilt when it appears,
+     moves or resizes - not only when the court's dimensions change. */
+  const g = SPACE.gravity;
   const key = [A.width, A.height, A.goalLip, A.goalHeight, A.goalDepth,
-               A.cornerR, A.netHeight, A.netT].join(',');
+               A.cornerR, A.netHeight, A.netT,
+               g.kind, g.x, g.y, g.rMul, PHYS.ballR].join(',');
   if (key === _spaceKey && spacePieces.length) return;
   _spaceKey = key;
   spacePieces = spaceBuildPieces();
