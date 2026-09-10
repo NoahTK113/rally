@@ -61,16 +61,17 @@
    fails for every sign of vy, so the branch never runs. No microgravity fudge
    needed; the zero can be real.
 
-   The point source has no stored strength. Its pull is defined as "equal to
-   PHYS.gravity at the court", so the reference distance is measured from the
-   source to the middle of the floor every time it is asked. Move the source and
-   the strength at the court follows it automatically - there is no second
-   number to remember to update, and the slider means what it says whichever
-   kind is running.
+   The point source's strength is `ref`: the distance at which it pulls as hard
+   as PHYS.gravity. That is a statement about the source rather than about where
+   it happens to be, which is what a mass actually is - move it and it keeps its
+   mass. An earlier version measured the reference from wherever the source sat
+   to the floor, which meant a source at the centre of the court would silently
+   redefine its own strength on arrival.
 
-   What DOES change as it comes closer is the falloff across the court, which is
-   the whole reason it is interesting. At 20 below, gravity at the ceiling is
-   about 40% of gravity at the floor.
+   The court is not a point, so what a source does to it depends entirely on how
+   close it is. Below the floor it is a stronger, tilted gravity. In the MIDDLE
+   of the court it is not gravity at all - it is a thing at the centre that
+   everything falls toward, from every direction.
    -------------------------------------------------------------------------- */
 /* ZONES ARE OFF.
 
@@ -86,7 +87,9 @@ const PADDLE_ZONES = false;
 
 const SPACE = {
   // the point data travels with it, so changing kind is one word
-  gravity: { kind: 'uniform', x: 10, y: -20, r: 2.5 },
+  /* Centre of the court, ball-sized, pulling as hard as PHYS.gravity at 5 -
+     which is half way to a goal. Nothing happens until the kind says `point`. */
+  gravity: { kind: 'uniform', x: 10, y: 6, rMul: 1, ref: 5 },
   goalR: 0.55,          // how close the ball must come to be swallowed
   pullR: 2.5,           // and how far out the pull reaches
 };
@@ -102,11 +105,7 @@ function spaceGravity(x, y, out) {
   if (s.kind === 'off') { out.x = 0; out.y = 0; return out; }
 
   if (s.kind === 'point') {
-    // strength is pinned to "PHYS.gravity at the middle of the floor", measured
-    // rather than stored - so moving the source cannot leave a stale constant
-    const rx = s.x - A.width / 2, ry = s.y;
-    const ref2 = rx * rx + ry * ry;
-
+    const ref2 = s.ref * s.ref;             // a = PHYS.gravity at distance ref
     const dx = s.x - x, dy = s.y - y;
     const d2 = (dx * dx + dy * dy) || 1e-9;
     const d = Math.sqrt(d2);
@@ -134,7 +133,10 @@ function spaceGravityAt(x, y) { return spaceGravity(x, y, _gAcc); }
    does when you are getting closer to it and further from everything else. */
 function spaceDrawSource(ctx) {
   if (SPACE.gravity.kind !== 'point') return;
-  const R = SPACE.gravity.r;
+  /* Measured in ball radii rather than metres. PHYS.ballR is a live constant
+     and space.js loads before it exists, so it cannot be read into the literal
+     above - and a copy of it there would be a second number to keep in step. */
+  const R = PHYS.ballR * SPACE.gravity.rMul;
   ctx.save();
   ctx.beginPath();
   ctx.arc(SPACE.gravity.x, SPACE.gravity.y, R, 0, Math.PI * 2);
