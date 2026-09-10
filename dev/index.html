@@ -516,13 +516,13 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v20.4-dev"></script>
-<script src="ai.js?v=v20.4-dev"></script>
-<script src="space.js?v=v20.4-dev"></script>
-<script src="gauntlet.js?v=v20.4-dev"></script>
-<script src="profile.js?v=v20.4-dev"></script>
-<script src="audio.js?v=v20.4-dev"></script>
-<script src="tutorial.js?v=v20.4-dev"></script>
+<script src="shot.js?v=v20.5-dev"></script>
+<script src="ai.js?v=v20.5-dev"></script>
+<script src="space.js?v=v20.5-dev"></script>
+<script src="gauntlet.js?v=v20.5-dev"></script>
+<script src="profile.js?v=v20.5-dev"></script>
+<script src="audio.js?v=v20.5-dev"></script>
+<script src="tutorial.js?v=v20.5-dev"></script>
 <script>
 'use strict';
 
@@ -1629,8 +1629,14 @@ function stepBall(w, dt, collide = true, skipPaddles = false) {
   const pull = inGoal ? (b.x < 0 ? -PHYS.goalPull : PHYS.goalPull) : 0;
 
   for (let i = 0; i < sub; i++) {
-    b.vx += pull * h;
-    b.vy -= PHYS.gravity * h;
+    /* Gravity is a field now, not a number. It points at a mass 2000 below the
+       court, so across twelve units it varies about a percent and leans a
+       third of a degree at the ends - which is why nobody has ever noticed
+       being in orbit. PHYS.gravity still means what the slider says: the
+       acceleration AT the court. */
+    const g = spaceGravityAt(b.x, b.y);
+    b.vx += (g.x + pull) * h;
+    b.vy += g.y * h;
     b.x  += b.vx * h;
     b.y  += b.vy * h;
     b.a  += b.w * h;
@@ -2869,7 +2875,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v20.4-dev';
+const BUILD = 'v20.5-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that

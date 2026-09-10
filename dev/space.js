@@ -67,6 +67,12 @@ function spaceGravity(x, y, out) {
   return out;
 }
 
+/* The one caller is stepBall, at 240Hz with up to eight substeps, and the AI's
+   shot search runs 360 more per candidate. Handing back a shared vector rather
+   than a fresh one keeps that free; it is read and discarded immediately. */
+const _gAcc = { x: 0, y: 0 };
+function spaceGravityAt(x, y) { return spaceGravity(x, y, _gAcc); }
+
 /* --------------------------------------------------------------------------
    PIECES
 
