@@ -32,20 +32,38 @@
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
-   THE SOURCE
+   WHAT PULLS THINGS DOWN
 
-   A point, far below the court. PHYS.gravity keeps its meaning and its slider,
-   but it now reads as "the acceleration AT THE FIELD" and GM follows from it:
+   Three kinds, and which one is running is a word.
 
-       GM = g * R^2
+     uniform   straight down at PHYS.gravity, everywhere, forever.
+     point     a mass somewhere, falling off with the square of distance.
+     off       nothing. The ball goes where it was hit and keeps going.
 
-   At R = 2000 the field varies 1.2% across the court's twelve units and its
-   direction fans 0.29 degrees at the ends. Imperceptible - which is the point.
-   Arena 1 plays exactly as it always did while being, truthfully, in orbit.
+   UNIFORM IS THE DEFAULT, and not as a simplification. A single point source
+   cannot be both flat enough to play on and close enough to matter:
 
-   The source does not track the width slider. At this distance a few metres of
-   offset tilts the field by thousandths of a degree, and pretending otherwise
-   would be precision theatre.
+       distance   variation across the court   flight time to reach it
+         2000              1.2%                        167s
+          240              9.3%                         20s
+           60               31%                          5s
+           30               49%                          2s
+
+   There is no radius that is both. So the court does not start near a mass at
+   all - the pull is thrust, and the room is a ship under acceleration. That
+   costs nothing and buys back exactness: with a genuinely uniform field the
+   AI's closed-form parabola is right rather than 1% out, and the expensive
+   numerical solver is only needed once the story has earned it.
+
+   It also makes the cheapest dramatic beats available. Thrust that stutters is
+   one number wobbling. Engines off is one word - and zero is SAFE: shotFlight
+   divides by g only inside `tApex > 0 && tApex < t`, and at g = 0 that test
+   fails for every sign of vy, so the branch never runs. No microgravity fudge
+   needed; the zero can be real.
+
+   The point source keeps `ref`: the distance at which its pull equals
+   PHYS.gravity. So the slider goes on meaning what it says whichever kind is
+   running.
    -------------------------------------------------------------------------- */
 /* ZONES ARE OFF.
 
@@ -60,22 +78,33 @@
 const PADDLE_ZONES = false;
 
 const SPACE = {
-  source: { x: 10, y: -2000 },
+  // the point data travels with it, so changing kind is one word
+  gravity: { kind: 'uniform', x: 10, y: -2000, ref: 2000 },
   goalR: 0.55,          // how close the ball must come to be swallowed
   pullR: 2.5,           // and how far out the pull reaches
 };
 
-function spaceGM() { return PHYS.gravity * SPACE.source.y * SPACE.source.y; }
+// One word, from the console or from whatever eventually drives the story.
+function spaceSetGravity(kind) { SPACE.gravity.kind = kind; }
 
-/* Acceleration at a point. Returns the vector rather than a magnitude, because
-   the whole reason this exists is that it stops pointing straight down. */
+/* Acceleration at a point. A vector rather than a magnitude, because two of
+   the three kinds do not point straight down. */
 function spaceGravity(x, y, out) {
-  const dx = SPACE.source.x - x, dy = SPACE.source.y - y;
-  const d2 = dx * dx + dy * dy;
-  const d = Math.sqrt(d2) || 1;
-  const a = spaceGM() / d2;
-  out.x = a * dx / d;
-  out.y = a * dy / d;
+  const s = SPACE.gravity;
+
+  if (s.kind === 'off') { out.x = 0; out.y = 0; return out; }
+
+  if (s.kind === 'point') {
+    const dx = s.x - x, dy = s.y - y;
+    const d2 = dx * dx + dy * dy;
+    const d = Math.sqrt(d2) || 1;
+    const a = PHYS.gravity * s.ref * s.ref / d2;   // = g at distance `ref`
+    out.x = a * dx / d;
+    out.y = a * dy / d;
+    return out;
+  }
+
+  out.x = 0; out.y = -PHYS.gravity;                // uniform: thrust, not gravity
   return out;
 }
 
@@ -85,25 +114,24 @@ function spaceGravity(x, y, out) {
 const _gAcc = { x: 0, y: 0 };
 function spaceGravityAt(x, y) { return spaceGravity(x, y, _gAcc); }
 
-/* The mass itself. Two thousand units below the court, so at any framing that
-   includes the goals it is far off the bottom of the screen and costs one
-   invisible arc per frame. It becomes visible exactly when something drags the
-   camera out far enough to see it - which is the point, and is why it is drawn
-   now rather than added as a surprise later.
+/* The mass, when there is one. Nothing is drawn under thrust or in free fall,
+   which is correct rather than a shortcut: there is no body out there yet, and
+   a dot marking where one will later appear would give the whole thing away.
 
    Sized in WORLD units so it grows as the view pulls back, the way a thing
-   does when you are getting further from everything else. */
+   does when you are getting closer to it and further from everything else. */
 function spaceDrawSource(ctx) {
+  if (SPACE.gravity.kind !== 'point') return;
   const R = 25;
   ctx.save();
   ctx.beginPath();
-  ctx.arc(SPACE.source.x, SPACE.source.y, R, 0, Math.PI * 2);
+  ctx.arc(SPACE.gravity.x, SPACE.gravity.y, R, 0, Math.PI * 2);
   ctx.fillStyle = '#ffffff';
   ctx.globalAlpha = 0.92;
   ctx.fill();
   ctx.globalAlpha = 0.16;
   ctx.beginPath();
-  ctx.arc(SPACE.source.x, SPACE.source.y, R * 2.4, 0, Math.PI * 2);
+  ctx.arc(SPACE.gravity.x, SPACE.gravity.y, R * 2.4, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
