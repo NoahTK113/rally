@@ -516,13 +516,13 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v20.5-dev"></script>
-<script src="ai.js?v=v20.5-dev"></script>
-<script src="space.js?v=v20.5-dev"></script>
-<script src="gauntlet.js?v=v20.5-dev"></script>
-<script src="profile.js?v=v20.5-dev"></script>
-<script src="audio.js?v=v20.5-dev"></script>
-<script src="tutorial.js?v=v20.5-dev"></script>
+<script src="shot.js?v=v20.6-dev"></script>
+<script src="ai.js?v=v20.6-dev"></script>
+<script src="space.js?v=v20.6-dev"></script>
+<script src="gauntlet.js?v=v20.6-dev"></script>
+<script src="profile.js?v=v20.6-dev"></script>
+<script src="audio.js?v=v20.6-dev"></script>
+<script src="tutorial.js?v=v20.6-dev"></script>
 <script>
 'use strict';
 
@@ -701,7 +701,7 @@ const goalY0 = () => A.goalLip;
 const goalY1 = () => A.goalLip + A.goalHeight;
 
 // ---- world -> screen ------------------------------------------------------
-const view = { scale: 1, ox: 0, oy: 0, dpr: 1 };
+const view = { scale: 1, ox: 0, oy: 0, dpr: 1, panelDev: 0 };
 
 function bounds() {
   const out = A.goalDepth + A.margin;
@@ -714,34 +714,88 @@ function bounds() {
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 
+/* Frame a rectangle of the world. Split out of resize so it can run every
+   frame rather than only when the window changes - the camera is no longer a
+   property of the court, it is a question about where things currently are. */
+function applyView(x0, x1, y0, y1) {
+  const dpr = view.dpr;
+  const cwDev = canvas.width, chDev = canvas.height;
+  const availDev = Math.max(1, chDev - view.panelDev);
+
+  const w = Math.max(1e-6, x1 - x0), h = Math.max(1e-6, y1 - y0);
+  const raw = Math.min(cwDev / w, availDev / h);
+
+  /* Quantise to a whole number of DEVICE pixels per metre. The court is a whole
+     number of metres across, so this lands x=0, x=W, y=0 and y=H on the same
+     pixel phase and vertical walls rasterise identically to horizontal ones.
+     Without it the two axes sit at unrelated sub-pixel offsets and the
+     antialiaser spreads their ink differently, which reads as a colour shift.
+
+     Only while the camera is sitting on the court, though. Once it is zooming
+     the scale would step by whole pixels-per-metre, and a slow zoom made of
+     visible steps is worse than a slightly soft line. */
+  const b = bounds();
+  const still = x0 >= b.minX - 1e-6 && x1 <= b.maxX + 1e-6 &&
+                y0 >= b.minY - 1e-6 && y1 <= b.maxY + 1e-6;
+
+  const sDev = view.sDev = Math.max(1, still ? Math.floor(raw) : raw);
+  view.scale = sDev / dpr;
+
+  const ox = (cwDev - w * sDev) / 2 - x0 * sDev;
+  const oy = view.panelDev + (availDev - h * sDev) / 2 + y1 * sDev;
+  view.oxDev = still ? Math.round(ox) : ox;      // snapped, for the same reason
+  view.oyDev = still ? Math.round(oy) : oy;
+  view.ox = view.oxDev / dpr;
+  view.oy = view.oyDev / dpr;
+}
+
+/* THE CAMERA.
+
+   The smallest window holding the ball, your own paddles and both goals, never
+   tighter than the court. spaceView decides what must be visible; this decides
+   how fast the frame agrees to it.
+
+   Expand quickly, contract slowly. If the frame lags something leaving it, the
+   thing leaves it - so growth has to be nearly immediate. Shrinking has no such
+   deadline, and a camera that snaps tight the moment it can is seasick. */
+const CAM_OUT = 0.10, CAM_IN = 0.60;      // seconds
+const camWant = { x0: 0, x1: 0, y0: 0, y1: 0 };
+const camBox  = { x0: 0, x1: 0, y0: 0, y1: 0 };
+let camReady = false;
+
+function camUpdate(dt) {
+  if (!running) { camReady = false; return; }
+  spaceView(world, mySide, camWant);
+
+  if (!camReady) {
+    camBox.x0 = camWant.x0; camBox.x1 = camWant.x1;
+    camBox.y0 = camWant.y0; camBox.y1 = camWant.y1;
+    camReady = true;
+  } else {
+    const out = 1 - Math.exp(-dt / CAM_OUT);
+    const back = 1 - Math.exp(-dt / CAM_IN);
+    // each edge moves out fast and back slowly, independently
+    camBox.x0 += (camWant.x0 - camBox.x0) * (camWant.x0 < camBox.x0 ? out : back);
+    camBox.x1 += (camWant.x1 - camBox.x1) * (camWant.x1 > camBox.x1 ? out : back);
+    camBox.y0 += (camWant.y0 - camBox.y0) * (camWant.y0 < camBox.y0 ? out : back);
+    camBox.y1 += (camWant.y1 - camBox.y1) * (camWant.y1 > camBox.y1 ? out : back);
+  }
+  applyView(camBox.x0, camBox.x1, camBox.y0, camBox.y1);
+}
+
 function resize() {
   const dpr = view.dpr = Math.min(devicePixelRatio || 1, 2);
   const cw = view.cw = innerWidth, ch = view.ch = innerHeight;
-  const cwDev = Math.round(cw * dpr), chDev = Math.round(ch * dpr);
-  canvas.width = cwDev;
-  canvas.height = chDev;
+  canvas.width = Math.round(cw * dpr);
+  canvas.height = Math.round(ch * dpr);
 
   // Keep the arena clear of the tuning panel rather than letting it overlap.
+  // Cached, because applyView runs every frame and this is a layout read.
   const panelEl = document.getElementById('panel');
-  const panelDev = Math.round(panelEl.offsetHeight * dpr);
-  const availDev = Math.max(1, chDev - panelDev);
+  view.panelDev = Math.round(panelEl.offsetHeight * dpr);
 
-  const b = bounds();
-  const w = b.maxX - b.minX, h = b.maxY - b.minY;
-
-  // Quantise to a whole number of DEVICE pixels per metre. The court is a
-  // whole number of metres across, so this lands x=0, x=W, y=0 and y=H on the
-  // same pixel world.phase and vertical walls rasterise identically to horizontal
-  // ones. Without it the two axes sit at unrelated sub-pixel offsets and the
-  // antialiaser spreads their ink differently, which reads as a colour shift.
-  const sDev = view.sDev = Math.max(1, Math.floor(Math.min(cwDev / w, availDev / h)));
-  view.scale = sDev / dpr;
-
-  // Snap the world origin to a whole device pixel, for the same reason.
-  view.oxDev = Math.round((cwDev - w * sDev) / 2 - b.minX * sDev);
-  view.oyDev = Math.round(panelDev + (availDev - h * sDev) / 2 + b.maxY * sDev);
-  view.ox = view.oxDev / dpr;
-  view.oy = view.oyDev / dpr;
+  if (camReady) applyView(camBox.x0, camBox.x1, camBox.y0, camBox.y1);
+  else { const b = bounds(); applyView(b.minX, b.maxX, b.minY, b.maxY); }
 
   render();
 }
@@ -932,6 +986,7 @@ const heldPaddle = () => paddles[idOf(mySide, intent.sel)];
 const controlsLive = () => !USE_POINTER_LOCK || pointerLocked;
 
 function clampCursor() {
+  if (!PADDLE_ZONES) return;
   const boxes = paddleBoxes(heldPaddle());
   const t = nearestLegal(boxes, cursor.x, cursor.y);
   const r = FEEL.reach;
@@ -1039,11 +1094,13 @@ function stepPaddle(p, inp, dt) {
      boundary, and the paddle is then stopped hard against it.
      The target is still bounded, but by a fixed distance in METRES, so window
      size can't buy anyone extra force at the walls. */
-  const boxes = paddleBoxes(p);
-  const reach = FEEL.reach;
-  const t = nearestLegal(boxes, p.tx, p.ty);
-  p.tx = p.tx < t.x - reach ? t.x - reach : p.tx > t.x + reach ? t.x + reach : p.tx;
-  p.ty = p.ty < t.y - reach ? t.y - reach : p.ty > t.y + reach ? t.y + reach : p.ty;
+  if (PADDLE_ZONES) {
+    const boxes = paddleBoxes(p);
+    const reach = FEEL.reach;
+    const t = nearestLegal(boxes, p.tx, p.ty);
+    p.tx = p.tx < t.x - reach ? t.x - reach : p.tx > t.x + reach ? t.x + reach : p.tx;
+    p.ty = p.ty < t.y - reach ? t.y - reach : p.ty > t.y + reach ? t.y + reach : p.ty;
+  }
 
   /* Position uses a clamped error, and clamps the error VECTOR rather than
      each axis, so top speed is the same in every direction instead of being
@@ -1063,9 +1120,11 @@ function stepPaddle(p, inp, dt) {
   // Hard stop at the boundary, per axis so the paddle still slides along a
   // wall it is pressed against. Velocity into the wall is killed, not
   // reflected — this is a kinematic limit, not a bounce.
-  const legal = nearestLegal(boxes, p.x, p.y);
-  if (legal.x !== p.x) { if ((legal.x - p.x) * p.vx < 0) p.vx = 0; p.x = legal.x; }
-  if (legal.y !== p.y) { if ((legal.y - p.y) * p.vy < 0) p.vy = 0; p.y = legal.y; }
+  if (PADDLE_ZONES) {
+    const legal = nearestLegal(paddleBoxes(p), p.x, p.y);
+    if (legal.x !== p.x) { if ((legal.x - p.x) * p.vx < 0) p.vx = 0; p.x = legal.x; }
+    if (legal.y !== p.y) { if ((legal.y - p.y) * p.vy < 0) p.vy = 0; p.y = legal.y; }
+  }
   [p.a, p.w ] = spring(p.a, p.w , p.ta, FEEL.angFreq, FEEL.angDamp, dt);
 
   /* NO ANGLE WRAPPING. It used to shift target and pose together by a turn to
@@ -1984,6 +2043,7 @@ function drawDefensivePosition() {
 
 function drawEffects() {
   drawCursor();
+  spaceDrawSource(ctx);
   drawDefensivePosition();
   if (!opts.showVectors) return;
   const p0 = me();
@@ -2841,6 +2901,8 @@ function frame(nowMs) {
     if (netAcc >= 1) { netAcc = 0; sendConfig(); }
   }
 
+  camUpdate(dt);
+
   pumpEvents();
   pumpTutorial(dt);
   pumpGauntlet(dt);
@@ -2875,7 +2937,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v20.5-dev';
+const BUILD = 'v20.6-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that

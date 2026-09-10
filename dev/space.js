@@ -47,6 +47,18 @@
    offset tilts the field by thousandths of a degree, and pretending otherwise
    would be precision theatre.
    -------------------------------------------------------------------------- */
+/* ZONES ARE OFF.
+
+   They were a rule about a court with two halves and a net between them, and
+   they clamped both the cursor and the paddle to a box. Once the walls can
+   move that clamp is the wrong shape of answer anyway - a paddle should be
+   stopped by a thing, not by a coordinate - so it comes off now and paddles
+   go where they are pointed, straight through the world.
+
+   Left as a switch rather than deleted: the clamp is the reference for what
+   zones eventually have to reproduce, and it is one word to put back. */
+const PADDLE_ZONES = false;
+
 const SPACE = {
   source: { x: 10, y: -2000 },
   goalR: 0.55,          // how close the ball must come to be swallowed
@@ -72,6 +84,29 @@ function spaceGravity(x, y, out) {
    than a fresh one keeps that free; it is read and discarded immediately. */
 const _gAcc = { x: 0, y: 0 };
 function spaceGravityAt(x, y) { return spaceGravity(x, y, _gAcc); }
+
+/* The mass itself. Two thousand units below the court, so at any framing that
+   includes the goals it is far off the bottom of the screen and costs one
+   invisible arc per frame. It becomes visible exactly when something drags the
+   camera out far enough to see it - which is the point, and is why it is drawn
+   now rather than added as a surprise later.
+
+   Sized in WORLD units so it grows as the view pulls back, the way a thing
+   does when you are getting further from everything else. */
+function spaceDrawSource(ctx) {
+  const R = 25;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(SPACE.source.x, SPACE.source.y, R, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.globalAlpha = 0.92;
+  ctx.fill();
+  ctx.globalAlpha = 0.16;
+  ctx.beginPath();
+  ctx.arc(SPACE.source.x, SPACE.source.y, R * 2.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
 
 /* --------------------------------------------------------------------------
    PIECES
@@ -338,6 +373,8 @@ function spaceGoalPull(b, out) {
    never be narrower than the goal separation - which in arena 1 is the whole
    court. So this rule leaves arena 1's camera exactly where it was.
    -------------------------------------------------------------------------- */
+const SPACE_PAD = 1.2;          // breathing room around whatever must be framed
+
 function spaceView(w, side, out) {
   const b = w.ball;
   let x0 = b.x, x1 = b.x, y0 = b.y, y1 = b.y;
@@ -350,6 +387,16 @@ function spaceView(w, side, out) {
     const p = w.p[idOf(side, i)];
     if (p) take(p.x, p.y);
   }
-  out.x0 = x0; out.x1 = x1; out.y0 = y0; out.y1 = y1;
+  out.x0 = x0 - SPACE_PAD; out.x1 = x1 + SPACE_PAD;
+  out.y0 = y0 - SPACE_PAD; out.y1 = y1 + SPACE_PAD;
+
+  /* Never tighter than the court itself. Without this the camera would close
+     right in during a rally at the centre circle, and a game that breathes in
+     and out on every exchange is unreadable. */
+  const b = bounds();
+  if (out.x0 > b.minX) out.x0 = b.minX;
+  if (out.x1 < b.maxX) out.x1 = b.maxX;
+  if (out.y0 > b.minY) out.y0 = b.minY;
+  if (out.y1 < b.maxY) out.y1 = b.maxY;
   return out;
 }
