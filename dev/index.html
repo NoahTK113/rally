@@ -46,6 +46,8 @@
   #panel button.on{border-color:#22d3ee;color:#e6edf6;background:#16222f}
   .lvl{display:flex;gap:6px;width:100px}
   .lvl button{flex:1;padding:4px 0}
+  .pick{display:flex;gap:5px;width:190px}
+  .pick button{flex:1;padding:4px 2px;font-size:9px;letter-spacing:.06em}
 
   #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
@@ -516,13 +518,13 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v20.8-dev"></script>
-<script src="ai.js?v=v20.8-dev"></script>
-<script src="space.js?v=v20.8-dev"></script>
-<script src="gauntlet.js?v=v20.8-dev"></script>
-<script src="profile.js?v=v20.8-dev"></script>
-<script src="audio.js?v=v20.8-dev"></script>
-<script src="tutorial.js?v=v20.8-dev"></script>
+<script src="shot.js?v=v20.9-dev"></script>
+<script src="ai.js?v=v20.9-dev"></script>
+<script src="space.js?v=v20.9-dev"></script>
+<script src="gauntlet.js?v=v20.9-dev"></script>
+<script src="profile.js?v=v20.9-dev"></script>
+<script src="audio.js?v=v20.9-dev"></script>
+<script src="tutorial.js?v=v20.9-dev"></script>
 <script>
 'use strict';
 
@@ -2507,6 +2509,11 @@ const KNOBS = [
   { o: SHOT, k: 'minWindow', label: 'min window', min: 0, max: 0.4, step: 0.005, u: 's' },
   { o: SHOT, k: 'wWindow',   label: 'w window',  min: 0, max: 4,   step: 0.1,   u: '' },
 
+  /* Which of the three pulls is running. Not a value with a right answer to
+     reset to, so it carries no target object and DEFAULTS skips it. */
+  ['GRAVITY'],
+  { pick: 'gravity' },
+
   /* Developer only, like the whole panel. Drags the run to a level so the late
      game and the survival card can be reached without playing there. */
   ['GAUNTLET'],
@@ -2545,6 +2552,26 @@ function buildPanel() {
       firstGroup = false;
       continue;
     }
+    /* Which kind of pull. Three buttons, one of them lit. */
+    if (k.pick === 'gravity') {
+      const wrap = document.createElement('div');
+      wrap.className = 'pick';
+      const kinds = ['uniform', 'point', 'off'];
+      for (const kind of kinds) {
+        const b = document.createElement('button');
+        b.textContent = kind.toUpperCase();
+        b.addEventListener('click', () => { spaceSetGravity(kind); syncPanel(); });
+        wrap.appendChild(b);
+      }
+      k._sync = () => {
+        [...wrap.children].forEach((b, i) =>
+          b.classList.toggle('on', SPACE.gravity.kind === kinds[i]));
+      };
+      k._sync();
+      el.appendChild(wrap);
+      continue;
+    }
+
     /* The difficulty pair. Not a slider — it writes a whole set of values at
        once, across both AI and SHOT, and then every other row has to catch up.
        That is what syncPanel is for. */
@@ -2937,7 +2964,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v20.8-dev';
+const BUILD = 'v20.9-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that

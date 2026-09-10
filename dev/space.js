@@ -61,9 +61,16 @@
    fails for every sign of vy, so the branch never runs. No microgravity fudge
    needed; the zero can be real.
 
-   The point source keeps `ref`: the distance at which its pull equals
-   PHYS.gravity. So the slider goes on meaning what it says whichever kind is
-   running.
+   The point source has no stored strength. Its pull is defined as "equal to
+   PHYS.gravity at the court", so the reference distance is measured from the
+   source to the middle of the floor every time it is asked. Move the source and
+   the strength at the court follows it automatically - there is no second
+   number to remember to update, and the slider means what it says whichever
+   kind is running.
+
+   What DOES change as it comes closer is the falloff across the court, which is
+   the whole reason it is interesting. At 20 below, gravity at the ceiling is
+   about 40% of gravity at the floor.
    -------------------------------------------------------------------------- */
 /* ZONES ARE OFF.
 
@@ -79,7 +86,7 @@ const PADDLE_ZONES = false;
 
 const SPACE = {
   // the point data travels with it, so changing kind is one word
-  gravity: { kind: 'uniform', x: 10, y: -2000, ref: 2000 },
+  gravity: { kind: 'uniform', x: 10, y: -20, r: 2.5 },
   goalR: 0.55,          // how close the ball must come to be swallowed
   pullR: 2.5,           // and how far out the pull reaches
 };
@@ -95,10 +102,15 @@ function spaceGravity(x, y, out) {
   if (s.kind === 'off') { out.x = 0; out.y = 0; return out; }
 
   if (s.kind === 'point') {
+    // strength is pinned to "PHYS.gravity at the middle of the floor", measured
+    // rather than stored - so moving the source cannot leave a stale constant
+    const rx = s.x - A.width / 2, ry = s.y;
+    const ref2 = rx * rx + ry * ry;
+
     const dx = s.x - x, dy = s.y - y;
-    const d2 = dx * dx + dy * dy;
-    const d = Math.sqrt(d2) || 1;
-    const a = PHYS.gravity * s.ref * s.ref / d2;   // = g at distance `ref`
+    const d2 = (dx * dx + dy * dy) || 1e-9;
+    const d = Math.sqrt(d2);
+    const a = PHYS.gravity * ref2 / d2;
     out.x = a * dx / d;
     out.y = a * dy / d;
     return out;
@@ -122,7 +134,7 @@ function spaceGravityAt(x, y) { return spaceGravity(x, y, _gAcc); }
    does when you are getting closer to it and further from everything else. */
 function spaceDrawSource(ctx) {
   if (SPACE.gravity.kind !== 'point') return;
-  const R = 25;
+  const R = SPACE.gravity.r;
   ctx.save();
   ctx.beginPath();
   ctx.arc(SPACE.gravity.x, SPACE.gravity.y, R, 0, Math.PI * 2);
