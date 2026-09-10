@@ -72,6 +72,24 @@
    close it is. Below the floor it is a stronger, tilted gravity. In the MIDDLE
    of the court it is not gravity at all - it is a thing at the centre that
    everything falls toward, from every direction.
+
+   AND IT HAS A SURFACE. A point mass has none, which makes it a black hole:
+   acceleration climbs without limit as the ball approaches, and the numbers
+   stop resembling any object you could stand on. Real bodies cannot do that,
+   because inside a body only the mass BELOW you pulls - so gravity peaks at
+   the surface and falls linearly to zero at the centre.
+
+       outside   a = g * ref^2 / d^2
+       inside    a = (g * ref^2 / R^2) * (d / R)
+
+   The two agree exactly at d = R, and the singularity is gone rather than
+   clamped: there is no special case, only the other half of the same law. It
+   also gives the source something to be - a ball that falls through it comes
+   out the far side and oscillates, which is what falling through a planet
+   actually does.
+
+   Radius is therefore a real quantity now, not a drawing size. Bigger radius,
+   same mass, gentler well.
    -------------------------------------------------------------------------- */
 /* ZONES ARE OFF.
 
@@ -87,9 +105,11 @@ const PADDLE_ZONES = false;
 
 const SPACE = {
   // the point data travels with it, so changing kind is one word
-  /* Centre of the court, ball-sized, pulling as hard as PHYS.gravity at 5 -
-     which is half way to a goal. Nothing happens until the kind says `point`. */
-  gravity: { kind: 'uniform', x: 10, y: 6, rMul: 1, ref: 5 },
+  /* Centre of the court, five balls across, pulling as hard as PHYS.gravity at
+     a distance of 5 - half way to a goal. Nothing happens until the kind says
+     `point`. rMul is a PHYSICAL radius in ball radii: it sets where the field
+     turns over, not just how big the dot looks. */
+  gravity: { kind: 'uniform', x: 10, y: 6, rMul: 5, ref: 5 },
   goalR: 0.55,          // how close the ball must come to be swallowed
   pullR: 2.5,           // and how far out the pull reaches
 };
@@ -105,11 +125,15 @@ function spaceGravity(x, y, out) {
   if (s.kind === 'off') { out.x = 0; out.y = 0; return out; }
 
   if (s.kind === 'point') {
-    const ref2 = s.ref * s.ref;             // a = PHYS.gravity at distance ref
     const dx = s.x - x, dy = s.y - y;
-    const d2 = (dx * dx + dy * dy) || 1e-9;
-    const d = Math.sqrt(d2);
-    const a = PHYS.gravity * ref2 / d2;
+    const d = Math.hypot(dx, dy);
+    if (d < 1e-9) { out.x = 0; out.y = 0; return out; }   // dead centre: nothing pulls
+
+    const R = PHYS.ballR * s.rMul;
+    const surface = PHYS.gravity * s.ref * s.ref / (R * R);
+    // outside, inverse square; inside, linear to zero. Equal at d = R.
+    const a = d >= R ? PHYS.gravity * s.ref * s.ref / (d * d)
+                     : surface * (d / R);
     out.x = a * dx / d;
     out.y = a * dy / d;
     return out;
@@ -133,9 +157,9 @@ function spaceGravityAt(x, y) { return spaceGravity(x, y, _gAcc); }
    does when you are getting closer to it and further from everything else. */
 function spaceDrawSource(ctx) {
   if (SPACE.gravity.kind !== 'point') return;
-  /* Measured in ball radii rather than metres. PHYS.ballR is a live constant
-     and space.js loads before it exists, so it cannot be read into the literal
-     above - and a copy of it there would be a second number to keep in step. */
+  /* The same radius the field turns over at, so what is drawn is what is
+     there. In ball radii because PHYS.ballR is a live constant and space.js
+     loads before it exists. */
   const R = PHYS.ballR * SPACE.gravity.rMul;
   ctx.save();
   ctx.beginPath();
