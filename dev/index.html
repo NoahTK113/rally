@@ -518,13 +518,13 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v21.3-dev"></script>
-<script src="ai.js?v=v21.3-dev"></script>
-<script src="space.js?v=v21.3-dev"></script>
-<script src="gauntlet.js?v=v21.3-dev"></script>
-<script src="profile.js?v=v21.3-dev"></script>
-<script src="audio.js?v=v21.3-dev"></script>
-<script src="tutorial.js?v=v21.3-dev"></script>
+<script src="shot.js?v=v21.4-dev"></script>
+<script src="ai.js?v=v21.4-dev"></script>
+<script src="space.js?v=v21.4-dev"></script>
+<script src="gauntlet.js?v=v21.4-dev"></script>
+<script src="profile.js?v=v21.4-dev"></script>
+<script src="audio.js?v=v21.4-dev"></script>
+<script src="tutorial.js?v=v21.4-dev"></script>
 <script>
 'use strict';
 
@@ -764,7 +764,7 @@ const CAM_OUT = 0.10, CAM_IN = 0.60;      // seconds
 const camWant = { x0: 0, x1: 0, y0: 0, y1: 0 };
 const camBox  = { x0: 0, x1: 0, y0: 0, y1: 0 };
 let camReady = false;
-let camLocked = false;          // developer: hold the frame where it is
+let camLocked = true;           // developer: hold the frame where it is
 
 function camUpdate(dt) {
   if (!running) { camReady = false; return; }
@@ -1647,37 +1647,69 @@ function collideNet(w) {
    carries v + omega x r, so swinging into the ball adds energy, dragging
    across it adds spin, and pulling away from it takes pace off. None of that
    is possible if the paddle is teleported to the cursor. */
+/* THE PADDLE IS A LIST OF SEGMENTS, rigidly connected.
+
+   It does not need to be a box, and it never really was one: the old collider
+   clamped the ball to a SPINE of length paddleLength - paddleT and resolved
+   against a radius of paddleT/2, which is a capsule. So the default shape is
+   exactly one capsule and the conversion is provably identical rather than
+   approximately so - same closest point, same normal, same material point.
+
+   What changes is that the list can be longer. Any shape that can be drawn
+   with segments is now a paddle: an L, a cup, a wedge, a comb. They rotate
+   together about the paddle's centre because they are local coordinates with
+   one transform, which is what "rigidly connected" means here.
+
+   Cached on the two dimensions it is built from, so the sliders still work. */
+let _padShape = null, _padKey = '';
+
+function paddleShape() {
+  const key = A.paddleLength + ',' + A.paddleT;
+  if (key === _padKey && _padShape) return _padShape;
+  _padKey = key;
+  const half = Math.max(0, (A.paddleLength - A.paddleT) / 2);
+  _padShape = [{ ax: -half, ay: 0, bx: half, by: 0, r: A.paddleT / 2 }];
+  return _padShape;
+}
+
 function collidePaddle(w, p) {
   const b = w.ball;
   const R = PHYS.ballR;
-  const half = Math.max(0, (A.paddleLength - A.paddleT) / 2);   // spine length
-  const rad  = A.paddleT / 2;
-
   const c = Math.cos(p.a), s = Math.sin(p.a);
-  const dx = b.x - p.x, dy = b.y - p.y;
-  const lx =  dx * c + dy * s;          // ball in the paddle's local frame
-  const ly = -dx * s + dy * c;
 
-  const qx = clamp(lx, -half, half);    // closest point on the spine
-  let nx = lx - qx, ny = ly;
-  let d = Math.hypot(nx, ny);
-  const sum = R + rad;
-  if (d >= sum) return;
-  if (d < 1e-9) { nx = 0; ny = 1; d = 1e-9; }
-  nx /= d; ny /= d;
+  for (const cap of paddleShape()) {
+    // the segment's ends, in world space
+    const ax = p.x + cap.ax * c - cap.ay * s, ay = p.y + cap.ax * s + cap.ay * c;
+    const bx = p.x + cap.bx * c - cap.by * s, by = p.y + cap.bx * s + cap.by * c;
 
-  const wnx = nx * c - ny * s;          // normal back into world space
-  const wny = nx * s + ny * c;
+    const ex = bx - ax, ey = by - ay;
+    const len2 = ex * ex + ey * ey;
+    let t = len2 > 0 ? ((b.x - ax) * ex + (b.y - ay) * ey) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const qx = ax + ex * t, qy = ay + ey * t;   // closest point on the segment
 
-  // material point of the paddle at the contact, relative to its centre
-  const rx = qx * c + rad * wnx;
-  const ry = qx * s + rad * wny;
-  const svx = p.vx - p.w * ry;
-  const svy = p.vy + p.w * rx;
+    let nx = b.x - qx, ny = b.y - qy;
+    let d = Math.hypot(nx, ny);
+    const sum = R + cap.r;
+    if (d >= sum) continue;
+    if (d < 1e-9) { nx = 0; ny = 1; d = 1e-9; }
+    nx /= d; ny /= d;
 
-  const j = resolveContact(b, wnx, wny, sum - d, PHYS.paddleRest, PHYS.paddleFriction,
-                           svx, svy, PHYS.ballR * 0.5);
-  if (j > EV_MIN) pushEvent(w, 'paddle', j, b.x);
+    /* The material point of the paddle at the contact, relative to its centre:
+       out to the segment, then out again by the segment's own radius. This is
+       what carries swing and spin into the ball, and it is the one place a
+       multi-segment paddle differs in spirit from a single one - a segment far
+       from the centre moves faster under rotation, so an outrigger hits harder
+       than the middle does. */
+    const rx = (qx - p.x) + cap.r * nx;
+    const ry = (qy - p.y) + cap.r * ny;
+    const svx = p.vx - p.w * ry;
+    const svy = p.vy + p.w * rx;
+
+    const j = resolveContact(b, nx, ny, sum - d, PHYS.paddleRest, PHYS.paddleFriction,
+                             svx, svy, PHYS.ballR * 0.5);
+    if (j > EV_MIN) pushEvent(w, 'paddle', j, b.x);
+  }
 }
 
 // skipPaddles lets the AI ask "where would this go if nobody touched it"
@@ -2982,7 +3014,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v21.3-dev';
+const BUILD = 'v21.4-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
