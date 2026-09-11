@@ -518,13 +518,13 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v21.4-dev"></script>
-<script src="ai.js?v=v21.4-dev"></script>
-<script src="space.js?v=v21.4-dev"></script>
-<script src="gauntlet.js?v=v21.4-dev"></script>
-<script src="profile.js?v=v21.4-dev"></script>
-<script src="audio.js?v=v21.4-dev"></script>
-<script src="tutorial.js?v=v21.4-dev"></script>
+<script src="shot.js?v=v21.5-dev"></script>
+<script src="ai.js?v=v21.5-dev"></script>
+<script src="space.js?v=v21.5-dev"></script>
+<script src="gauntlet.js?v=v21.5-dev"></script>
+<script src="profile.js?v=v21.5-dev"></script>
+<script src="audio.js?v=v21.5-dev"></script>
+<script src="tutorial.js?v=v21.5-dev"></script>
 <script>
 'use strict';
 
@@ -570,6 +570,8 @@ let arenaId = 1;
 const A = {
   paddleLength: 0.85,         // the instrument, not the room
   paddleT: 0.05,
+  paddleCurve: 0,             // bulge at the middle, in metres. 0 is straight.
+  paddleSegs: 9,              // how finely a curved face is cut up
 };
 
 /* Writes into the live A rather than replacing it, because everything holds a
@@ -1664,11 +1666,40 @@ function collideNet(w) {
 let _padShape = null, _padKey = '';
 
 function paddleShape() {
-  const key = A.paddleLength + ',' + A.paddleT;
+  const key = [A.paddleLength, A.paddleT, A.paddleCurve, A.paddleSegs].join(',');
   if (key === _padKey && _padShape) return _padShape;
   _padKey = key;
+
   const half = Math.max(0, (A.paddleLength - A.paddleT) / 2);
-  _padShape = [{ ax: -half, ay: 0, bx: half, by: 0, r: A.paddleT / 2 }];
+  const r = A.paddleT / 2;
+  const sag = A.paddleCurve;
+
+  /* Straight is ONE segment, not nine collinear ones. Same geometry either
+     way, but one is the cheap version and it keeps the default exactly what it
+     has always been. */
+  if (Math.abs(sag) < 1e-6 || A.paddleSegs < 2) {
+    _padShape = [{ ax: -half, ay: 0, bx: half, by: 0, r }];
+    return _padShape;
+  }
+
+  /* A parabola rather than a circular arc: y = sag * (1 - u*u) over u in
+     [-1, 1]. It needs no radius, has no degenerate case as the bulge goes to
+     zero, and nobody can tell the difference by eye at these curvatures.
+
+     Centred on its own mean height so the face stays balanced about the
+     cursor - otherwise a deep curve would drift the paddle off the pointer as
+     the slider moved, which reads as the controls breaking. */
+  const segs = Math.max(2, Math.round(A.paddleSegs));
+  const mean = sag * 2 / 3;
+  const caps = [];
+  let ax = -half, ay = -mean;
+  for (let i = 1; i <= segs; i++) {
+    const u = -1 + 2 * i / segs;
+    const bx = u * half, by = sag * (1 - u * u) - mean;
+    caps.push({ ax, ay, bx, by, r });
+    ax = bx; ay = by;
+  }
+  _padShape = caps;
   return _padShape;
 }
 
@@ -1676,6 +1707,16 @@ function collidePaddle(w, p) {
   const b = w.ball;
   const R = PHYS.ballR;
   const c = Math.cos(p.a), s = Math.sin(p.a);
+
+  /* ONE CONTACT, THE DEEPEST. Neighbouring segments share an endpoint, so a
+     ball near a joint is inside both - and resolveContact pushes it out before
+     it checks whether the two are even approaching. Resolving each in turn
+     would push it twice and hit it twice, which at a joint reads as the paddle
+     randomly hitting harder. So the whole shape is searched first and only the
+     worst overlap is answered.
+
+     With one segment this is exactly what the old collider did. */
+  let bestPen = 0, bestNx = 0, bestNy = 1, bestQx = 0, bestQy = 0, bestR = 0;
 
   for (const cap of paddleShape()) {
     // the segment's ends, in world space
@@ -1695,18 +1736,27 @@ function collidePaddle(w, p) {
     if (d < 1e-9) { nx = 0; ny = 1; d = 1e-9; }
     nx /= d; ny /= d;
 
+    const pen = sum - d;
+    if (pen <= bestPen) continue;
+    bestPen = pen; bestNx = nx; bestNy = ny;
+    bestQx = qx; bestQy = qy; bestR = cap.r;
+  }
+
+  if (bestPen > 0) {
+    const nx = bestNx, ny = bestNy, qx = bestQx, qy = bestQy;
+
     /* The material point of the paddle at the contact, relative to its centre:
        out to the segment, then out again by the segment's own radius. This is
        what carries swing and spin into the ball, and it is the one place a
        multi-segment paddle differs in spirit from a single one - a segment far
        from the centre moves faster under rotation, so an outrigger hits harder
        than the middle does. */
-    const rx = (qx - p.x) + cap.r * nx;
-    const ry = (qy - p.y) + cap.r * ny;
+    const rx = (qx - p.x) + bestR * nx;
+    const ry = (qy - p.y) + bestR * ny;
     const svx = p.vx - p.w * ry;
     const svy = p.vy + p.w * rx;
 
-    const j = resolveContact(b, nx, ny, sum - d, PHYS.paddleRest, PHYS.paddleFriction,
+    const j = resolveContact(b, nx, ny, bestPen, PHYS.paddleRest, PHYS.paddleFriction,
                              svx, svy, PHYS.ballR * 0.5);
     if (j > EV_MIN) pushEvent(w, 'paddle', j, b.x);
   }
@@ -1911,31 +1961,43 @@ function pathRR(x, y, w, h, r) {
   ctx.closePath();
 }
 
+/* Drawn from the same list the collider reads, so the picture cannot disagree
+   with the shape - the worst kind of bug in a game where the player aims at
+   what they see.
+
+   A capsule IS a stroked line: round caps, width twice the radius. So there is
+   no outline to trace and no fill; the body is a stroke at its true thickness
+   and the glow is the same stroke, wider and fainter. For the default single
+   segment that draws the identical stadium the rounded rectangle did. */
 function drawPaddle(x, y, a, colour, ghost) {
-  const L = A.paddleLength, T = A.paddleT;
+  const shape = paddleShape();
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(a);
-  pathRR(-L / 2, -T / 2, L, T, T / 2);
-  if (ghost) {
-    ctx.strokeStyle = colour;
-    ctx.globalAlpha = 0.20;
-    ctx.lineWidth = lineW();
-    ctx.setLineDash([0.10, 0.09]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.globalAlpha = 1;
-  } else {
-    ctx.strokeStyle = colour;
-    for (const [px, alpha] of GLOW) {
-      ctx.lineWidth = px * 0.5 / view.scale;
-      ctx.globalAlpha = alpha * VIS.glow;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = colour;
+
+  const strokeAll = (extra, alpha) => {
+    ctx.globalAlpha = alpha;
+    for (const cp of shape) {
+      ctx.beginPath();
+      ctx.moveTo(cp.ax, cp.ay);
+      ctx.lineTo(cp.bx, cp.by);
+      ctx.lineWidth = 2 * cp.r + extra;
       ctx.stroke();
     }
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = colour;
-    ctx.fill();
+  };
+
+  if (ghost) {
+    ctx.setLineDash([0.10, 0.09]);
+    strokeAll(0, 0.20);
+    ctx.setLineDash([]);
+  } else {
+    for (const [px, alpha] of GLOW) strokeAll(px * 0.5 / view.scale, alpha * VIS.glow);
+    strokeAll(0, 1);
   }
+  ctx.globalAlpha = 1;
   ctx.restore();
 }
 
@@ -2496,6 +2558,8 @@ addEventListener('resize', resize);
    refit; everything else takes effect on the next frame by itself. */
 const KNOBS = [
   ['PADDLE'],
+  { o: A, k: 'paddleCurve', label: 'curve',    min: -0.30, max: 0.30, step: 0.005, u: 'm' },
+  { o: A, k: 'paddleSegs',  label: 'segments', min: 1,     max: 48,   step: 1,     u: '' },
   { o: FEEL, k: 'posFreq',    label: 'pos freq',   min: 1,   max: 25,  step: 0.1,  u: 'Hz' },
   { o: FEEL, k: 'posDamp',    label: 'pos damp',   min: 0.2, max: 8,   step: 0.02, u: 'z'  },
   { o: FEEL, k: 'angFreq',    label: 'ang freq',   min: 1,   max: 30,  step: 0.1,  u: 'Hz' },
@@ -3014,7 +3078,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v21.4-dev';
+const BUILD = 'v21.5-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
