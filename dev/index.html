@@ -518,13 +518,13 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v21.2-dev"></script>
-<script src="ai.js?v=v21.2-dev"></script>
-<script src="space.js?v=v21.2-dev"></script>
-<script src="gauntlet.js?v=v21.2-dev"></script>
-<script src="profile.js?v=v21.2-dev"></script>
-<script src="audio.js?v=v21.2-dev"></script>
-<script src="tutorial.js?v=v21.2-dev"></script>
+<script src="shot.js?v=v21.3-dev"></script>
+<script src="ai.js?v=v21.3-dev"></script>
+<script src="space.js?v=v21.3-dev"></script>
+<script src="gauntlet.js?v=v21.3-dev"></script>
+<script src="profile.js?v=v21.3-dev"></script>
+<script src="audio.js?v=v21.3-dev"></script>
+<script src="tutorial.js?v=v21.3-dev"></script>
 <script>
 'use strict';
 
@@ -764,9 +764,19 @@ const CAM_OUT = 0.10, CAM_IN = 0.60;      // seconds
 const camWant = { x0: 0, x1: 0, y0: 0, y1: 0 };
 const camBox  = { x0: 0, x1: 0, y0: 0, y1: 0 };
 let camReady = false;
+let camLocked = false;          // developer: hold the frame where it is
 
 function camUpdate(dt) {
   if (!running) { camReady = false; return; }
+
+  /* Locked means locked to where it IS, not to the court - so it freezes
+     whatever you were looking at when you pressed it, including a zoomed-out
+     frame. Still applied every frame, because the window can still resize. */
+  if (camLocked && camReady) {
+    applyView(camBox.x0, camBox.x1, camBox.y0, camBox.y1);
+    return;
+  }
+
   spaceView(world, mySide, camWant);
 
   if (!camReady) {
@@ -2512,7 +2522,13 @@ const KNOBS = [
   /* Which of the three pulls is running. Not a value with a right answer to
      reset to, so it carries no target object and DEFAULTS skips it. */
   ['GRAVITY'],
-  { pick: 'gravity' },
+  { pick: true, options: ['uniform', 'point', 'off'],
+    get: () => SPACE.gravity.kind, set: v => spaceSetGravity(v) },
+
+  ['CAMERA'],
+  { pick: true, options: ['follow', 'locked'],
+    get: () => camLocked ? 'locked' : 'follow',
+    set: v => { camLocked = (v === 'locked'); } },
 
   /* Developer only, like the whole panel. Drags the run to a level so the late
      game and the survival card can be reached without playing there. */
@@ -2552,20 +2568,22 @@ function buildPanel() {
       firstGroup = false;
       continue;
     }
-    /* Which kind of pull. Three buttons, one of them lit. */
-    if (k.pick === 'gravity') {
+    /* A row of exclusive buttons, one of them lit. Generic rather than a branch
+       per setting: it carries its own options and its own get and set, so a new
+       one is an entry in KNOBS and nothing here changes. */
+    if (k.pick) {
       const wrap = document.createElement('div');
       wrap.className = 'pick';
-      const kinds = ['uniform', 'point', 'off'];
-      for (const kind of kinds) {
+      for (const opt of k.options) {
         const b = document.createElement('button');
-        b.textContent = kind.toUpperCase();
-        b.addEventListener('click', () => { spaceSetGravity(kind); syncPanel(); });
+        b.textContent = opt.toUpperCase();
+        b.addEventListener('click', () => { k.set(opt); syncPanel(); });
         wrap.appendChild(b);
       }
       k._sync = () => {
+        const cur = k.get();
         [...wrap.children].forEach((b, i) =>
-          b.classList.toggle('on', SPACE.gravity.kind === kinds[i]));
+          b.classList.toggle('on', k.options[i] === cur));
       };
       k._sync();
       el.appendChild(wrap);
@@ -2964,7 +2982,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v21.2-dev';
+const BUILD = 'v21.3-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
