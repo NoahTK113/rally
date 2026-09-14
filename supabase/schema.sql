@@ -47,6 +47,9 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 
+-- Guests keep a record but stay off the board until they choose a name.
+alter table public.profiles add column if not exists is_guest boolean not null default false;
+
 /* Usernames have to survive being turned into <username>@banjoball.invalid,
    which is how they reach an auth system that only understands email
    addresses. Lowercase, 3-20, letters digits hyphen underscore. */
@@ -134,7 +137,8 @@ begin
     end if;
   end if;
 
-  insert into public.profiles (id, username) values (new.id, v_name);
+  insert into public.profiles (id, username, is_guest)
+  values (new.id, v_name, coalesce(new.is_anonymous, false));
   return new;
 end;
 $$;
@@ -143,6 +147,50 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- Guests created before is_guest existed.
+update public.profiles p
+   set is_guest = true
+  from auth.users u
+ where u.id = p.id and u.is_anonymous and not p.is_guest;
+
+
+-- -------------------------------------------------------------------------
+-- A GUEST CHOOSES A NAME
+--
+-- The client links an email and password to the anonymous user. Once that
+-- user is no longer anonymous and has an address, the profile takes the name
+-- from the address. Same transaction as the auth update, so a taken name
+-- (unique violation) refuses the whole upgrade instead of half-doing it.
+-- A name that fails the shape check is left alone rather than raised on,
+-- because this fires on every update to auth.users, sign-ins included.
+-- -------------------------------------------------------------------------
+create or replace function public.handle_user_upgraded()
+returns trigger
+language plpgsql
+security definer set search_path = ''
+as $$
+declare
+  v_name text;
+begin
+  v_name := lower(split_part(new.email, '@', 1));
+  if v_name !~ '^[a-z0-9_-]{3,20}$' or v_name ~ '^guest[0-9]+$' then
+    return new;
+  end if;
+
+  update public.profiles
+     set username = v_name, is_guest = false
+   where id = new.id and is_guest;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_upgraded on auth.users;
+create trigger on_auth_user_upgraded
+  after update on auth.users
+  for each row
+  when (new.is_anonymous = false and new.email is not null)
+  execute function public.handle_user_upgraded();
 
 
 -- -------------------------------------------------------------------------
@@ -274,6 +322,7 @@ with (security_invoker = true) as
   select username, best_level
     from public.profiles
    where best_level > 0
+     and not is_guest
    order by best_level desc, updated_at asc
    limit 100;
 

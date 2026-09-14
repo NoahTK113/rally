@@ -49,7 +49,10 @@
   .pick{display:flex;gap:5px;width:190px}
   .pick button{flex:1;padding:4px 2px;font-size:9px;letter-spacing:.06em}
 
-  #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
+  /* A column, because a guest gets a second card under the first. `safe` so a
+     short window scrolls to the top of the stack instead of cutting it off. */
+  #menu{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;gap:14px;
+        align-items:center;justify-content:safe center;overflow-y:auto;
         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
   /* !important because #menu and #setup set display through ID selectors, and
      an ID beats a class: a plain .hidden rule loses to both and silently does
@@ -266,6 +269,17 @@
   #menu input:focus{border-color:#22d3ee}
   #menu .join button{width:92px;margin:0}
   #menu .msg{margin-top:14px;font-size:14px;line-height:1.6;color:#ffffff;min-height:30px}
+  /* The guest's sign-up card. Its rules are written as #menu #upgrade so they
+     outrank #menu input and #menu h1 by specificity rather than by where they
+     happen to sit in the sheet - the menu's input is the uppercase JOIN code
+     box, and a username must not inherit that. */
+  #menu #upgrade h1{margin:0 0 10px;font-size:15px;letter-spacing:.3em;font-weight:600}
+  #menu #upgrade .note{margin:0 0 16px;font-size:14px;line-height:1.5;color:#ffffff}
+  #menu #upgrade input{display:block;width:100%;box-sizing:border-box;flex:none;
+                       letter-spacing:.06em;text-transform:none;color:#ffffff}
+  #menu #upgrade .hint{margin:12px 0 0;text-align:left;line-height:1.5}
+  #menu #upgrade .msg{margin-top:10px;min-height:20px;color:#fdba74}
+  #menu #upgrade .go{margin:6px 0 0;border-color:#22d3ee}
   #menu .code{display:block;margin-top:6px;font-size:26px;letter-spacing:.42em;color:#22d3ee}
 
   /* Above the menu's z-index on purpose: you want to check the build BEFORE
@@ -496,6 +510,19 @@
       <button id="btnProfile">LOG IN</button>
     </div>
   </div>
+  <div class="card hidden" id="upgrade">
+    <h1>CREATE ACCOUNT</h1>
+    <div class="note">Create a username to get on the leaderboard.</div>
+    <div class="lab">USERNAME</div>
+    <input id="upUser" maxlength="20" autocomplete="username"
+           placeholder="username" spellcheck="false">
+    <div class="lab" style="margin-top:14px">PASSWORD</div>
+    <input id="upPass" type="password" maxlength="72"
+           autocomplete="new-password" placeholder="password">
+    <div class="hint">Username: 3 to 20 characters, using lowercase letters, numbers, - or _.<br>Password: at least 8 characters.</div>
+    <div class="msg" id="upMsg"></div>
+    <button class="go" id="upGo">CREATE ACCOUNT</button>
+  </div>
 </div>
 <script>
 /* ==========================================================================
@@ -519,13 +546,13 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v21.6-dev"></script>
-<script src="ai.js?v=v21.6-dev"></script>
-<script src="space.js?v=v21.6-dev"></script>
-<script src="gauntlet.js?v=v21.6-dev"></script>
-<script src="profile.js?v=v21.6-dev"></script>
-<script src="audio.js?v=v21.6-dev"></script>
-<script src="tutorial.js?v=v21.6-dev"></script>
+<script src="shot.js?v=v21.7-dev"></script>
+<script src="ai.js?v=v21.7-dev"></script>
+<script src="space.js?v=v21.7-dev"></script>
+<script src="gauntlet.js?v=v21.7-dev"></script>
+<script src="profile.js?v=v21.7-dev"></script>
+<script src="audio.js?v=v21.7-dev"></script>
+<script src="tutorial.js?v=v21.7-dev"></script>
 <script>
 'use strict';
 
@@ -3079,7 +3106,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v21.6-dev';
+const BUILD = 'v21.7-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3857,6 +3884,8 @@ function paintAccount() {
   else if (signedIn()) el.innerHTML = (authIsGuest() ? 'playing as <b>' : 'signed in as <b>')
                                     + (authName() || '...') + '</b>';
   else                 el.innerHTML = 'playing as a guest';
+  const up = $('upgrade');
+  if (up) up.classList.toggle('hidden', !(authReady() && signedIn() && authIsGuest()));
   const btn = $('btnProfile');
   if (btn) btn.textContent = signedIn() ? 'LOG OUT' : 'LOG IN';
   if (btn) btn.disabled = !authReady();
@@ -3905,6 +3934,14 @@ function paintLeaderboard() {
   // depend on what they are currently showing.
   const card = document.querySelector('#' + where + ' .card');
   if (card && card.offsetHeight) $('lbCard').style.height = card.offsetHeight + 'px';
+  /* The panel centres itself on the window. The menu card is only centred
+     when it is alone - a guest's second card pushes it up - so the board is
+     moved by however far the card's middle is from the window's. */
+  if (card && card.offsetHeight) {
+    const rc = card.getBoundingClientRect();
+    $('lbCard').style.transform =
+      'translateY(' + Math.round(rc.top + rc.height / 2 - innerHeight / 2) + 'px)';
+  }
 
   $('lbBody').innerHTML = '';
   $('lbMsg').textContent = authReady() ? 'loading...' : 'offline';
@@ -4454,6 +4491,23 @@ function loginSubmit() {
   loginAttempt(loginMode === 'new' ? authSignUp : authSignIn);
 }
 $('loginGo').addEventListener('click', loginSubmit);
+
+function upgradeSubmit() {
+  const go = $('upGo');
+  if (go.disabled) return;
+  go.disabled = true;
+  $('upMsg').textContent = 'working...';
+  authUpgrade($('upUser').value, $('upPass').value).then(err => {
+    go.disabled = false;
+    $('upMsg').textContent = err || '';
+    if (err) return;
+    $('upUser').value = '';
+    $('upPass').value = '';
+  });
+}
+$('upGo').addEventListener('click', upgradeSubmit);
+$('upPass').addEventListener('keydown', e => { if (e.key === 'Enter') upgradeSubmit(); });
+$('upUser').addEventListener('keydown', e => { if (e.key === 'Enter') $('upPass').focus(); });
 $('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') loginSubmit(); });
 $('loginUser').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginPass').focus(); });
 

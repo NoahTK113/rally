@@ -156,6 +156,42 @@ async function authGuest() {
   return null;
 }
 
+/* A guest becomes a real account IN PLACE: same id, so the same profile, the
+   same best level and the same run history. Supabase links an email and a
+   password to the anonymous user, and a database trigger swaps guestN for the
+   username the moment the account stops being anonymous - in the same
+   transaction, so a taken name refuses the whole thing rather than leaving an
+   account with a login and the wrong name.
+
+   The session is refreshed afterwards because the token still says anonymous
+   until it is reissued, and the menu reads that flag. */
+async function authUpgrade(username, password) {
+  if (!sb || !signedIn()) return 'No connection.';
+  if (!acct.guest) return 'You already have an account.';
+  const v = authValidate(username, password);
+  if (v.err) return v.err;
+  if (GUEST_RE.test(v.u)) return 'Names like guest12 are kept for guests.';
+
+  const { error } = await sb.auth.updateUser({
+    email: v.u + '@banjoball.invalid',
+    password: password,
+  });
+  if (error) {
+    if (/already.*registered|already exists|database error/i.test(error.message)) {
+      return 'That username is taken.';
+    }
+    return error.message;
+  }
+
+  try {
+    const r = await sb.auth.refreshSession();
+    const s = r.data && r.data.session;
+    if (s && s.user && s.user.is_anonymous) return 'The account was not finished. Try again.';
+    authAdopt(s);
+  } catch (e) {}
+  return null;
+}
+
 async function authSignOut() {
   if (!sb) return;
   try { await sb.auth.signOut(); } catch (e) {}
