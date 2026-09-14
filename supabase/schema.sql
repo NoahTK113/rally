@@ -107,15 +107,34 @@ create policy "own runs readable"
 -- The username travels in the sign-up metadata and lands here. Doing it in a
 -- trigger rather than a second call from the client means an account can never
 -- exist without its profile.
+--
+-- GUESTS are Supabase anonymous sign-ins (switched on in the dashboard under
+-- Authentication). They arrive with no username, so they are given the next
+-- guestN. That pattern is reserved: a real sign-up cannot take it.
 -- -------------------------------------------------------------------------
+create sequence if not exists public.guest_seq;
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer set search_path = ''
 as $$
+declare
+  v_name text;
 begin
-  insert into public.profiles (id, username)
-  values (new.id, lower(new.raw_user_meta_data->>'username'));
+  if new.is_anonymous then
+    loop
+      v_name := 'guest' || nextval('public.guest_seq');
+      exit when not exists (select 1 from public.profiles where username = v_name);
+    end loop;
+  else
+    v_name := lower(new.raw_user_meta_data->>'username');
+    if v_name ~ '^guest[0-9]+$' then
+      raise exception 'username reserved for guests';
+    end if;
+  end if;
+
+  insert into public.profiles (id, username) values (new.id, v_name);
   return new;
 end;
 $$;

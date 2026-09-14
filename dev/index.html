@@ -400,6 +400,7 @@
     <div id="gateMsg"></div>
     <button id="gateLogin">LOG IN</button>
     <button id="gateNew">CREATE ACCOUNT</button>
+    <button id="gateGuest">PLAY AS GUEST</button>
     <button id="gateSkip" class="hidden">CONTINUE</button>
   </div>
 </div>
@@ -518,13 +519,13 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v21.5-dev"></script>
-<script src="ai.js?v=v21.5-dev"></script>
-<script src="space.js?v=v21.5-dev"></script>
-<script src="gauntlet.js?v=v21.5-dev"></script>
-<script src="profile.js?v=v21.5-dev"></script>
-<script src="audio.js?v=v21.5-dev"></script>
-<script src="tutorial.js?v=v21.5-dev"></script>
+<script src="shot.js?v=v21.6-dev"></script>
+<script src="ai.js?v=v21.6-dev"></script>
+<script src="space.js?v=v21.6-dev"></script>
+<script src="gauntlet.js?v=v21.6-dev"></script>
+<script src="profile.js?v=v21.6-dev"></script>
+<script src="audio.js?v=v21.6-dev"></script>
+<script src="tutorial.js?v=v21.6-dev"></script>
 <script>
 'use strict';
 
@@ -3078,7 +3079,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v21.5-dev';
+const BUILD = 'v21.6-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3800,6 +3801,7 @@ function paintGate() {
     : '';
   $('gateLogin').classList.toggle('hidden', waiting || offline);
   $('gateNew').classList.toggle('hidden', waiting || offline);
+  $('gateGuest').classList.toggle('hidden', waiting || offline);
   $('gateSkip').classList.toggle('hidden', !offline);
 }
 
@@ -3852,7 +3854,8 @@ function paintAccount() {
   const el = $('whoami');
   if (!el) return;
   if (!authReady())    el.innerHTML = 'offline &mdash; playing as a guest';
-  else if (signedIn()) el.innerHTML = 'signed in as <b>' + (authName() || '...') + '</b>';
+  else if (signedIn()) el.innerHTML = (authIsGuest() ? 'playing as <b>' : 'signed in as <b>')
+                                    + (authName() || '...') + '</b>';
   else                 el.innerHTML = 'playing as a guest';
   const btn = $('btnProfile');
   if (btn) btn.textContent = signedIn() ? 'LOG OUT' : 'LOG IN';
@@ -4420,6 +4423,19 @@ $('btnProfile').addEventListener('click', function () {
 $('gateLogin').addEventListener('click', () => showLogin('in'));
 $('gateNew').addEventListener('click', () => showLogin('new'));
 $('gateSkip').addEventListener('click', gateThrough);
+
+/* No card in between: the button IS the account. The auth state change that
+   follows a success is what takes the gate down, the same as a login. */
+$('gateGuest').addEventListener('click', function () {
+  const btn = this;
+  if (btn.disabled) return;
+  btn.disabled = true;
+  $('gateMsg').textContent = 'working...';
+  authGuest().then(err => {
+    btn.disabled = false;
+    $('gateMsg').textContent = err || '';
+  });
+});
 $('loginBack').addEventListener('click', function () {
   hideLogin();
   if (signedIn()) showMenu(); else paintGate();

@@ -25,11 +25,12 @@ const SB_URL = 'https://rpdyrkdudakfejbxzsdx.supabase.co';
 const SB_KEY = 'sb_publishable_9c4VMTyp2gDJkVLuRk3bqw_W8NILMVE';
 
 const USERNAME_RE = /^[a-z0-9_-]{3,20}$/;   // must survive becoming an address
+const GUEST_RE = /^guest[0-9]+$/;           // handed out by the database, never chosen
 const PASSWORD_MIN = 8;
 
 let sb = null;                               // the client, or null if unavailable
 let authChecked = false;                     // the session question has been answered
-const acct = { id: null, username: null, best: 0 };
+const acct = { id: null, username: null, best: 0, guest: false };
 
 function authReady()   { return !!sb; }
 function authIsChecked() { return authChecked; }
@@ -40,6 +41,7 @@ function authGiveUp() { authChecked = true; }
 function signedIn()   { return !!acct.id; }
 function authName()   { return acct.username; }
 function authBest()   { return acct.best; }
+function authIsGuest() { return acct.guest; }
 
 /* The library comes from a CDN, so it is absent offline and absent from
    file:// with no connection. That is not an error worth reporting - it is the
@@ -62,11 +64,12 @@ function authInit() {
 function authAdopt(session) {
   authChecked = true;
   if (!session || !session.user) {
-    acct.id = null; acct.username = null; acct.best = 0;
+    acct.id = null; acct.username = null; acct.best = 0; acct.guest = false;
     paintAccount();
     return;
   }
   acct.id = session.user.id;
+  acct.guest = !!session.user.is_anonymous;
   paintAccount();                       // show something immediately
   authRefreshProfile();
 }
@@ -101,6 +104,7 @@ async function authSignUp(username, password) {
   if (!sb) return 'No connection. You can still play as a guest.';
   const v = authValidate(username, password);
   if (v.err) return v.err;
+  if (GUEST_RE.test(v.u)) return 'Names like guest12 are kept for guests.';
 
   const { error } = await sb.auth.signUp({
     email: v.u + '@banjoball.invalid',
@@ -128,6 +132,25 @@ async function authSignIn(username, password) {
   });
   if (error) {
     if (/invalid login/i.test(error.message)) return 'Wrong username or password.';
+    return error.message;
+  }
+  return null;
+}
+
+/* A GUEST is a real account with no name or password of its own: Supabase's
+   anonymous sign-in. The database trigger gives it the next guestN, so it has a
+   profile, a best level and a place on the leaderboard like anyone else.
+
+   Its session lives in this browser's storage and nowhere else. Clear that and
+   the account is still in the database, but nothing can ever sign into it
+   again - which is the deal a guest is offered. */
+async function authGuest() {
+  if (!sb) return 'No connection. You can play, but scores will not be saved.';
+  const { error } = await sb.auth.signInAnonymously();
+  if (error) {
+    if (/anonymous sign-ins are disabled/i.test(error.message)) {
+      return 'Guest play is not switched on yet.';
+    }
     return error.message;
   }
   return null;
