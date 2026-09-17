@@ -312,6 +312,71 @@ grant  execute on function public.end_run(uuid)          to authenticated;
 
 
 -- -------------------------------------------------------------------------
+-- EVENTS
+--
+-- What people did, as opposed to what they scored. Profiles say somebody
+-- arrived and runs say somebody played a gauntlet; between those is every
+-- question worth asking about a stranger who clicked an advert - did they
+-- start the tutorial, did they finish it, which mode did they open, how long
+-- did they stay.
+--
+-- Written only through log_event, read only from here. There is no select
+-- policy, so the client cannot read a single row back; it writes and forgets.
+--
+-- A game that ends by the tab being closed leaves a mode_start with no
+-- mode_end. That is not a gap to be filled - it IS the finding.
+-- -------------------------------------------------------------------------
+create table if not exists public.events (
+  id      bigint generated always as identity primary key,
+  user_id uuid not null references auth.users on delete cascade,
+  kind    text not null check (kind in ('mode_start', 'mode_end', 'tutorial_done')),
+  mode    text not null default '',
+  secs    int  not null default 0,     -- how long the game lasted
+  n       int  not null default 0,     -- how far they got: level, or tutorial step
+  at      timestamptz not null default now()
+);
+
+create index if not exists events_at_idx   on public.events (at desc);
+create index if not exists events_user_idx on public.events (user_id, at desc);
+
+alter table public.events enable row level security;
+-- deliberately no policies: the only way in is the function below
+
+create or replace function public.log_event(p_kind text, p_mode text, p_secs int, p_n int)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_recent int;
+begin
+  if auth.uid() is null then
+    return;
+  end if;
+
+  -- a browser that has gone wrong cannot fill the table
+  select count(*) into v_recent
+    from public.events
+   where user_id = auth.uid()
+     and at > now() - interval '1 minute';
+  if v_recent >= 60 then
+    return;
+  end if;
+
+  insert into public.events (user_id, kind, mode, secs, n)
+  values (auth.uid(),
+          left(p_kind, 20),
+          left(coalesce(p_mode, ''), 20),
+          greatest(0, least(coalesce(p_secs, 0), 86400)),
+          greatest(0, least(coalesce(p_n, 0), 1000000)));
+end;
+$$;
+
+revoke execute on function public.log_event(text, text, int, int) from anon, public;
+grant  execute on function public.log_event(text, text, int, int) to authenticated;
+
+
+-- -------------------------------------------------------------------------
 -- THE LEADERBOARD
 --
 -- security_invoker so the view is read under the caller's rights and obeys the
