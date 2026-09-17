@@ -46,6 +46,8 @@
   #panel button.on{border-color:#22d3ee;color:#e6edf6;background:#16222f}
   .lvl{display:flex;gap:6px;width:100px}
   .lvl button{flex:1;padding:4px 0}
+  .pick{display:flex;gap:5px;width:190px}
+  .pick button{flex:1;padding:4px 2px;font-size:9px;letter-spacing:.06em}
 
   #menu{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
         background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
@@ -518,32 +520,71 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v20.5-dev"></script>
-<script src="ai.js?v=v20.5-dev"></script>
-<script src="gauntlet.js?v=v20.5-dev"></script>
-<script src="profile.js?v=v20.5-dev"></script>
-<script src="audio.js?v=v20.5-dev"></script>
-<script src="tutorial.js?v=v20.5-dev"></script>
+<script src="shot.js?v=v21.9-space"></script>
+<script src="ai.js?v=v21.9-space"></script>
+<script src="space.js?v=v21.9-space"></script>
+<script src="gauntlet.js?v=v21.9-space"></script>
+<script src="profile.js?v=v21.9-space"></script>
+<script src="audio.js?v=v21.9-space"></script>
+<script src="tutorial.js?v=v21.9-space"></script>
 <script>
 'use strict';
 
 // ---- arena, all in metres -------------------------------------------------
-const A = {
-  width: 20, height: 12,    // inner playing area
-  netHeight: 2.95, netT: 0.10,
-  goalLip: 3.00,            // gap between the floor and the bottom of the opening
-  goalHeight: 3.00,         // size of the opening
-  goalDepth: 0.70,          // how far the box extends outside the field
-  cornerR: 0.11,            // rounding on the arena contour. WORLD units, not
-                            // derived from the hairline, so collision geometry
-                            // never changes when the window resizes.
-  crossFrac: 0.35,         // how far the OFFENCE paddle may reach into the far
-                            // half, as a fraction of that half's width
-  defFrac: 0.65,            // share of a player's own half reserved for defence
-  paddleLength: 0.85,
-  paddleT: 0.05,
-  margin: 0.9,
+/* ==========================================================================
+   THE ARENA, AS DATA
+
+   The field is a named set of numbers rather than a set of numbers. Everything
+   still reads `A`, which is the arena currently loaded - so no call site
+   changes and nothing about how the game plays moves. What changes is that
+   there can be more than one entry.
+
+   Two things follow from doing it this way rather than by branching on an
+   arena id at each site. A second arena cannot break the first, because the
+   first is just another entry. And a transition between two arenas is
+   interpolation between two tables, which is the same shape as AI_LEVELS -
+   there is no morph to write, only a `t` to drive.
+
+   PADDLE LENGTH AND THICKNESS ARE NOT IN HERE. The paddle is the instrument;
+   the arena is the room. A player who learns to time a swing in one field
+   should arrive in the next knowing exactly what they know, and that only
+   holds if the thing in their hand never changes when the room does.
+   ========================================================================== */
+const ARENAS = {
+  1: {
+    width: 20, height: 12,    // inner playing area
+    netHeight: 2.95, netT: 0.10,
+    goalLip: 3.00,            // gap between the floor and the bottom of the opening
+    goalHeight: 3.00,         // size of the opening
+    goalDepth: 0.70,          // how far the box extends outside the field
+    cornerR: 0.11,            // rounding on the arena contour. WORLD units, not
+                              // derived from the hairline, so collision geometry
+                              // never changes when the window resizes.
+    crossFrac: 0.35,          // how far the OFFENCE paddle may reach into the far
+                              // half, as a fraction of that half's width
+    defFrac: 0.65,            // share of a player's own half reserved for defence
+    margin: 0.9,              // camera padding around the contour
+  },
 };
+
+let arenaId = 1;
+
+const A = {
+  paddleLength: 0.85,         // the instrument, not the room
+  paddleT: 0.05,
+  paddleCurve: 0,             // bulge at the middle, in metres. 0 is straight.
+  paddleSegs: 9,              // how finely a curved face is cut up
+};
+
+/* Writes into the live A rather than replacing it, because everything holds a
+   reference to that object - the tuning panel, the config the host sends a
+   guest, and every closure that reads A.width. */
+function arenaSet(n) {
+  if (!ARENAS[n]) return;
+  Object.assign(A, ARENAS[n]);
+  arenaId = n;
+}
+arenaSet(1);
 
 /* Paddle response. Springs are given as (frequency, damping ratio) rather than
    (k, c) because those are the numbers you can reason about: frequency is how
@@ -666,7 +707,7 @@ const goalY0 = () => A.goalLip;
 const goalY1 = () => A.goalLip + A.goalHeight;
 
 // ---- world -> screen ------------------------------------------------------
-const view = { scale: 1, ox: 0, oy: 0, dpr: 1 };
+const view = { scale: 1, ox: 0, oy: 0, dpr: 1, panelDev: 0 };
 
 function bounds() {
   const out = A.goalDepth + A.margin;
@@ -679,34 +720,98 @@ function bounds() {
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 
+/* Frame a rectangle of the world. Split out of resize so it can run every
+   frame rather than only when the window changes - the camera is no longer a
+   property of the court, it is a question about where things currently are. */
+function applyView(x0, x1, y0, y1) {
+  const dpr = view.dpr;
+  const cwDev = canvas.width, chDev = canvas.height;
+  const availDev = Math.max(1, chDev - view.panelDev);
+
+  const w = Math.max(1e-6, x1 - x0), h = Math.max(1e-6, y1 - y0);
+  const raw = Math.min(cwDev / w, availDev / h);
+
+  /* Quantise to a whole number of DEVICE pixels per metre. The court is a whole
+     number of metres across, so this lands x=0, x=W, y=0 and y=H on the same
+     pixel phase and vertical walls rasterise identically to horizontal ones.
+     Without it the two axes sit at unrelated sub-pixel offsets and the
+     antialiaser spreads their ink differently, which reads as a colour shift.
+
+     Only while the camera is sitting on the court, though. Once it is zooming
+     the scale would step by whole pixels-per-metre, and a slow zoom made of
+     visible steps is worse than a slightly soft line. */
+  const b = bounds();
+  const still = x0 >= b.minX - 1e-6 && x1 <= b.maxX + 1e-6 &&
+                y0 >= b.minY - 1e-6 && y1 <= b.maxY + 1e-6;
+
+  const sDev = view.sDev = Math.max(1, still ? Math.floor(raw) : raw);
+  view.scale = sDev / dpr;
+
+  const ox = (cwDev - w * sDev) / 2 - x0 * sDev;
+  const oy = view.panelDev + (availDev - h * sDev) / 2 + y1 * sDev;
+  view.oxDev = still ? Math.round(ox) : ox;      // snapped, for the same reason
+  view.oyDev = still ? Math.round(oy) : oy;
+  view.ox = view.oxDev / dpr;
+  view.oy = view.oyDev / dpr;
+}
+
+/* THE CAMERA.
+
+   The smallest window holding the ball, your own paddles and both goals, never
+   tighter than the court. spaceView decides what must be visible; this decides
+   how fast the frame agrees to it.
+
+   Expand quickly, contract slowly. If the frame lags something leaving it, the
+   thing leaves it - so growth has to be nearly immediate. Shrinking has no such
+   deadline, and a camera that snaps tight the moment it can is seasick. */
+const CAM_OUT = 0.10, CAM_IN = 0.60;      // seconds
+const camWant = { x0: 0, x1: 0, y0: 0, y1: 0 };
+const camBox  = { x0: 0, x1: 0, y0: 0, y1: 0 };
+let camReady = false;
+let camLocked = true;           // developer: hold the frame where it is
+
+function camUpdate(dt) {
+  if (!running) { camReady = false; return; }
+
+  /* Locked means locked to where it IS, not to the court - so it freezes
+     whatever you were looking at when you pressed it, including a zoomed-out
+     frame. Still applied every frame, because the window can still resize. */
+  if (camLocked && camReady) {
+    applyView(camBox.x0, camBox.x1, camBox.y0, camBox.y1);
+    return;
+  }
+
+  spaceView(world, mySide, camWant);
+
+  if (!camReady) {
+    camBox.x0 = camWant.x0; camBox.x1 = camWant.x1;
+    camBox.y0 = camWant.y0; camBox.y1 = camWant.y1;
+    camReady = true;
+  } else {
+    const out = 1 - Math.exp(-dt / CAM_OUT);
+    const back = 1 - Math.exp(-dt / CAM_IN);
+    // each edge moves out fast and back slowly, independently
+    camBox.x0 += (camWant.x0 - camBox.x0) * (camWant.x0 < camBox.x0 ? out : back);
+    camBox.x1 += (camWant.x1 - camBox.x1) * (camWant.x1 > camBox.x1 ? out : back);
+    camBox.y0 += (camWant.y0 - camBox.y0) * (camWant.y0 < camBox.y0 ? out : back);
+    camBox.y1 += (camWant.y1 - camBox.y1) * (camWant.y1 > camBox.y1 ? out : back);
+  }
+  applyView(camBox.x0, camBox.x1, camBox.y0, camBox.y1);
+}
+
 function resize() {
   const dpr = view.dpr = Math.min(devicePixelRatio || 1, 2);
   const cw = view.cw = innerWidth, ch = view.ch = innerHeight;
-  const cwDev = Math.round(cw * dpr), chDev = Math.round(ch * dpr);
-  canvas.width = cwDev;
-  canvas.height = chDev;
+  canvas.width = Math.round(cw * dpr);
+  canvas.height = Math.round(ch * dpr);
 
   // Keep the arena clear of the tuning panel rather than letting it overlap.
+  // Cached, because applyView runs every frame and this is a layout read.
   const panelEl = document.getElementById('panel');
-  const panelDev = Math.round(panelEl.offsetHeight * dpr);
-  const availDev = Math.max(1, chDev - panelDev);
+  view.panelDev = Math.round(panelEl.offsetHeight * dpr);
 
-  const b = bounds();
-  const w = b.maxX - b.minX, h = b.maxY - b.minY;
-
-  // Quantise to a whole number of DEVICE pixels per metre. The court is a
-  // whole number of metres across, so this lands x=0, x=W, y=0 and y=H on the
-  // same pixel world.phase and vertical walls rasterise identically to horizontal
-  // ones. Without it the two axes sit at unrelated sub-pixel offsets and the
-  // antialiaser spreads their ink differently, which reads as a colour shift.
-  const sDev = view.sDev = Math.max(1, Math.floor(Math.min(cwDev / w, availDev / h)));
-  view.scale = sDev / dpr;
-
-  // Snap the world origin to a whole device pixel, for the same reason.
-  view.oxDev = Math.round((cwDev - w * sDev) / 2 - b.minX * sDev);
-  view.oyDev = Math.round(panelDev + (availDev - h * sDev) / 2 + b.maxY * sDev);
-  view.ox = view.oxDev / dpr;
-  view.oy = view.oyDev / dpr;
+  if (camReady) applyView(camBox.x0, camBox.x1, camBox.y0, camBox.y1);
+  else { const b = bounds(); applyView(b.minX, b.maxX, b.minY, b.maxY); }
 
   render();
 }
@@ -897,6 +1002,7 @@ const heldPaddle = () => paddles[idOf(mySide, intent.sel)];
 const controlsLive = () => !USE_POINTER_LOCK || pointerLocked;
 
 function clampCursor() {
+  if (!PADDLE_ZONES) return;
   const boxes = paddleBoxes(heldPaddle());
   const t = nearestLegal(boxes, cursor.x, cursor.y);
   const r = FEEL.reach;
@@ -1004,11 +1110,13 @@ function stepPaddle(p, inp, dt) {
      boundary, and the paddle is then stopped hard against it.
      The target is still bounded, but by a fixed distance in METRES, so window
      size can't buy anyone extra force at the walls. */
-  const boxes = paddleBoxes(p);
-  const reach = FEEL.reach;
-  const t = nearestLegal(boxes, p.tx, p.ty);
-  p.tx = p.tx < t.x - reach ? t.x - reach : p.tx > t.x + reach ? t.x + reach : p.tx;
-  p.ty = p.ty < t.y - reach ? t.y - reach : p.ty > t.y + reach ? t.y + reach : p.ty;
+  if (PADDLE_ZONES) {
+    const boxes = paddleBoxes(p);
+    const reach = FEEL.reach;
+    const t = nearestLegal(boxes, p.tx, p.ty);
+    p.tx = p.tx < t.x - reach ? t.x - reach : p.tx > t.x + reach ? t.x + reach : p.tx;
+    p.ty = p.ty < t.y - reach ? t.y - reach : p.ty > t.y + reach ? t.y + reach : p.ty;
+  }
 
   /* Position uses a clamped error, and clamps the error VECTOR rather than
      each axis, so top speed is the same in every direction instead of being
@@ -1028,9 +1136,11 @@ function stepPaddle(p, inp, dt) {
   // Hard stop at the boundary, per axis so the paddle still slides along a
   // wall it is pressed against. Velocity into the wall is killed, not
   // reflected — this is a kinematic limit, not a bounce.
-  const legal = nearestLegal(boxes, p.x, p.y);
-  if (legal.x !== p.x) { if ((legal.x - p.x) * p.vx < 0) p.vx = 0; p.x = legal.x; }
-  if (legal.y !== p.y) { if ((legal.y - p.y) * p.vy < 0) p.vy = 0; p.y = legal.y; }
+  if (PADDLE_ZONES) {
+    const legal = nearestLegal(paddleBoxes(p), p.x, p.y);
+    if (legal.x !== p.x) { if ((legal.x - p.x) * p.vx < 0) p.vx = 0; p.x = legal.x; }
+    if (legal.y !== p.y) { if ((legal.y - p.y) * p.vy < 0) p.vy = 0; p.y = legal.y; }
+  }
   [p.a, p.w ] = spring(p.a, p.w , p.ta, FEEL.angFreq, FEEL.angDamp, dt);
 
   /* NO ANGLE WRAPPING. It used to shift target and pose together by a turn to
@@ -1541,37 +1651,117 @@ function collideNet(w) {
    carries v + omega x r, so swinging into the ball adds energy, dragging
    across it adds spin, and pulling away from it takes pace off. None of that
    is possible if the paddle is teleported to the cursor. */
+/* THE PADDLE IS A LIST OF SEGMENTS, rigidly connected.
+
+   It does not need to be a box, and it never really was one: the old collider
+   clamped the ball to a SPINE of length paddleLength - paddleT and resolved
+   against a radius of paddleT/2, which is a capsule. So the default shape is
+   exactly one capsule and the conversion is provably identical rather than
+   approximately so - same closest point, same normal, same material point.
+
+   What changes is that the list can be longer. Any shape that can be drawn
+   with segments is now a paddle: an L, a cup, a wedge, a comb. They rotate
+   together about the paddle's centre because they are local coordinates with
+   one transform, which is what "rigidly connected" means here.
+
+   Cached on the two dimensions it is built from, so the sliders still work. */
+let _padShape = null, _padKey = '';
+
+function paddleShape() {
+  const key = [A.paddleLength, A.paddleT, A.paddleCurve, A.paddleSegs].join(',');
+  if (key === _padKey && _padShape) return _padShape;
+  _padKey = key;
+
+  const half = Math.max(0, (A.paddleLength - A.paddleT) / 2);
+  const r = A.paddleT / 2;
+  const sag = A.paddleCurve;
+
+  /* Straight is ONE segment, not nine collinear ones. Same geometry either
+     way, but one is the cheap version and it keeps the default exactly what it
+     has always been. */
+  if (Math.abs(sag) < 1e-6 || A.paddleSegs < 2) {
+    _padShape = [{ ax: -half, ay: 0, bx: half, by: 0, r }];
+    return _padShape;
+  }
+
+  /* A parabola rather than a circular arc: y = sag * (1 - u*u) over u in
+     [-1, 1]. It needs no radius, has no degenerate case as the bulge goes to
+     zero, and nobody can tell the difference by eye at these curvatures.
+
+     Centred on its own mean height so the face stays balanced about the
+     cursor - otherwise a deep curve would drift the paddle off the pointer as
+     the slider moved, which reads as the controls breaking. */
+  const segs = Math.max(2, Math.round(A.paddleSegs));
+  const mean = sag * 2 / 3;
+  const caps = [];
+  let ax = -half, ay = -mean;
+  for (let i = 1; i <= segs; i++) {
+    const u = -1 + 2 * i / segs;
+    const bx = u * half, by = sag * (1 - u * u) - mean;
+    caps.push({ ax, ay, bx, by, r });
+    ax = bx; ay = by;
+  }
+  _padShape = caps;
+  return _padShape;
+}
+
 function collidePaddle(w, p) {
   const b = w.ball;
   const R = PHYS.ballR;
-  const half = Math.max(0, (A.paddleLength - A.paddleT) / 2);   // spine length
-  const rad  = A.paddleT / 2;
-
   const c = Math.cos(p.a), s = Math.sin(p.a);
-  const dx = b.x - p.x, dy = b.y - p.y;
-  const lx =  dx * c + dy * s;          // ball in the paddle's local frame
-  const ly = -dx * s + dy * c;
 
-  const qx = clamp(lx, -half, half);    // closest point on the spine
-  let nx = lx - qx, ny = ly;
-  let d = Math.hypot(nx, ny);
-  const sum = R + rad;
-  if (d >= sum) return;
-  if (d < 1e-9) { nx = 0; ny = 1; d = 1e-9; }
-  nx /= d; ny /= d;
+  /* ONE CONTACT, THE DEEPEST. Neighbouring segments share an endpoint, so a
+     ball near a joint is inside both - and resolveContact pushes it out before
+     it checks whether the two are even approaching. Resolving each in turn
+     would push it twice and hit it twice, which at a joint reads as the paddle
+     randomly hitting harder. So the whole shape is searched first and only the
+     worst overlap is answered.
 
-  const wnx = nx * c - ny * s;          // normal back into world space
-  const wny = nx * s + ny * c;
+     With one segment this is exactly what the old collider did. */
+  let bestPen = 0, bestNx = 0, bestNy = 1, bestQx = 0, bestQy = 0, bestR = 0;
 
-  // material point of the paddle at the contact, relative to its centre
-  const rx = qx * c + rad * wnx;
-  const ry = qx * s + rad * wny;
-  const svx = p.vx - p.w * ry;
-  const svy = p.vy + p.w * rx;
+  for (const cap of paddleShape()) {
+    // the segment's ends, in world space
+    const ax = p.x + cap.ax * c - cap.ay * s, ay = p.y + cap.ax * s + cap.ay * c;
+    const bx = p.x + cap.bx * c - cap.by * s, by = p.y + cap.bx * s + cap.by * c;
 
-  const j = resolveContact(b, wnx, wny, sum - d, PHYS.paddleRest, PHYS.paddleFriction,
-                           svx, svy, PHYS.ballR * 0.5);
-  if (j > EV_MIN) pushEvent(w, 'paddle', j, b.x);
+    const ex = bx - ax, ey = by - ay;
+    const len2 = ex * ex + ey * ey;
+    let t = len2 > 0 ? ((b.x - ax) * ex + (b.y - ay) * ey) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const qx = ax + ex * t, qy = ay + ey * t;   // closest point on the segment
+
+    let nx = b.x - qx, ny = b.y - qy;
+    let d = Math.hypot(nx, ny);
+    const sum = R + cap.r;
+    if (d >= sum) continue;
+    if (d < 1e-9) { nx = 0; ny = 1; d = 1e-9; }
+    nx /= d; ny /= d;
+
+    const pen = sum - d;
+    if (pen <= bestPen) continue;
+    bestPen = pen; bestNx = nx; bestNy = ny;
+    bestQx = qx; bestQy = qy; bestR = cap.r;
+  }
+
+  if (bestPen > 0) {
+    const nx = bestNx, ny = bestNy, qx = bestQx, qy = bestQy;
+
+    /* The material point of the paddle at the contact, relative to its centre:
+       out to the segment, then out again by the segment's own radius. This is
+       what carries swing and spin into the ball, and it is the one place a
+       multi-segment paddle differs in spirit from a single one - a segment far
+       from the centre moves faster under rotation, so an outrigger hits harder
+       than the middle does. */
+    const rx = (qx - p.x) + bestR * nx;
+    const ry = (qy - p.y) + bestR * ny;
+    const svx = p.vx - p.w * ry;
+    const svy = p.vy + p.w * rx;
+
+    const j = resolveContact(b, nx, ny, bestPen, PHYS.paddleRest, PHYS.paddleFriction,
+                             svx, svy, PHYS.ballR * 0.5);
+    if (j > EV_MIN) pushEvent(w, 'paddle', j, b.x);
+  }
 }
 
 // skipPaddles lets the AI ask "where would this go if nobody touched it"
@@ -1594,8 +1784,14 @@ function stepBall(w, dt, collide = true, skipPaddles = false) {
   const pull = inGoal ? (b.x < 0 ? -PHYS.goalPull : PHYS.goalPull) : 0;
 
   for (let i = 0; i < sub; i++) {
-    b.vx += pull * h;
-    b.vy -= PHYS.gravity * h;
+    /* Gravity is a field now, not a number. It points at a mass 2000 below the
+       court, so across twelve units it varies about a percent and leans a
+       third of a degree at the ends - which is why nobody has ever noticed
+       being in orbit. PHYS.gravity still means what the slider says: the
+       acceleration AT the court. */
+    const g = spaceGravityAt(b.x, b.y);
+    b.vx += (g.x + pull) * h;
+    b.vy += g.y * h;
     b.x  += b.vx * h;
     b.y  += b.vy * h;
     b.a  += b.w * h;
@@ -1607,8 +1803,11 @@ function stepBall(w, dt, collide = true, skipPaddles = false) {
           collidePaddle(w, pd);
         }
       }
-      collideNet(w);
-      collideArena(w);      // last, so the ball can never be left inside a wall
+      /* One call for every surface in the world - net, walls, corners - in the
+         order collideNet and collideArena resolved them, so a frame with two
+         contacts in it comes out the same. Walls last, so the ball can never
+         be left inside one. */
+      spaceCollide(w);
       // Only while the ball is meant to be on the court: during a goal it is
       // supposed to leave through the back of the net.
       if (w.phase === PHASE.PLAY) containBall(b);
@@ -1764,31 +1963,43 @@ function pathRR(x, y, w, h, r) {
   ctx.closePath();
 }
 
+/* Drawn from the same list the collider reads, so the picture cannot disagree
+   with the shape - the worst kind of bug in a game where the player aims at
+   what they see.
+
+   A capsule IS a stroked line: round caps, width twice the radius. So there is
+   no outline to trace and no fill; the body is a stroke at its true thickness
+   and the glow is the same stroke, wider and fainter. For the default single
+   segment that draws the identical stadium the rounded rectangle did. */
 function drawPaddle(x, y, a, colour, ghost) {
-  const L = A.paddleLength, T = A.paddleT;
+  const shape = paddleShape();
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(a);
-  pathRR(-L / 2, -T / 2, L, T, T / 2);
-  if (ghost) {
-    ctx.strokeStyle = colour;
-    ctx.globalAlpha = 0.20;
-    ctx.lineWidth = lineW();
-    ctx.setLineDash([0.10, 0.09]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.globalAlpha = 1;
-  } else {
-    ctx.strokeStyle = colour;
-    for (const [px, alpha] of GLOW) {
-      ctx.lineWidth = px * 0.5 / view.scale;
-      ctx.globalAlpha = alpha * VIS.glow;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = colour;
+
+  const strokeAll = (extra, alpha) => {
+    ctx.globalAlpha = alpha;
+    for (const cp of shape) {
+      ctx.beginPath();
+      ctx.moveTo(cp.ax, cp.ay);
+      ctx.lineTo(cp.bx, cp.by);
+      ctx.lineWidth = 2 * cp.r + extra;
       ctx.stroke();
     }
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = colour;
-    ctx.fill();
+  };
+
+  if (ghost) {
+    ctx.setLineDash([0.10, 0.09]);
+    strokeAll(0, 0.20);
+    ctx.setLineDash([]);
+  } else {
+    for (const [px, alpha] of GLOW) strokeAll(px * 0.5 / view.scale, alpha * VIS.glow);
+    strokeAll(0, 1);
   }
+  ctx.globalAlpha = 1;
   ctx.restore();
 }
 
@@ -1940,6 +2151,7 @@ function drawDefensivePosition() {
 
 function drawEffects() {
   drawCursor();
+  spaceDrawSource(ctx);
   drawDefensivePosition();
   if (!opts.showVectors) return;
   const p0 = me();
@@ -2348,6 +2560,8 @@ addEventListener('resize', resize);
    refit; everything else takes effect on the next frame by itself. */
 const KNOBS = [
   ['PADDLE'],
+  { o: A, k: 'paddleCurve', label: 'curve',    min: -0.30, max: 0.30, step: 0.005, u: 'm' },
+  { o: A, k: 'paddleSegs',  label: 'segments', min: 1,     max: 48,   step: 1,     u: '' },
   { o: FEEL, k: 'posFreq',    label: 'pos freq',   min: 1,   max: 25,  step: 0.1,  u: 'Hz' },
   { o: FEEL, k: 'posDamp',    label: 'pos damp',   min: 0.2, max: 8,   step: 0.02, u: 'z'  },
   { o: FEEL, k: 'angFreq',    label: 'ang freq',   min: 1,   max: 30,  step: 0.1,  u: 'Hz' },
@@ -2403,6 +2617,17 @@ const KNOBS = [
   { o: SHOT, k: 'minWindow', label: 'min window', min: 0, max: 0.4, step: 0.005, u: 's' },
   { o: SHOT, k: 'wWindow',   label: 'w window',  min: 0, max: 4,   step: 0.1,   u: '' },
 
+  /* Which of the three pulls is running. Not a value with a right answer to
+     reset to, so it carries no target object and DEFAULTS skips it. */
+  ['GRAVITY'],
+  { pick: true, options: ['uniform', 'point', 'off'],
+    get: () => SPACE.gravity.kind, set: v => spaceSetGravity(v) },
+
+  ['CAMERA'],
+  { pick: true, options: ['follow', 'locked'],
+    get: () => camLocked ? 'locked' : 'follow',
+    set: v => { camLocked = (v === 'locked'); } },
+
   /* Developer only, like the whole panel. Drags the run to a level so the late
      game and the survival card can be reached without playing there. */
   ['GAUNTLET'],
@@ -2441,6 +2666,28 @@ function buildPanel() {
       firstGroup = false;
       continue;
     }
+    /* A row of exclusive buttons, one of them lit. Generic rather than a branch
+       per setting: it carries its own options and its own get and set, so a new
+       one is an entry in KNOBS and nothing here changes. */
+    if (k.pick) {
+      const wrap = document.createElement('div');
+      wrap.className = 'pick';
+      for (const opt of k.options) {
+        const b = document.createElement('button');
+        b.textContent = opt.toUpperCase();
+        b.addEventListener('click', () => { k.set(opt); syncPanel(); });
+        wrap.appendChild(b);
+      }
+      k._sync = () => {
+        const cur = k.get();
+        [...wrap.children].forEach((b, i) =>
+          b.classList.toggle('on', k.options[i] === cur));
+      };
+      k._sync();
+      el.appendChild(wrap);
+      continue;
+    }
+
     /* The difficulty pair. Not a slider — it writes a whole set of values at
        once, across both AI and SHOT, and then every other row has to catch up.
        That is what syncPanel is for. */
@@ -2840,6 +3087,8 @@ function frame(nowMs) {
     if (netAcc >= 1) { netAcc = 0; sendConfig(); }
   }
 
+  camUpdate(dt);
+
   pumpEvents();
   pumpTutorial(dt);
   pumpGauntlet(dt);
@@ -2874,7 +3123,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v20.5-dev';
+const BUILD = 'v21.9-space';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
