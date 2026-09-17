@@ -305,6 +305,7 @@ function tutEnterStep() {
      because whichever arrives first, the other is a no-op: openPause returns
      early if already paused, and pausePanel only sets which card is up. */
   if (kind === 'finish') {
+    evLog('tutorial_done', 'tutorial', 0, tut.step);
     document.body.classList.add('tutdone');
     if (document.exitPointerLock) document.exitPointerLock();
     openPause();

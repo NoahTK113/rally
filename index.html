@@ -518,12 +518,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v20.4"></script>
-<script src="ai.js?v=v20.4"></script>
-<script src="gauntlet.js?v=v20.4"></script>
-<script src="profile.js?v=v20.4"></script>
-<script src="audio.js?v=v20.4"></script>
-<script src="tutorial.js?v=v20.4"></script>
+<script src="shot.js?v=v20.5"></script>
+<script src="ai.js?v=v20.5"></script>
+<script src="gauntlet.js?v=v20.5"></script>
+<script src="profile.js?v=v20.5"></script>
+<script src="audio.js?v=v20.5"></script>
+<script src="tutorial.js?v=v20.5"></script>
 <script>
 'use strict';
 
@@ -2676,6 +2676,7 @@ function startGame(asTutorial) {
   /* After restoreTuning, which resets AI and SHOT to their defaults - the
      gauntlet's level has to be written on top of that, not under it. */
   if (gaunt.armed) gauntStart(); else gauntStop();
+  evGameStart();
 
   if (soloDirect()) {
     /* Nothing to wire. The world set up above is the one that will be stepped,
@@ -2702,6 +2703,46 @@ function startGame(asTutorial) {
   requestAnimationFrame(frame);
 }
 
+/* ==========================================================================
+   WHAT MODE IS THIS, AND HOW LONG DID IT LAST
+
+   Read rather than remembered: the mode is whatever the flags say at the
+   moment the game starts, so there is no fourth place for it to be set and go
+   stale. Taken AFTER tutStart and gauntStart have run, because both of those
+   are what make their answer true.
+
+   A game that ends by the tab closing records its start and no end. That is
+   left as it is - the alternative is a beacon on unload, and an absent end row
+   already reads as "walked away", which is the thing worth knowing.
+   ========================================================================== */
+function gameMode() {
+  if (tut.active) return 'tutorial';
+  if (gaunt.active) return 'gauntlet';
+  if (net.role === 'host' || net.role === 'guest') return 'online';
+  if (AI.on) return 'vsai';
+  return 'practice';
+}
+
+let evMode = '';           // the mode currently being played, '' between games
+let evT0 = 0;
+
+function evGameStart() {
+  evMode = gameMode();
+  evT0 = performance.now();
+  evLog('mode_start', evMode, 0, 0);
+}
+
+/* Both ways out of a game come here. The number carried is whatever counts as
+   progress in that mode - the level for a gauntlet, the step for the tutorial
+   - so one row says both how long they stayed and how far they got. */
+function evGameEnd() {
+  if (!evMode) return;
+  const n = evMode === 'gauntlet' ? gaunt.level
+          : evMode === 'tutorial' ? tut.step : 0;
+  evLog('mode_end', evMode, (performance.now() - evT0) / 1000, n);
+  evMode = '';
+}
+
 /* A finished match returns to the lobby rather than the main menu: the
    connection is still up and the settings are still wanted. Both peers reach
    this from the phase they are already being told about, so it needs no
@@ -2713,6 +2754,7 @@ function releaseMouse() {
 }
 
 function endMatch() {
+  evGameEnd();
   releaseMouse();
   running = false;
   document.body.classList.remove('playing');
@@ -2722,6 +2764,7 @@ function endMatch() {
 }
 
 function stopGame() {
+  evGameEnd();          // before tutStop, which is what forgets the step
   releaseMouse();
   tutStop();
   running = false;
@@ -2831,7 +2874,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v20.4';
+const BUILD = 'v20.5';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that

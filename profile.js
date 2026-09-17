@@ -252,6 +252,35 @@ async function runEnd() {
 }
 
 
+/* ==========================================================================
+   EVENTS
+
+   What people actually do, which is otherwise invisible: the profiles table
+   says somebody arrived and the runs table says they played a gauntlet, and
+   between those two is everything that has to be guessed at - whether they
+   tried the tutorial, whether they finished it, which mode they opened, how
+   long they stayed.
+
+   Fire and forget, like the run calls, and silent on every failure. A player
+   whose network drops loses a row from a report; nothing they can see is
+   affected, and nothing waits on the reply.
+
+   Only for people who are signed in, which since guest accounts is everyone
+   who has got past the door. Rows are written by a SECURITY DEFINER function
+   and cannot be read back by the client at all.
+   ========================================================================== */
+function evLog(kind, mode, secs, n) {
+  if (!sb || !signedIn()) return;
+  try {
+    sb.rpc('log_event', {
+      p_kind: kind,
+      p_mode: mode || '',
+      p_secs: Math.max(0, Math.round(secs || 0)),
+      p_n: Math.max(0, Math.round(n || 0)),
+    }).then(() => {}, () => {});
+  } catch (e) {}
+}
+
 /* The top hundred, for whenever there is somewhere to show it. Resolves to an
    array, empty on any failure - a leaderboard that cannot be fetched is an
    empty leaderboard, not an error dialog over a game. */
