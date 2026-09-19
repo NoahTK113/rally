@@ -481,7 +481,8 @@ function drawGoalMark(ctx, m) {
   const colour = c ? goalColour(m.x === 0 ? -1 : 1) : '#ffffff';
 
   ctx.save();
-  ctx.font = `700 ${Math.max(11, Math.round(view.scale * 0.30))}px ui-monospace, Consolas, monospace`;
+  const fs = c ? Math.max(16, Math.round(view.scale * 0.46)) : Math.max(11, Math.round(view.scale * 0.30));
+  ctx.font = `700 ${fs}px ui-monospace, Consolas, monospace`;
   ctx.textBaseline = 'middle';
   ctx.lineWidth = c ? Math.max(3, view.scale * 0.08) : Math.max(1.5, view.scale * 0.035);
   ctx.lineCap = 'round';
