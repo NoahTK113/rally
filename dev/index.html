@@ -123,23 +123,31 @@
   /* The list scrolls; the card does not grow. Its height is matched to the
      setup card in script, because that card's height depends on its contents. */
   #lbScroll{overflow-y:auto;flex:1;min-height:0}
-  /* The scrollbar: a thin cyan bar with no track and no arrows, standing in
-     the middle of the gap between the level column and the card's edge.
+  /* The scrollbar: a thin, half-clear cyan bar with no track and no arrows,
+     standing in the middle of the gap between the level column and the
+     card's edge.
+
+     Chrome IGNORES every ::-webkit-scrollbar rule on an element that also sets
+     the standard scrollbar-width or scrollbar-color - it draws its own thin bar
+     instead, arrows and all, which is what the first version showed. So the
+     standard properties are given only to browsers without the webkit ones,
+     which in practice means Firefox, where `thin` and a colour are all there is.
 
      A scrollbar always sits at its container's edge, so the container is
-     pulled 10px into the card's 16px padding and given 6px of its own on the
-     inside - 6px, 4px of bar, 6px - which puts the numbers back where the
-     card's padding would have put them. The gutter is kept even when nothing
-     overflows, so a short list does not sit 4px further right than a long one.
-     No horizontal scrolling: the bottom bar was only ever the table being
-     squeezed by the side one. Firefox takes only `thin` and a colour. */
-  #lbScroll{overflow-x:hidden;margin-right:-10px;padding-right:6px;
-            scrollbar-gutter:stable;scrollbar-width:thin;
-            scrollbar-color:#22d3ee transparent}
-  #lbScroll::-webkit-scrollbar{width:4px;height:0}
+     pulled into the card's 16px padding and given padding of its own on the
+     inside: 5.8px, 4.4px of bar, 5.8px. The gutter is kept even when nothing
+     overflows, so a short list does not sit further right than a long one. No
+     horizontal scrolling: the bottom bar was the table squeezed by the side one. */
+  #lbScroll{overflow-x:hidden;margin-right:-10.2px;padding-right:5.8px;
+            scrollbar-gutter:stable}
+  #lbScroll::-webkit-scrollbar{width:4.4px;height:0}
   #lbScroll::-webkit-scrollbar-track{background:transparent}
-  #lbScroll::-webkit-scrollbar-thumb{background:#22d3ee;border-radius:2px}
-  #lbScroll::-webkit-scrollbar-button{display:none}
+  #lbScroll::-webkit-scrollbar-thumb{background:rgba(34,211,238,.5);border-radius:3px}
+  #lbScroll::-webkit-scrollbar-button{display:none;width:0;height:0}
+  #lbScroll::-webkit-scrollbar-corner{background:transparent}
+  @supports not selector(::-webkit-scrollbar) {
+    #lbScroll{scrollbar-width:thin;scrollbar-color:rgba(34,211,238,.5) transparent}
+  }
   #setup .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
                background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.5);text-align:center}
   #setup h1{font-size:15px;letter-spacing:.3em;font-weight:600;color:#ffffff}
@@ -603,12 +611,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v21.4-dev"></script>
-<script src="ai.js?v=v21.4-dev"></script>
-<script src="gauntlet.js?v=v21.4-dev"></script>
-<script src="profile.js?v=v21.4-dev"></script>
-<script src="audio.js?v=v21.4-dev"></script>
-<script src="tutorial.js?v=v21.4-dev"></script>
+<script src="shot.js?v=v21.5-dev"></script>
+<script src="ai.js?v=v21.5-dev"></script>
+<script src="gauntlet.js?v=v21.5-dev"></script>
+<script src="profile.js?v=v21.5-dev"></script>
+<script src="audio.js?v=v21.5-dev"></script>
+<script src="tutorial.js?v=v21.5-dev"></script>
 <script>
 'use strict';
 
@@ -3036,7 +3044,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v21.4-dev';
+const BUILD = 'v21.5-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
