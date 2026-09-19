@@ -329,7 +329,7 @@
 <div id="lockHint"><span id="lockMain">CLICK TO START</span><small id="lockSub">&nbsp;</small></div>
 <div id="intro">
   <div><b>[Mouse]</b> to move</div>
-  <div><b>[Wheel]</b> to rotate</div>
+  <div><b>[Scroll]</b> to rotate</div>
   <div>Press <b>[Esc]</b> to pause</div>
   <div>Press <b>[Space]</b> to start game</div>
 </div>
@@ -350,18 +350,18 @@
   <div class="pcard hidden" id="pauseControls">
     <h2>CONTROLS</h2>
     <dl>
-      <dt>Mouse</dt><dd>Move your paddle</dd>
-      <dt>Wheel</dt><dd>Rotate your paddle</dd>
-      <dt>Hold right-click</dt><dd>Finer rotation steps</dd>
-      <dt>Space</dt><dd>Switch paddles (two paddle mode)</dd>
-      <dt>Esc</dt><dd>Pause</dd>
+      <dt>[Mouse]</dt><dd>Move your paddle</dd>
+      <dt>[Scroll]</dt><dd>Rotate your paddle</dd>
+      <dt>Hold [Right Click]</dt><dd>Finer rotation steps</dd>
+      <dt>[Space]</dt><dd>Switch paddles (two paddle mode)</dd>
+      <dt>[Esc]</dt><dd>Pause</dd>
     </dl>
     <h3>PRACTICE ONLY</h3>
     <dl>
-      <dt>F</dt><dd>Serve</dd>
-      <dt>R</dt><dd>Reset the score</dd>
-      <dt>H</dt><dd>Developer settings</dd>
-      <dt>Tab</dt><dd>Swap teams</dd>
+      <dt>[F]</dt><dd>Serve</dd>
+      <dt>[R]</dt><dd>Reset the score</dd>
+      <dt>[H]</dt><dd>Developer settings</dd>
+      <dt>[Tab]</dt><dd>Swap teams</dd>
     </dl>
     <button id="pBack">BACK</button>
   </div>
@@ -572,12 +572,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v20.8-dev"></script>
-<script src="ai.js?v=v20.8-dev"></script>
-<script src="gauntlet.js?v=v20.8-dev"></script>
-<script src="profile.js?v=v20.8-dev"></script>
-<script src="audio.js?v=v20.8-dev"></script>
-<script src="tutorial.js?v=v20.8-dev"></script>
+<script src="shot.js?v=v20.9-dev"></script>
+<script src="ai.js?v=v20.9-dev"></script>
+<script src="gauntlet.js?v=v20.9-dev"></script>
+<script src="profile.js?v=v20.9-dev"></script>
+<script src="audio.js?v=v20.9-dev"></script>
+<script src="tutorial.js?v=v20.9-dev"></script>
 <script>
 'use strict';
 
@@ -3005,7 +3005,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v20.8-dev';
+const BUILD = 'v20.9-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
