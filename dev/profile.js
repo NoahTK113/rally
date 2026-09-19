@@ -235,10 +235,16 @@ async function authSetName(name) {
   if (!USERNAME_RE.test(u)) return 'Name: 3 to 20 characters, lowercase letters, numbers, - or _';
   if (GUEST_RE.test(u)) return 'Names like guest12 are kept for guests.';
 
-  const { error } = await sb.rpc('set_name', { p_name: u });
+  /* A dropped connection comes back as a fetch error rather than a database
+     one, and "Failed to fetch" tells a player nothing, so it is said plainly. */
+  const offline = 'Could not reach the server. Check your connection and try again.';
+  let error;
+  try { ({ error } = await sb.rpc('set_name', { p_name: u })); }
+  catch (e) { return offline; }
   if (error) {
     if (/taken/i.test(error.message)) return 'That name is taken.';
     if (/cannot be changed/i.test(error.message)) return 'A saved name cannot be changed.';
+    if (/fetch|network|timeout/i.test(error.message)) return offline;
     return error.message;
   }
   await authRefreshProfile();

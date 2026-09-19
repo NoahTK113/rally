@@ -314,7 +314,12 @@
                    border-radius:8px;background:#0e141f;color:#ffffff;
                    border:1px solid #263449;outline:none}
   #gauntName input:focus{border-color:#22d3ee}
-  #gauntNameMsg{min-height:20px;margin:6px 0 10px;font-size:14px;color:#fdba74}
+  #gauntName .nrow{display:flex;gap:9px}
+  #gauntName .nrow input{flex:1;min-width:0}
+  #pause #gauntName .nrow button{width:auto;margin:0;padding:11px 16px}
+  #gauntNameMsg{min-height:20px;margin:6px 0 10px;font-size:14px;color:#ffffff}
+  #gauntNameMsg.ok{color:#4ade80}
+  #gauntNameMsg.bad{color:#f87171}
 
   /* Above the menu's z-index on purpose: you want to check the build BEFORE
      connecting, not after. */
@@ -404,8 +409,11 @@
     <p id="gauntOverBest"></p>
     <div id="gauntName" class="hidden">
       <div class="nlab">Leaderboard Name:</div>
-      <input id="gauntNameIn" maxlength="20" placeholder="name"
-             spellcheck="false" autocomplete="off">
+      <div class="nrow">
+        <input id="gauntNameIn" maxlength="20" placeholder="name"
+               spellcheck="false" autocomplete="off">
+        <button id="gauntNameGo">SAVE</button>
+      </div>
       <div id="gauntNameMsg"></div>
     </div>
     <div class="row">
@@ -595,12 +603,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v21.2-dev"></script>
-<script src="ai.js?v=v21.2-dev"></script>
-<script src="gauntlet.js?v=v21.2-dev"></script>
-<script src="profile.js?v=v21.2-dev"></script>
-<script src="audio.js?v=v21.2-dev"></script>
-<script src="tutorial.js?v=v21.2-dev"></script>
+<script src="shot.js?v=v21.3-dev"></script>
+<script src="ai.js?v=v21.3-dev"></script>
+<script src="gauntlet.js?v=v21.3-dev"></script>
+<script src="profile.js?v=v21.3-dev"></script>
+<script src="audio.js?v=v21.3-dev"></script>
+<script src="tutorial.js?v=v21.3-dev"></script>
 <script>
 'use strict';
 
@@ -3028,7 +3036,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v21.2-dev';
+const BUILD = 'v21.3-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -4348,27 +4356,44 @@ function paintGauntName() {
   const want = !asked && authReady() && signedIn() && authIsGuest() && !authHasName();
   $('gauntName').classList.toggle('hidden', !want);
   $('gauntNameIn').value = '';
-  $('gauntNameMsg').textContent = '';
+  gauntNameSay('', '');
   if (want) { try { localStorage.setItem(NAME_PROMPT_KEY, '1'); } catch (e) {} }
 }
 
-/* There is no save button: leaving the card is saving. An empty box leaves
-   without a name; a name that is taken or malformed keeps the player here with
-   the reason, and clearing the box is the way past it. */
+// The line under the name box: green when it worked, red with the reason when not.
+function gauntNameSay(text, kind) {
+  const el = $('gauntNameMsg');
+  el.textContent = text;
+  el.classList.toggle('ok', kind === 'ok');
+  el.classList.toggle('bad', kind === 'bad');
+}
+
+/* SAVE says whether it worked, which is the point of having it: a name that
+   vanishes into a box with no answer leaves the player unsure it went anywhere.
+   The box stays up afterwards so the answer can be read. */
+function gauntNameSave() {
+  const all = [$('gauntNameGo'), $('gauntAgain'), $('gauntMenu')];
+  if (all[0].disabled) return Promise.resolve(false);
+  all.forEach(b => { b.disabled = true; });
+  gauntNameSay('saving...', '');
+  return authSetName($('gauntNameIn').value).then(err => {
+    all.forEach(b => { b.disabled = false; });
+    if (err) { gauntNameSay(err, 'bad'); return false; }
+    gauntNameSay('Name saved.', 'ok');
+    return true;
+  });
+}
+$('gauntNameGo').addEventListener('click', gauntNameSave);
+$('gauntNameIn').addEventListener('keydown', e => { if (e.key === 'Enter') gauntNameSave(); });
+
+/* Leaving still saves a name that was typed and never saved, so PLAY AGAIN is
+   not a way to lose it. A name already saved - or an empty box - just leaves.
+   A save that fails keeps the player here with the red reason. */
 function gauntNameThen(next) {
   return function () {
-    const v = $('gauntNameIn').value.trim();
-    if ($('gauntName').classList.contains('hidden') || !v) { next(); return; }
-    const btns = [$('gauntAgain'), $('gauntMenu')];
-    if (btns[0].disabled) return;
-    btns.forEach(b => { b.disabled = true; });
-    $('gauntNameMsg').textContent = 'saving...';
-    authSetName(v).then(err => {
-      btns.forEach(b => { b.disabled = false; });
-      if (err) { $('gauntNameMsg').textContent = err; return; }
-      $('gauntName').classList.add('hidden');
-      next();
-    });
+    const v = $('gauntNameIn').value.trim().toLowerCase();
+    if ($('gauntName').classList.contains('hidden') || !v || v === authName()) { next(); return; }
+    gauntNameSave().then(ok => { if (ok) next(); });
   };
 }
 
