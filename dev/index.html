@@ -57,18 +57,6 @@
      did. A utility class that means "not displayed, whatever else says" has to
      outrank the layout rules it is switching off. */
   .hidden{display:none!important}
-  #gate{position:fixed;inset:0;z-index:25;display:flex;align-items:center;
-        justify-content:center;
-        background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
-  #gate .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
-              background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.5);
-              text-align:center}
-  #gate h1{margin:0 0 22px;font-size:30px;letter-spacing:.32em;font-weight:700;color:#ffffff}
-  #gate button{width:100%;padding:12px;margin-bottom:9px;font:inherit;font-size:14px;
-               letter-spacing:.13em;border-radius:8px;cursor:pointer;
-               background:#151d2b;color:#ffffff;border:1px solid #263449}
-  #gate button:hover{border-color:#22d3ee}
-  #gateMsg{margin:-8px 0 18px;font-size:14px;line-height:1.5;color:#ffffff;min-height:20px}
   #login{position:fixed;inset:0;z-index:19;display:flex;align-items:center;
          justify-content:center;
          background:radial-gradient(120% 100% at 50% 0%, #0d1420 0%, #05070c 70%)}
@@ -90,6 +78,9 @@
              color:#ffffff;border:1px solid #22d3ee}
   #login .msg{margin-top:13px;font-size:14px;line-height:1.5;color:#fdba74;min-height:20px}
   #login .hint{margin:16px 0 0;font-size:14px;line-height:1.5;text-align:left}
+  #login .link{display:block;width:100%;margin:4px 0 12px;padding:4px;background:none;
+               border:0;font:inherit;font-size:14px;color:#22d3ee;cursor:pointer;
+               text-decoration:underline}
   /* Set apart from the menu proper: it is about you, not about starting a
      game, and the gap says so. */
   #account{margin-top:26px;padding-top:20px;border-top:1px solid #1c2838}
@@ -265,6 +256,39 @@
   #menu .join button{width:92px;margin:0}
   #menu .msg{margin-top:14px;font-size:14px;line-height:1.6;color:#ffffff;min-height:30px}
   #menu .code{display:block;margin-top:6px;font-size:26px;letter-spacing:.42em;color:#22d3ee}
+  /* The main card leads with one button, and the rest are quieter. */
+  #menu #btnPlay{padding:14px;font-size:16px;border-color:#22d3ee}
+  #menu .req{margin-top:16px;font-size:14px;line-height:1.5;color:#ffffff}
+  /* The cards behind MORE. Their titles are longer than BANJOBALL, so smaller -
+     USER SETTINGS at the main title's size runs off a 340px card. Written as
+     #menu .sub h1 so it outranks #menu h1 by specificity, not by position. */
+  #menu .sub h1{font-size:18px;letter-spacing:.24em;margin-bottom:18px}
+  #menu .note{margin:0 0 16px;font-size:14px;line-height:1.5;color:#ffffff}
+  #menu .note b{color:#22d3ee;font-weight:600}
+  #menu .back{margin-top:10px}
+  /* The name box is a name, not a room code: no forced capitals, no wide
+     spacing. An ID selector, so it beats #menu input outright. */
+  #menu #nameIn{display:block;width:100%;box-sizing:border-box;flex:none;
+                letter-spacing:.06em;text-transform:none;color:#ffffff;margin-bottom:10px}
+
+  /* The first gauntlet's instructions, in place of CLICK TO START. */
+  #intro{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9;
+         display:none;padding:22px 38px;border-radius:14px;background:rgba(10,14,22,.93);
+         border:1px solid #2b3d57;pointer-events:none;text-align:center;
+         font-size:22px;line-height:1.6;letter-spacing:.04em;color:#ffffff}
+  #intro b{color:#22d3ee;font-weight:700}
+  body.intro #intro{display:block}
+  body.intro #lockHint{display:none!important}
+
+  /* The name prompt on the game-over card. */
+  #gauntName p{margin:0 0 10px}
+  #gauntName .nrow{display:flex;gap:9px;margin-bottom:8px}
+  #gauntName input{flex:1;min-width:0;padding:11px;font:inherit;font-size:14px;
+                   letter-spacing:.06em;text-align:center;border-radius:8px;
+                   background:#0e141f;color:#ffffff;border:1px solid #263449;outline:none}
+  #gauntName input:focus{border-color:#22d3ee}
+  #pause #gauntName .nrow button{width:auto;margin:0;padding:11px 16px}
+  #gauntNameMsg{min-height:20px;margin-bottom:12px;font-size:14px;color:#fdba74}
 
   /* Above the menu's z-index on purpose: you want to check the build BEFORE
      connecting, not after. */
@@ -299,6 +323,11 @@
 </div>
 <div id="status"></div>
 <div id="lockHint"><span id="lockMain">CLICK TO START</span><small id="lockSub">&nbsp;</small></div>
+<div id="intro">
+  <div><b>Mouse</b> to move.</div>
+  <div><b>Wheel</b> to rotate.</div>
+  <div>Press <b>spacebar</b> to start.</div>
+</div>
 <div id="pause">
   <div class="pcard" id="pauseMain">
     <h2>PAUSED</h2>
@@ -346,6 +375,15 @@
     <h2>GAME OVER</h2>
     <p id="gauntOverLevel"></p>
     <p id="gauntOverBest"></p>
+    <div id="gauntName" class="hidden">
+      <p>Pick a name for the leaderboard.</p>
+      <div class="nrow">
+        <input id="gauntNameIn" maxlength="20" placeholder="name"
+               spellcheck="false" autocomplete="off">
+        <button id="gauntNameGo">SAVE</button>
+      </div>
+      <div id="gauntNameMsg"></div>
+    </div>
     <div class="row">
       <button id="gauntAgain">RESTART</button>
       <button id="gauntMenu">MAIN MENU</button>
@@ -384,7 +422,7 @@
     <h1>GAUNTLET LEADERBOARD</h1>
     <div id="lbScroll">
       <table id="lbTable">
-        <thead><tr><th>USERNAME</th><th>HIGHEST LEVEL</th></tr></thead>
+        <thead><tr><th>NAME</th><th>HIGHEST LEVEL</th></tr></thead>
         <tbody id="lbBody"></tbody>
       </table>
     </div>
@@ -392,29 +430,19 @@
   </div>
 </div>
 
-<div id="gate">
-  <div class="card">
-    <h1>BANJOBALL</h1>
-    <div id="gateMsg"></div>
-    <button id="gateLogin">LOG IN</button>
-    <button id="gateNew">CREATE ACCOUNT</button>
-    <button id="gateGuest">PLAY AS GUEST</button>
-    <button id="gateSkip" class="hidden">CONTINUE</button>
-  </div>
-</div>
-
 <div id="login" class="hidden">
   <div class="card">
     <h1 id="loginTitle">LOG IN</h1>
-    <div class="lab">USERNAME</div>
+    <div class="lab">NAME</div>
     <input id="loginUser" maxlength="20" autocomplete="username"
-           placeholder="username" spellcheck="false">
+           placeholder="name" spellcheck="false">
     <div class="lab" style="margin-top:14px">PASSWORD</div>
     <input id="loginPass" type="password" maxlength="72"
            autocomplete="current-password" placeholder="password">
     <div class="hint" id="loginRules"></div>
     <div class="msg" id="loginMsg"></div>
     <button class="go" id="loginGo">LOG IN</button>
+    <button class="link" id="loginSwitch">ALREADY SAVED? LOG IN</button>
     <div class="row">
       <button id="loginBack">BACK</button>
     </div>
@@ -477,23 +505,46 @@
 
 </div>
 <div id="menu" class="hidden">
-  <div class="card">
+  <div class="card" id="mainCard">
     <h1>BANJOBALL</h1>
+    <button id="btnPlay">PLAY NOW</button>
     <button id="btnTutorial">HOW TO PLAY</button>
-    <button id="btnSolo">PRACTICE</button>
+    <button id="btnMore">MORE</button>
+    <div class="req">This game requires a mouse with a wheel.</div>
+  </div>
+  <div class="card sub hidden" id="moreCard">
+    <h1>MORE</h1>
     <button id="btnAI">VS AI</button>
-    <button id="btnGauntlet">GAUNTLET</button>
+    <button id="btnSolo">PRACTICE</button>
     <button id="btnHost">HOST A GAME</button>
     <div class="join">
       <input id="codeIn" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false">
       <button id="btnJoin">JOIN</button>
     </div>
     <div class="msg" id="netMsg"></div>
-    <div id="account">
+    <button id="btnUser">USER SETTINGS</button>
+    <button id="btnMoreBack" class="back">BACK</button>
+    <div id="account" class="hidden">
       <div id="whoami"></div>
-      <button id="btnProfile">LOG IN</button>
-      <button id="btnSignIn" class="hidden">SIGN IN</button>
+      <button id="btnLogout">LOG OUT</button>
     </div>
+  </div>
+  <div class="card sub hidden" id="userCard">
+    <h1>USER SETTINGS</h1>
+    <div class="note" id="userWho"></div>
+    <button id="btnName">NAME</button>
+    <button id="btnSave">SAVE MY STATS</button>
+    <button id="btnUserBack" class="back">BACK</button>
+  </div>
+  <div class="card sub hidden" id="nameCard">
+    <h1>NAME</h1>
+    <div class="note">Pick a name for the leaderboard. No password needed.</div>
+    <input id="nameIn" maxlength="20" placeholder="name" spellcheck="false" autocomplete="off">
+    <div class="note">3 to 20 characters: lowercase letters, numbers, - or _.
+      Save your stats to use this name on other devices.</div>
+    <div class="msg" id="nameMsg"></div>
+    <button id="nameGo">SAVE NAME</button>
+    <button id="nameBack" class="back">BACK</button>
   </div>
 </div>
 <script>
@@ -518,12 +569,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v20.5-dev"></script>
-<script src="ai.js?v=v20.5-dev"></script>
-<script src="gauntlet.js?v=v20.5-dev"></script>
-<script src="profile.js?v=v20.5-dev"></script>
-<script src="audio.js?v=v20.5-dev"></script>
-<script src="tutorial.js?v=v20.5-dev"></script>
+<script src="shot.js?v=v20.6-dev"></script>
+<script src="ai.js?v=v20.6-dev"></script>
+<script src="gauntlet.js?v=v20.6-dev"></script>
+<script src="profile.js?v=v20.6-dev"></script>
+<script src="audio.js?v=v20.6-dev"></script>
+<script src="tutorial.js?v=v20.6-dev"></script>
 <script>
 'use strict';
 
@@ -2003,7 +2054,23 @@ function drawHud() {
    match it starts it, and mid-match it only takes the mouse back. Once ready
    it stays up to say who is being waited on, so a player who has done their
    part is not left looking at a still screen wondering. */
+/* THE FIRST RUN. A gauntlet waiting to start shows the controls instead of
+   CLICK TO START, once per browser. The two things nobody guesses are that the
+   wheel turns the paddle and that the game is waiting for them; everything
+   else the first level teaches by being easy. */
+const INTRO_KEY = 'banjoball.introSeen';
+let introSeen = false;
+try { introSeen = localStorage.getItem(INTRO_KEY) === '1'; } catch (e) {}
+
+function introMarkSeen() {
+  if (introSeen) return;
+  introSeen = true;
+  try { localStorage.setItem(INTRO_KEY, '1'); } catch (e) {}
+}
+
 function paintLockHint() {
+  document.body.classList.toggle('intro', running && !introSeen && gaunt.active &&
+    world.phase === PHASE.READY && !intent.rdy && !pointerLocked);
   if (!running) { document.body.classList.remove('waiting'); return; }
   const twoPlayer = net.role === 'host' || net.role === 'guest';
   const ready = world.phase === PHASE.READY;
@@ -2152,6 +2219,7 @@ document.addEventListener('pointerlockchange', () => {
     const np = heldPaddle();
     placeCursor(np.x, np.y);
     intent.rdy = 1;          // the click that captures the mouse is the ready
+    if (gaunt.active) introMarkSeen();
   }
   /* Only once the player has actually started. Before that, losing the lock
      just means they have not clicked in yet, and the CLICK TO START banner is
@@ -2241,16 +2309,17 @@ addEventListener('keydown', e => {
 /* ESCAPE GOES BACK, from wherever you are to wherever you came from.
 
    The menus are handled before the `running` guard below, because they exist
-   precisely when nothing is running. The gate and the main menu are roots and
-   have nowhere to go back to, so escape does nothing there rather than
-   guessing. */
+   precisely when nothing is running. The main card is the root and has
+   nowhere to go back to, so escape does nothing there rather than guessing.
+   Everything else goes up one level: the cards behind MORE nest, and the
+   setup card and the save card each came from one of them. */
 function escapeMenus() {
-  if (!$('login').classList.contains('hidden')) {
-    hideLogin();
-    if (signedIn()) showMenu(); else paintGate();
-    return;
-  }
-  if (!$('setup').classList.contains('hidden')) { hideSetup(); showMenu(); }
+  if (!$('login').classList.contains('hidden')) { hideLogin(); showMenu('user'); return; }
+  if (!$('setup').classList.contains('hidden')) { hideSetup(); showMenu('more'); return; }
+  if ($('menu').classList.contains('hidden')) return;
+  if (menuCard === 'name') menuShow('user');
+  else if (menuCard === 'user') menuShow('more');
+  else if (menuCard === 'more') menuShow('main');
 }
 
 addEventListener('keydown', e => {
@@ -2258,9 +2327,20 @@ addEventListener('keydown', e => {
     if (e.key.toLowerCase() === 'escape') escapeMenus();
     return;                      // menu keys are otherwise the menu's business
   }
+  /* The game-over card has a name box on it while the game is technically
+     still running. Letters typed there are a name, not controls. */
+  if (e.target && e.target.tagName === 'INPUT') return;
   const k = e.key.toLowerCase();
   if (k === ' ' || k === '.' || k === 'tab') e.preventDefault();
   if (e.repeat) return;
+  /* The first gauntlet asks for the spacebar rather than a click. Taking the
+     mouse is what starts a match - pointerlockchange sets the ready flag - so
+     the key only has to ask for it, and a click still works as it always has. */
+  if (k === ' ' && document.body.classList.contains('intro')) {
+    const r = canvas.requestPointerLock && canvas.requestPointerLock();
+    if (r && r.catch) r.catch(() => {});
+    return;
+  }
   keys.add(k);
   /* P and . stop the local simulation, which against another machine is a
      silent desync rather than a pause. Behind the unlock with the rest. */
@@ -2874,7 +2954,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v20.5-dev';
+const BUILD = 'v20.6-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3555,10 +3635,26 @@ const randomCode = () => Array.from({ length: 4 },
 
 function setMsg(html) { $('netMsg').innerHTML = html; }
 function hideMenu() { $('menu').classList.add('hidden'); paintLeaderboard(); }
-function showMenu() {
+function showMenu(card) {
   pendingTutorial = false; pendingGauntlet = false;
   $('menu').classList.remove('hidden');
   hideSetup();
+  menuShow(card || 'main');
+}
+
+/* ONE MENU, FOUR CARDS. The main card asks for as little as possible - play,
+   learn, or everything else - and everything else sits one card behind it.
+   Accounts are two cards further back again: nothing on the way into the game
+   mentions a name or a password.
+
+   They share #menu so they share its styling; only one is ever showing. */
+let menuCard = 'main';            // 'main' | 'more' | 'user' | 'name'
+const MENU_CARDS = { main: 'mainCard', more: 'moreCard', user: 'userCard', name: 'nameCard' };
+
+function menuShow(which) {
+  menuCard = MENU_CARDS[which] ? which : 'main';
+  for (const k in MENU_CARDS) $(MENU_CARDS[k]).classList.toggle('hidden', k !== menuCard);
+  paintAccount();
   paintLeaderboard();
 }
 function hideSetup() {
@@ -3566,44 +3662,6 @@ function hideSetup() {
   paintLeaderboard();
 }
 function hideLogin() { $('login').classList.add('hidden'); }
-
-/* THE DOOR.
-
-   The first screen is the gate, not the menu. It resolves into one of three
-   things and only ever acts while nobody is playing - an auth event can arrive
-   at any moment, including mid-match when a token refreshes, and yanking a
-   player out of a game to show them a menu would be worse than any of the
-   states this is choosing between.
-
-   The third state is the one that matters: with no client at all there is
-   nothing to log into, so the door offers CONTINUE rather than two buttons
-   that cannot work. Nobody is ever locked out of a game by their own wifi. */
-function paintGate() {
-  if (running) return;
-  const g = $('gate');
-  if (!g) return;
-
-  if (signedIn()) { g.classList.add('hidden'); showMenu(); return; }
-
-  g.classList.remove('hidden');
-  $('menu').classList.add('hidden');
-
-  const waiting = !authIsChecked();
-  const offline = authIsChecked() && !authReady();
-  $('gateMsg').textContent =
-      waiting ? 'checking...'
-    : offline ? 'No connection. You can play, but scores will not be saved.'
-    : '';
-  $('gateLogin').classList.toggle('hidden', waiting || offline);
-  $('gateNew').classList.toggle('hidden', waiting || offline);
-  $('gateGuest').classList.toggle('hidden', waiting || offline);
-  $('gateSkip').classList.toggle('hidden', !offline);
-}
-
-function gateThrough() {
-  $('gate').classList.add('hidden');
-  showMenu();
-}
 
 /* One card, two jobs. Signing in and signing up ask for the same two fields
    and mean quite different things by them, so the card says which it is doing
@@ -3615,52 +3673,57 @@ let loginMode = 'in';           // 'in' | 'new'
 
 function paintLogin() {
   const isNew = loginMode === 'new';
-  $('loginTitle').textContent = isNew ? 'CREATE ACCOUNT' : 'LOG IN';
-  $('loginGo').textContent    = isNew ? 'CREATE ACCOUNT' : 'LOG IN';
+  $('loginTitle').textContent = isNew ? 'SAVE MY STATS' : 'LOG IN';
+  $('loginGo').textContent    = isNew ? 'SAVE MY STATS' : 'LOG IN';
   // so a password manager offers to save on the way in, not on the way back
   $('loginPass').setAttribute('autocomplete', isNew ? 'new-password' : 'current-password');
   $('loginRules').innerHTML = isNew
-    ? 'Username: 3 to 20 characters, using lowercase letters, numbers, - or _.'
-      + '<br>Password: at least 8 characters.'
+    ? 'Name: 3 to 20 characters, using lowercase letters, numbers, - or _.'
+      + '<br>Password: at least 8 characters. No email needed.'
     : '';
   $('loginRules').style.display = isNew ? '' : 'none';
+  $('loginSwitch').classList.toggle('hidden', !isNew);
 }
 
 function showLogin(mode) {
   loginMode = (mode === 'new') ? 'new' : 'in';
-  /* The gate sits at z-index 21 and the login card at 19, so revealing the
-     card without standing the gate down leaves it underneath: every click
-     lands, nothing appears to happen. Whatever opens this has to close the
-     door behind it. */
-  $('gate').classList.add('hidden');
   hideMenu();
   $('login').classList.remove('hidden');
   $('loginMsg').textContent = '';
   $('loginPass').value = '';
+  /* Saving keeps the name you already picked, filled in and still editable -
+     changing it here is a rename on the way to setting the password. */
+  $('loginUser').value = (loginMode === 'new' && authHasName()) ? authName() : '';
   paintLogin();
-  $('loginUser').focus();
+  $(loginMode === 'new' && authHasName() ? 'loginPass' : 'loginUser').focus();
 }
 
-/* The menu's own line about who you are. Three states, and the middle one
-   matters: no client at all, because the library did not load or there is no
-   network. Saying "log in" then would be an invitation to something that
-   cannot work. */
+/* Who you are, in the words each card needs. It paints and never navigates:
+   an auth event can land at any moment, a token refresh mid-match included,
+   and moving the player to another screen from here would be worse than any
+   state it could be describing.
+
+   Three kinds of player. No client at all (offline, or the library did not
+   load) can save nothing, so it is offered nothing. A guest - named or not -
+   can pick a name and can save. A saved account has its name fixed and gets
+   LOG OUT at the foot of MORE. */
 function paintAccount() {
-  const el = $('whoami');
-  if (!el) return;
-  if (!authReady())    el.innerHTML = 'offline &mdash; playing as a guest';
-  else if (signedIn()) el.innerHTML = (authIsGuest() ? 'playing as <b>' : 'signed in as <b>')
-                                    + (authName() || '...') + '</b>';
-  else                 el.innerHTML = 'playing as a guest';
-  /* A guest has nothing to log out of worth keeping, and two things worth
-     doing instead: make this account a real one, or sign into one they have. */
-  const guest = authReady() && signedIn() && authIsGuest();
-  if (guest) el.innerHTML += '<br>Create a username to get on the leaderboard.';
-  $('btnSignIn').classList.toggle('hidden', !guest);
-  const btn = $('btnProfile');
-  if (btn) btn.textContent = guest ? 'CREATE ACCOUNT' : signedIn() ? 'LOG OUT' : 'LOG IN';
-  if (btn) btn.disabled = !authReady();
-  paintGate();
+  if (!$('userWho')) return;
+  const online = authReady();
+  const saved  = online && signedIn() && !authIsGuest();
+  const name   = esc(authName() || '...');
+
+  $('account').classList.toggle('hidden', !saved);
+  $('whoami').innerHTML = saved ? 'signed in as <b>' + name + '</b>' : '';
+
+  $('userWho').innerHTML =
+      !online       ? 'No connection. Nothing can be saved right now.'
+    : saved         ? 'Your stats are saved as <b>' + name + '</b>.'
+    : authHasName() ? 'Playing as <b>' + name + '</b>. Not saved yet.'
+    : signedIn()    ? 'You have no name yet.'
+    :                 'Not signed in.';
+  $('btnName').classList.toggle('hidden', !online || saved || !signedIn());
+  $('btnSave').classList.toggle('hidden', !online || saved);
 }
 
 /* The lobby. Reached once there is someone to play against — or straight away
@@ -3692,7 +3755,8 @@ const MENU_LEADERBOARD = true;
    card to sit next to and no question being asked. */
 function lbTarget() {
   if (!$('setup').classList.contains('hidden')) return pendingGauntlet ? 'setup' : null;
-  if (!$('menu').classList.contains('hidden'))  return MENU_LEADERBOARD ? 'menu' : null;
+  if (!$('menu').classList.contains('hidden') && menuCard === 'main')
+    return MENU_LEADERBOARD ? 'menu' : null;
   return null;
 }
 
@@ -3703,7 +3767,7 @@ function paintLeaderboard() {
 
   // Match the card beside it. Read rather than assumed: both cards' heights
   // depend on what they are currently showing.
-  const card = document.querySelector('#' + where + ' .card');
+  const card = where === 'menu' ? $('mainCard') : document.querySelector('#setup .card');
   if (card && card.offsetHeight) $('lbCard').style.height = card.offsetHeight + 'px';
 
   $('lbBody').innerHTML = '';
@@ -4120,16 +4184,93 @@ $('btnSolo').addEventListener('click', function () {
   updateStatus(); showSetup();
 });
 
-/* AI.on selects the mode and is deliberately NOT reset per match: finishing a
-   match returns to the lobby, and starting another there should keep you
-   playing whoever you chose to play. The menu handlers are the only thing that
-   changes it. */
-$('btnGauntlet').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; AI.on = true;
-  pendingGauntlet = true; pendingTutorial = false;
-  aiInit();
-  updateStatus(); showSetup();
+/* THE MAIN CARD. Any of its three buttons makes the guest account first, so
+   every game is played by someone the events and the gauntlet can record -
+   and a visitor who never presses anything never becomes a row.
+
+   The buttons stand down while that happens: it is one round trip, and a
+   second click inside it would start a second request for a second guest. */
+function mainGo(action) {
+  return function () {
+    const btns = ['btnPlay', 'btnTutorial', 'btnMore'].map($);
+    if (btns[0].disabled) return;
+    btns.forEach(b => { b.disabled = true; });
+    authEnsure().then(() => {
+      btns.forEach(b => { b.disabled = false; });
+      action();
+    });
+  };
+}
+
+// Straight into a run. No setup card: the gauntlet has nothing to set.
+$('btnPlay').addEventListener('click', mainGo(gauntBegin));
+
+/* Straight into the lesson, one paddle. The setup card asked one question
+   here - how many paddles - and a first-timer is not the person to ask. */
+$('btnTutorial').addEventListener('click', mainGo(function () {
+  net.role = 'solo'; mySide = 1; AI.on = false;
+  MATCH.paddles = 1;
+  pendingTutorial = pendingGauntlet = false;
+  updateStatus();
+  startGame(true);
+}));
+
+$('btnMore').addEventListener('click', mainGo(() => menuShow('more')));
+$('btnMoreBack').addEventListener('click', () => menuShow('main'));
+$('btnUser').addEventListener('click', () => menuShow('user'));
+$('btnUserBack').addEventListener('click', () => menuShow('more'));
+$('btnSave').addEventListener('click', () => showLogin('new'));
+$('btnName').addEventListener('click', function () {
+  $('nameIn').value = authHasName() ? authName() : '';
+  $('nameMsg').textContent = '';
+  menuShow('name');
+  $('nameIn').focus();
 });
+$('nameBack').addEventListener('click', () => menuShow('user'));
+
+function nameSubmit() {
+  const go = $('nameGo');
+  if (go.disabled) return;
+  go.disabled = true;
+  $('nameMsg').textContent = 'working...';
+  authSetName($('nameIn').value).then(err => {
+    go.disabled = false;
+    $('nameMsg').textContent = err || '';
+    if (!err) menuShow('user');
+  });
+}
+$('nameGo').addEventListener('click', nameSubmit);
+$('nameIn').addEventListener('keydown', e => { if (e.key === 'Enter') nameSubmit(); });
+
+$('btnLogout').addEventListener('click', function () {
+  authSignOut().then(() => menuShow('main'));
+});
+
+/* The same name box, on the card where a player has just found out how far
+   they got - the moment a name is most worth having. Hidden for anyone who
+   already has one, and for anyone who cannot save one. */
+function paintGauntName() {
+  const want = authReady() && signedIn() && authIsGuest() && !authHasName();
+  $('gauntName').classList.toggle('hidden', !want);
+  $('gauntNameIn').value = '';
+  $('gauntNameMsg').textContent = '';
+}
+
+function gauntNameSubmit() {
+  const go = $('gauntNameGo');
+  if (go.disabled) return;
+  go.disabled = true;
+  $('gauntNameMsg').textContent = 'working...';
+  authSetName($('gauntNameIn').value).then(err => {
+    go.disabled = false;
+    if (err) { $('gauntNameMsg').textContent = err; return; }
+    $('gauntName').classList.add('hidden');
+    $('gauntOverBest').textContent = 'Saved as ' + authName() + '.' +
+      (gaunt.best ? ' Best: level ' + gaunt.best : '');
+  });
+}
+$('gauntNameGo').addEventListener('click', gauntNameSubmit);
+$('gauntNameIn').addEventListener('keydown', e => { if (e.key === 'Enter') gauntNameSubmit(); });
 
 $('btnAI').addEventListener('click', function () {
   net.role = 'solo'; mySide = 1; AI.on = true;
@@ -4138,20 +4279,6 @@ $('btnAI').addEventListener('click', function () {
   updateStatus(); showSetup();
 });
 
-/* The tutorial used to go straight in, on the reasoning that a lobby is one
-   more thing to explain before explaining anything. It gets one now: paddles
-   per player changes what the tutorial is teaching, and sensitivity and volume
-   are worth setting before a lesson rather than during one.
-
-   Same card as practice, so there is nothing new to learn about it - only the
-   title and the start button read differently. Difficulty and points to win
-   hide themselves already: the first wants AI.on, the second is hidden
-   whenever inPractice(), and a tutorial is practice by that test. */
-$('btnTutorial').addEventListener('click', function () {
-  net.role = 'solo'; mySide = 1; AI.on = false;
-  pendingTutorial = true; pendingGauntlet = false;
-  updateStatus(); showSetup();
-});
 $('btnStart').addEventListener('click', beginMatch);
 $('pd1').addEventListener('click', () => setPaddles(1));
 $('pd2').addEventListener('click', () => setPaddles(2));
@@ -4216,31 +4343,16 @@ paintTarget();
 paintPaddles();
 paintDifficulty();
 paintSens();
-$('btnProfile').addEventListener('click', function () {
-  if (signedIn() && authIsGuest()) { showLogin('new'); return; }
-  if (signedIn()) { authSignOut(); return; }   // paintGate puts the door back
-  showLogin('in');
-});
-$('btnSignIn').addEventListener('click', () => showLogin('in'));
-$('gateLogin').addEventListener('click', () => showLogin('in'));
-$('gateNew').addEventListener('click', () => showLogin('new'));
-$('gateSkip').addEventListener('click', gateThrough);
-
-/* No card in between: the button IS the account. The auth state change that
-   follows a success is what takes the gate down, the same as a login. */
-$('gateGuest').addEventListener('click', function () {
-  const btn = this;
-  if (btn.disabled) return;
-  btn.disabled = true;
-  $('gateMsg').textContent = 'working...';
-  authGuest().then(err => {
-    btn.disabled = false;
-    $('gateMsg').textContent = err || '';
-  });
+$('loginSwitch').addEventListener('click', function () {
+  loginMode = 'in';
+  $('loginMsg').textContent = '';
+  $('loginUser').value = '';
+  paintLogin();
+  $('loginUser').focus();
 });
 $('loginBack').addEventListener('click', function () {
   hideLogin();
-  if (signedIn()) showMenu(); else paintGate();
+  showMenu('user');
 });
 
 function loginAttempt(fn) {
@@ -4249,7 +4361,7 @@ function loginAttempt(fn) {
     if (err) { $('loginMsg').textContent = err; return; }
     $('loginPass').value = '';
     hideLogin();
-    showMenu();          // paintGate has already stood down
+    showMenu('user');    // back where they came from, now saying who they are
   });
 }
 function loginSubmit() {
@@ -4270,10 +4382,9 @@ updateStatus();
    whoever finds it next. */
 try { localStorage.removeItem('banjoball.best'); } catch (e) {}
 authInit();
-paintAccount();
-paintGate();
-/* A network that never answers must not leave the door closed for ever. */
-setTimeout(() => { if (!authIsChecked()) { authGiveUp(); paintGate(); } }, 4000);
+showMenu();
+/* A network that never answers must not leave the first click waiting on it. */
+setTimeout(() => { if (!authIsChecked()) { authGiveUp(); paintAccount(); } }, 4000);
 buildPanel();
 serve(world);
 resize();

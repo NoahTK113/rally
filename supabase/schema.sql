@@ -194,6 +194,50 @@ create trigger on_auth_user_upgraded
 
 
 -- -------------------------------------------------------------------------
+-- A NAME WITHOUT A PASSWORD
+--
+-- A guest may pick a name for the leaderboard with nothing else asked of them.
+-- First come, first served: the unique constraint on username is the check,
+-- so there is no window between asking and taking.
+--
+-- Only while the account is still a guest. Once stats are saved the name is
+-- also the login, and renaming it would change a login under its owner.
+-- -------------------------------------------------------------------------
+create or replace function public.set_name(p_name text)
+returns text
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_name text := lower(trim(coalesce(p_name, '')));
+begin
+  if auth.uid() is null then
+    raise exception 'not signed in';
+  end if;
+  if not exists (select 1 from public.profiles where id = auth.uid() and is_guest) then
+    raise exception 'saved names cannot be changed';
+  end if;
+  if v_name !~ '^[a-z0-9_-]{3,20}$' then
+    raise exception 'bad name';
+  end if;
+  if v_name ~ '^guest[0-9]+$' then
+    raise exception 'reserved';
+  end if;
+
+  begin
+    update public.profiles set username = v_name where id = auth.uid();
+  exception when unique_violation then
+    raise exception 'taken';
+  end;
+  return v_name;
+end;
+$$;
+
+revoke execute on function public.set_name(text) from anon, public;
+grant  execute on function public.set_name(text) to authenticated;
+
+
+-- -------------------------------------------------------------------------
 -- THE THREE CALLS
 -- -------------------------------------------------------------------------
 
@@ -387,7 +431,7 @@ with (security_invoker = true) as
   select username, best_level
     from public.profiles
    where best_level > 0
-     and not is_guest
+     and username !~ '^guest[0-9]+$'     -- anyone who has picked a name
    order by best_level desc, updated_at asc
    limit 100;
 

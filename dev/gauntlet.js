@@ -153,6 +153,7 @@ function pumpGauntlet(dt) {
       !signedIn()  ? 'Sign in to record a best.'
       : gaunt.best ? 'Best: level ' + gaunt.best
       : '';
+    paintGauntName();
   }
 
   if (document.exitPointerLock) document.exitPointerLock();
