@@ -274,8 +274,13 @@
   #menu .msg{margin-top:14px;font-size:14px;line-height:1.6;color:#ffffff;min-height:30px}
   #menu .code{display:block;margin-top:6px;font-size:26px;letter-spacing:.42em;color:#22d3ee}
   /* The main card leads with one button, and the rest are quieter. */
-  #menu #btnPlay{padding:14px;font-size:16px;border-color:#22d3ee}
-  #menu .req{margin-top:16px;font-size:14px;line-height:1.5;color:#ffffff}
+  #menu #btnPlay{border-color:#22d3ee}
+  /* One line, never wrapped. The main card grows to fit it rather than being
+     given a width, because the monospace face differs by platform - Consolas
+     is narrower than the Mac's - and a fixed width that fits one wraps on the
+     other. The board beside it is placed from the card's measured width. */
+  #menu #mainCard{width:auto;min-width:340px}
+  #menu .req{margin-top:16px;font-size:14px;line-height:1.5;color:#ffffff;white-space:nowrap}
   /* The cards behind MORE. Their titles are longer than BANJOBALL, so smaller -
      USER SETTINGS at the main title's size runs off a 340px card. Written as
      #menu .sub h1 so it outranks #menu h1 by specificity, not by position. */
@@ -590,12 +595,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v21.1-dev"></script>
-<script src="ai.js?v=v21.1-dev"></script>
-<script src="gauntlet.js?v=v21.1-dev"></script>
-<script src="profile.js?v=v21.1-dev"></script>
-<script src="audio.js?v=v21.1-dev"></script>
-<script src="tutorial.js?v=v21.1-dev"></script>
+<script src="shot.js?v=v21.2-dev"></script>
+<script src="ai.js?v=v21.2-dev"></script>
+<script src="gauntlet.js?v=v21.2-dev"></script>
+<script src="profile.js?v=v21.2-dev"></script>
+<script src="audio.js?v=v21.2-dev"></script>
+<script src="tutorial.js?v=v21.2-dev"></script>
 <script>
 'use strict';
 
@@ -3023,7 +3028,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v21.1-dev';
+const BUILD = 'v21.2-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3838,6 +3843,9 @@ function paintLeaderboard() {
   // depend on what they are currently showing.
   const card = where === 'menu' ? $('mainCard') : document.querySelector('#setup .card');
   if (card && card.offsetHeight) $('lbCard').style.height = card.offsetHeight + 'px';
+  // Beside it whatever its width: the main card sizes to its own text.
+  $('lbPanel').style.left = card && card.offsetWidth
+    ? 'calc(50% + ' + Math.round(card.offsetWidth / 2) + 'px)' : '';
 
   $('lbBody').innerHTML = '';
   $('lbMsg').textContent = authReady() ? 'loading...' : 'offline';
