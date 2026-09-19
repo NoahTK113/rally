@@ -295,6 +295,7 @@
   #menu .sub h1{font-size:18px;letter-spacing:.24em;margin-bottom:18px}
   #menu .note{margin:0 0 16px;font-size:14px;line-height:1.5;color:#ffffff}
   #menu .note b{color:#22d3ee;font-weight:600}
+  #menu .note.warn{color:#facc15}
   #menu .back{margin-top:10px}
   /* The name box is a name, not a room code: no forced capitals, no wide
      spacing. An ID selector, so it beats #menu input outright. */
@@ -574,8 +575,10 @@
   <div class="card sub hidden" id="userCard">
     <h1>USER SETTINGS</h1>
     <div class="note" id="userWho"></div>
+    <div class="note warn hidden" id="userHint">Create a login password to access your
+      profile across different sessions and devices.</div>
     <button id="btnName">NAME</button>
-    <button id="btnSave">SAVE MY STATS</button>
+    <button id="btnSave">CREATE LOGIN</button>
     <button id="btnLogin">LOG IN</button>
     <button id="btnUserBack" class="back">BACK</button>
   </div>
@@ -612,12 +615,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v21.7-dev"></script>
-<script src="ai.js?v=v21.7-dev"></script>
-<script src="gauntlet.js?v=v21.7-dev"></script>
-<script src="profile.js?v=v21.7-dev"></script>
-<script src="audio.js?v=v21.7-dev"></script>
-<script src="tutorial.js?v=v21.7-dev"></script>
+<script src="shot.js?v=v21.8-dev"></script>
+<script src="ai.js?v=v21.8-dev"></script>
+<script src="gauntlet.js?v=v21.8-dev"></script>
+<script src="profile.js?v=v21.8-dev"></script>
+<script src="audio.js?v=v21.8-dev"></script>
+<script src="tutorial.js?v=v21.8-dev"></script>
 <script>
 'use strict';
 
@@ -3045,7 +3048,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v21.7-dev';
+const BUILD = 'v21.8-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3764,8 +3767,8 @@ let loginMode = 'in';           // 'in' | 'new'
 
 function paintLogin() {
   const isNew = loginMode === 'new';
-  $('loginTitle').textContent = isNew ? 'SAVE MY STATS' : 'LOG IN';
-  $('loginGo').textContent    = isNew ? 'SAVE MY STATS' : 'LOG IN';
+  $('loginTitle').textContent = isNew ? 'CREATE LOGIN' : 'LOG IN';
+  $('loginGo').textContent    = isNew ? 'CREATE LOGIN' : 'LOG IN';
   // so a password manager offers to save on the way in, not on the way back
   $('loginPass').setAttribute('autocomplete', isNew ? 'new-password' : 'current-password');
   $('loginRules').innerHTML = isNew
@@ -3810,9 +3813,11 @@ function paintAccount() {
   $('userWho').innerHTML =
       !online       ? 'No connection. Nothing can be saved right now.'
     : saved         ? 'Your stats are saved as <b>' + name + '</b>.'
-    : authHasName() ? 'Playing as <b>' + name + '</b>. Not saved yet.'
+    : authHasName() ? 'Playing as <b>' + name + '</b>. Login not created.'
     : signedIn()    ? 'You have no name yet.'
     :                 'Not signed in.';
+  // Only with a temp name: a name worth keeping, and nothing yet keeping it.
+  $('userHint').classList.toggle('hidden', !online || saved || !authHasName());
   $('btnName').classList.toggle('hidden', !online || saved || !signedIn());
   $('btnSave').classList.toggle('hidden', !online || saved);
   // For someone who has an account but has ended up on a guest or temp name.
