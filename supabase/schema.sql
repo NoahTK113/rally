@@ -450,3 +450,30 @@ with (security_invoker = true) as
    limit 100;
 
 grant select on public.leaderboard to anon, authenticated;
+
+
+-- -------------------------------------------------------------------------
+-- DIAGNOSTIC VIEWS
+--
+-- runs and events with the player's name beside the id, for reading in the
+-- dashboard. Views rather than columns: Postgres only appends columns, and a
+-- copied name would go stale on rename - this one is looked up live.
+--
+-- security_invoker plus the revoke keeps them from becoming a way round RLS:
+-- a plain view reads with its owner's rights, and the public API key would
+-- then see every player's runs and events. The dashboard still sees all.
+-- -------------------------------------------------------------------------
+create or replace view public.runs_named
+with (security_invoker = true) as
+  select r.id, p.username, r.user_id, r.level, r.ranked,
+         r.started_at, r.last_goal_at, r.ended_at
+    from public.runs r
+    left join public.profiles p on p.id = r.user_id;
+
+create or replace view public.events_named
+with (security_invoker = true) as
+  select e.id, p.username, e.user_id, e.kind, e.mode, e.secs, e.n, e.at
+    from public.events e
+    left join public.profiles p on p.id = e.user_id;
+
+revoke all on public.runs_named, public.events_named from anon, authenticated;
