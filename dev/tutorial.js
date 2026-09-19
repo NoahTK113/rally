@@ -469,23 +469,35 @@ function drawGoalMark(ctx, m) {
   const inward = m.x === 0 ? 1 : -1;              // into the field, whichever end
   const tipX = sx(m.x + inward * 0.25);
   const tipY = sy(midY);
-  const labX = sx(m.x + inward * 2.6);
-  const labY = sy(goalY1() + 1.6);
+
+  /* Two layouts. The tutorial's notes sit above the goal with a slanting
+     arrow, in white. A `centred` mark sits level with the goal's middle, in
+     that goal's team colour, with a heavier arrow pointing straight at it. */
+  const c = !!m.centred;
+  const labX = sx(m.x + inward * (c ? 2.2 : 2.6));
+  const labY = c ? tipY : sy(goalY1() + 1.6);
+  const tailX = c ? labX - inward * view.scale * 0.2 : labX;
+  const tailY = c ? labY : labY + view.scale * 0.18;
+  const colour = c ? goalColour(m.x === 0 ? -1 : 1) : '#ffffff';
 
   ctx.save();
   ctx.font = `700 ${Math.max(11, Math.round(view.scale * 0.30))}px ui-monospace, Consolas, monospace`;
   ctx.textBaseline = 'middle';
-  ctx.lineWidth = Math.max(1.5, view.scale * 0.035);
-  ctx.strokeStyle = '#ffffff';
-  ctx.fillStyle = '#ffffff';
+  ctx.lineWidth = c ? Math.max(3, view.scale * 0.08) : Math.max(1.5, view.scale * 0.035);
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = colour;
+  ctx.fillStyle = colour;
 
+  const ang = Math.atan2(tipY - tailY, tipX - tailX);
+  const h = c ? Math.max(12, view.scale * 0.32) : Math.max(6, view.scale * 0.16);
+
+  // The shaft stops short of the tip so a thick line does not poke through
+  // the point of the head.
   ctx.beginPath();
-  ctx.moveTo(labX, labY + view.scale * 0.18);
-  ctx.lineTo(tipX, tipY);
+  ctx.moveTo(tailX, tailY);
+  ctx.lineTo(tipX - h * 0.6 * Math.cos(ang), tipY - h * 0.6 * Math.sin(ang));
   ctx.stroke();
 
-  const ang = Math.atan2(tipY - (labY + view.scale * 0.18), tipX - labX);
-  const h = Math.max(6, view.scale * 0.16);
   ctx.beginPath();
   ctx.moveTo(tipX, tipY);
   ctx.lineTo(tipX - h * Math.cos(ang - 0.4), tipY - h * Math.sin(ang - 0.4));
