@@ -453,9 +453,15 @@ function tutGoalMark() {
   };
 }
 
+/* The gauntlet's first-run intro labels both goals the same way, so the
+   drawing is shared and each caller only says which goal and what it reads. */
 function drawTutorialGoals(ctx) {
   const m = tutGoalMark();
-  if (!m) return;
+  if (m) drawGoalMark(ctx, m);
+  for (const g of introGoalMarks()) drawGoalMark(ctx, g);
+}
+
+function drawGoalMark(ctx, m) {
   const sx = wx => view.ox + wx * view.scale;
   const sy = wy => view.oy - wy * view.scale;
   const midY = (goalY0() + goalY1()) / 2;

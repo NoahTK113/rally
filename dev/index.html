@@ -272,7 +272,9 @@
                 letter-spacing:.06em;text-transform:none;color:#ffffff;margin-bottom:10px}
 
   /* The first gauntlet's instructions, in place of CLICK TO START. */
-  #intro{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9;
+  /* Top set in script, just under the LEVEL readout, which is drawn on the
+     canvas and so moves with the view. */
+  #intro{position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:9;
          display:none;padding:22px 38px;border-radius:14px;background:rgba(10,14,22,.93);
          border:1px solid #2b3d57;pointer-events:none;text-align:center;
          font-size:22px;line-height:1.6;letter-spacing:.04em;color:#ffffff}
@@ -280,15 +282,17 @@
   body.intro #intro{display:block}
   body.intro #lockHint{display:none!important}
 
-  /* The name prompt on the game-over card. */
-  #gauntName p{margin:0 0 10px}
-  #gauntName .nrow{display:flex;gap:9px;margin-bottom:8px}
-  #gauntName input{flex:1;min-width:0;padding:11px;font:inherit;font-size:14px;
-                   letter-spacing:.06em;text-align:center;border-radius:8px;
-                   background:#0e141f;color:#ffffff;border:1px solid #263449;outline:none}
+  /* The game-over card. Its title is the size of the intro card's text: it is
+     the other end of the same run. #pause #pauseGauntOver h2 so it outranks
+     #pause h2 by specificity. */
+  #pause #pauseGauntOver h2{font-size:22px;letter-spacing:.12em;font-weight:700}
+  #gauntName .nlab{margin:0 0 8px;font-size:14px;color:#ffffff;text-align:left}
+  #gauntName input{display:block;width:100%;box-sizing:border-box;padding:11px;
+                   font:inherit;font-size:14px;letter-spacing:.06em;text-align:center;
+                   border-radius:8px;background:#0e141f;color:#ffffff;
+                   border:1px solid #263449;outline:none}
   #gauntName input:focus{border-color:#22d3ee}
-  #pause #gauntName .nrow button{width:auto;margin:0;padding:11px 16px}
-  #gauntNameMsg{min-height:20px;margin-bottom:12px;font-size:14px;color:#fdba74}
+  #gauntNameMsg{min-height:20px;margin:6px 0 10px;font-size:14px;color:#fdba74}
 
   /* Above the menu's z-index on purpose: you want to check the build BEFORE
      connecting, not after. */
@@ -324,9 +328,10 @@
 <div id="status"></div>
 <div id="lockHint"><span id="lockMain">CLICK TO START</span><small id="lockSub">&nbsp;</small></div>
 <div id="intro">
-  <div><b>Mouse</b> to move.</div>
-  <div><b>Wheel</b> to rotate.</div>
-  <div>Press <b>spacebar</b> to start.</div>
+  <div><b>[Mouse]</b> to move</div>
+  <div><b>[Wheel]</b> to rotate</div>
+  <div>Press <b>[Esc]</b> to pause</div>
+  <div>Press <b>[Space]</b> to start game</div>
 </div>
 <div id="pause">
   <div class="pcard" id="pauseMain">
@@ -372,22 +377,20 @@
   </div>
 
   <div class="pcard hidden" id="pauseGauntOver">
-    <h2>GAME OVER</h2>
+    <h2>GAME OVER!</h2>
     <p id="gauntOverLevel"></p>
     <p id="gauntOverBest"></p>
     <div id="gauntName" class="hidden">
-      <p>Pick a name for the leaderboard.</p>
-      <div class="nrow">
-        <input id="gauntNameIn" maxlength="20" placeholder="name"
-               spellcheck="false" autocomplete="off">
-        <button id="gauntNameGo">SAVE</button>
-      </div>
+      <div class="nlab">Leaderboard Name:</div>
+      <input id="gauntNameIn" maxlength="20" placeholder="name"
+             spellcheck="false" autocomplete="off">
       <div id="gauntNameMsg"></div>
     </div>
     <div class="row">
-      <button id="gauntAgain">RESTART</button>
+      <button id="gauntAgain">PLAY AGAIN</button>
       <button id="gauntMenu">MAIN MENU</button>
     </div>
+    <button id="gauntControls">CONTROLS</button>
   </div>
 
   <div class="pcard hidden" id="pauseGauntWin">
@@ -569,12 +572,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v20.6-dev"></script>
-<script src="ai.js?v=v20.6-dev"></script>
-<script src="gauntlet.js?v=v20.6-dev"></script>
-<script src="profile.js?v=v20.6-dev"></script>
-<script src="audio.js?v=v20.6-dev"></script>
-<script src="tutorial.js?v=v20.6-dev"></script>
+<script src="shot.js?v=v20.7-dev"></script>
+<script src="ai.js?v=v20.7-dev"></script>
+<script src="gauntlet.js?v=v20.7-dev"></script>
+<script src="profile.js?v=v20.7-dev"></script>
+<script src="audio.js?v=v20.7-dev"></script>
+<script src="tutorial.js?v=v20.7-dev"></script>
 <script>
 'use strict';
 
@@ -2062,15 +2065,59 @@ const INTRO_KEY = 'banjoball.introSeen';
 let introSeen = false;
 try { introSeen = localStorage.getItem(INTRO_KEY) === '1'; } catch (e) {}
 
+/* While it is up the world is in HOLD - the tutorial's state - so the player's
+   paddle moves and turns and nothing else does: no ball, and the opponent is
+   not stepped at all. A click only captures the mouse. The spacebar is the one
+   way out, because a stray click must not start a game under a card nobody
+   has read. */
+let introOn = false;
+
 function introMarkSeen() {
   if (introSeen) return;
   introSeen = true;
   try { localStorage.setItem(INTRO_KEY, '1'); } catch (e) {}
 }
 
+function grabMouse() {
+  const r = canvas.requestPointerLock && canvas.requestPointerLock();
+  if (r && r.catch) r.catch(() => {});
+}
+
+/* Space. The paddles go back to their marks, the card and the labels go, and
+   the match starts the ordinary way - READY with the ready flag already set,
+   which the next tick turns into the countdown. */
+function introEnd() {
+  if (!introOn) return;
+  introOn = false;
+  introMarkSeen();
+  resetPaddles(world);
+  const np = heldPaddle();
+  placeCursor(np.x, np.y);
+  intent.tx = np.x; intent.ty = np.y; intent.ta = np.a;
+  world.phase = PHASE.READY;
+  world.phaseT = 0;
+  if (pointerLocked) intent.rdy = 1;
+  else grabMouse();                 // pointerlockchange sets the flag
+}
+
+// Both goals, labelled from the player's side. Read by drawTutorialGoals.
+function introGoalMarks() {
+  if (!introOn || !running) return [];
+  const theirX = mySide > 0 ? 0 : A.width;
+  return [{ x: A.width - theirX, text: 'YOUR GOAL' },
+          { x: theirX,           text: 'ENEMY GOAL' }];
+}
+
 function paintLockHint() {
-  document.body.classList.toggle('intro', running && !introSeen && gaunt.active &&
-    world.phase === PHASE.READY && !intent.rdy && !pointerLocked);
+  const intro = running && introOn;
+  document.body.classList.toggle('intro', intro);
+  if (intro) {
+    // Just under LEVEL n, which drawScore puts at this height and size.
+    const y = view.oy - (A.height - 0.62) * view.scale;
+    const size = Math.max(13, Math.round(view.scale * 0.46));
+    const top = Math.round(y + size * 0.8 + 10) + 'px';
+    if ($('intro').style.top !== top) $('intro').style.top = top;
+  }
   if (!running) { document.body.classList.remove('waiting'); return; }
   const twoPlayer = net.role === 'host' || net.role === 'guest';
   const ready = world.phase === PHASE.READY;
@@ -2218,13 +2265,13 @@ document.addEventListener('pointerlockchange', () => {
   if (pointerLocked && running) {
     const np = heldPaddle();
     placeCursor(np.x, np.y);
-    intent.rdy = 1;          // the click that captures the mouse is the ready
-    if (gaunt.active) introMarkSeen();
+    if (!introOn) intent.rdy = 1;   // the click that captures the mouse is the ready
   }
   /* Only once the player has actually started. Before that, losing the lock
      just means they have not clicked in yet, and the CLICK TO START banner is
-     the right thing to show rather than a menu offering to resume. */
-  if (running && intent.rdy) {
+     the right thing to show rather than a menu offering to resume. The intro
+     counts as started: its card tells them Esc pauses. */
+  if (running && (intent.rdy || introOn)) {
     if (pointerLocked) { paused = false; document.body.classList.remove('paused'); }
     else openPause();
   }
@@ -2336,9 +2383,8 @@ addEventListener('keydown', e => {
   /* The first gauntlet asks for the spacebar rather than a click. Taking the
      mouse is what starts a match - pointerlockchange sets the ready flag - so
      the key only has to ask for it, and a click still works as it always has. */
-  if (k === ' ' && document.body.classList.contains('intro')) {
-    const r = canvas.requestPointerLock && canvas.requestPointerLock();
-    if (r && r.catch) r.catch(() => {});
+  if (k === ' ' && introOn) {
+    if (!paused) introEnd();
     return;
   }
   keys.add(k);
@@ -2402,13 +2448,16 @@ addEventListener('keydown', e => {
   if (k === '[') setSens(MOUSE.sens - 0.05);   // capture blocks the slider,
   if (k === ']') setSens(MOUSE.sens + 0.05);   // so keys work mid-match too
   if (k === 'escape') {
+    // Only reached without the mouse captured; with it, the browser takes Esc.
+    if (!paused && introOn) { openPause(); return; }
     if (!paused) { leaveGame(); return; }
     /* A sub-card goes back to the pause menu proper rather than straight into
        the game - escape means back, not out. The terminal cards (tutorial
        finish, gauntlet over) are not stepped back from at all: resumeGame
        already refuses them, because there is nothing behind them to return
        to. */
-    if (pauseWhich === 'controls' || pauseWhich === 'exit') { pausePanel('main'); return; }
+    if (pauseWhich === 'controls') { pausePanel(controlsBack); return; }
+    if (pauseWhich === 'exit') { pausePanel('main'); return; }
     resumeGame();
     return;
   }
@@ -2606,7 +2655,7 @@ function stepLocal(dt) {
      the tick the AI would have been acting on. It runs whether or not an
      opponent is switched on: perception costs almost nothing, and a ring that
      only filled while the AI played would start every match blind. */
-  aiStep(world, -mySide, liveInput[String(-mySide)], dt);
+  if (!introOn) aiStep(world, -mySide, liveInput[String(-mySide)], dt);
 
   // The ready gate. With one player at this keyboard the question of who still
   // has to click in answers itself.
@@ -2756,6 +2805,7 @@ function startGame(asTutorial) {
   /* After restoreTuning, which resets AI and SHOT to their defaults - the
      gauntlet's level has to be written on top of that, not under it. */
   if (gaunt.armed) gauntStart(); else gauntStop();
+  introOn = gaunt.active && !introSeen;
   evGameStart();
 
   if (soloDirect()) {
@@ -2763,7 +2813,7 @@ function startGame(asTutorial) {
        so the phase it starts in is set here rather than inside serverStart. */
     serverStop();
     client.link = null;
-    world.phase = tut.active ? PHASE.HOLD : PHASE.READY;
+    world.phase = (tut.active || introOn) ? PHASE.HOLD : PHASE.READY;
     world.phaseT = 0;
     world.ballHidden = true;
     for (const k of ['-1', '1']) liveInput[k].rdy = 0;
@@ -2845,6 +2895,7 @@ function endMatch() {
 
 function stopGame() {
   evGameEnd();          // before tutStop, which is what forgets the step
+  introOn = false;
   releaseMouse();
   tutStop();
   running = false;
@@ -2954,7 +3005,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v20.6-dev';
+const BUILD = 'v20.7-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3868,14 +3919,16 @@ function resumeGame() {
 }
 
 $('pResume').addEventListener('click', resumeGame);
-$('pControls').addEventListener('click', () => pausePanel('controls'));
-$('pBack').addEventListener('click', () => pausePanel('main'));
+let controlsBack = 'main';        // which card CONTROLS was opened from
+$('pControls').addEventListener('click', () => { controlsBack = 'main'; pausePanel('controls'); });
+$('gauntControls').addEventListener('click', () => { controlsBack = 'gauntover'; pausePanel('controls'); });
+$('pBack').addEventListener('click', () => pausePanel(controlsBack));
 $('pExit').addEventListener('click', () => pausePanel('exit'));
 $('pExitNo').addEventListener('click', () => pausePanel('main'));
 $('tutPractice').addEventListener('click', () => tutFinishTo(false));
 $('tutVsAi').addEventListener('click', () => tutFinishTo(true));
-$('gauntAgain').addEventListener('click', gauntRestart);
-$('gauntMenu').addEventListener('click', gauntQuit);
+$('gauntAgain').addEventListener('click', gauntNameThen(gauntRestart));
+$('gauntMenu').addEventListener('click', gauntNameThen(gauntQuit));
 $('gauntSurvive').addEventListener('click', gauntContinueSurvival);
 $('gauntWinMenu').addEventListener('click', gauntQuit);
 $('pExitYes').addEventListener('click', () => {
@@ -4203,7 +4256,14 @@ function mainGo(action) {
 }
 
 // Straight into a run. No setup card: the gauntlet has nothing to set.
-$('btnPlay').addEventListener('click', mainGo(gauntBegin));
+/* On the intro run the mouse is taken as the game opens, so the paddle moves
+   the moment the card appears. Still inside the click's grace period - the
+   guest account is one round trip - and if the browser refuses, a click on
+   the field captures it and does nothing else. */
+$('btnPlay').addEventListener('click', mainGo(function () {
+  gauntBegin();
+  if (introOn) grabMouse();
+}));
 
 /* Straight into the lesson, one paddle. The setup card asked one question
    here - how many paddles - and a first-timer is not the person to ask. */
@@ -4247,30 +4307,40 @@ $('btnLogout').addEventListener('click', function () {
 });
 
 /* The same name box, on the card where a player has just found out how far
-   they got - the moment a name is most worth having. Hidden for anyone who
-   already has one, and for anyone who cannot save one. */
+   they got - the moment a name is most worth having. ONCE: the first game
+   over in this browser, and only for a guest with no name. After that the
+   name lives in MORE > USER SETTINGS; asking after every run is nagging. */
+const NAME_PROMPT_KEY = 'banjoball.namePrompted';
+
 function paintGauntName() {
-  const want = authReady() && signedIn() && authIsGuest() && !authHasName();
+  let asked = false;
+  try { asked = localStorage.getItem(NAME_PROMPT_KEY) === '1'; } catch (e) {}
+  const want = !asked && authReady() && signedIn() && authIsGuest() && !authHasName();
   $('gauntName').classList.toggle('hidden', !want);
   $('gauntNameIn').value = '';
   $('gauntNameMsg').textContent = '';
+  if (want) { try { localStorage.setItem(NAME_PROMPT_KEY, '1'); } catch (e) {} }
 }
 
-function gauntNameSubmit() {
-  const go = $('gauntNameGo');
-  if (go.disabled) return;
-  go.disabled = true;
-  $('gauntNameMsg').textContent = 'working...';
-  authSetName($('gauntNameIn').value).then(err => {
-    go.disabled = false;
-    if (err) { $('gauntNameMsg').textContent = err; return; }
-    $('gauntName').classList.add('hidden');
-    $('gauntOverBest').textContent = 'Saved as ' + authName() + '.' +
-      (gaunt.best ? ' Best: level ' + gaunt.best : '');
-  });
+/* There is no save button: leaving the card is saving. An empty box leaves
+   without a name; a name that is taken or malformed keeps the player here with
+   the reason, and clearing the box is the way past it. */
+function gauntNameThen(next) {
+  return function () {
+    const v = $('gauntNameIn').value.trim();
+    if ($('gauntName').classList.contains('hidden') || !v) { next(); return; }
+    const btns = [$('gauntAgain'), $('gauntMenu')];
+    if (btns[0].disabled) return;
+    btns.forEach(b => { b.disabled = true; });
+    $('gauntNameMsg').textContent = 'saving...';
+    authSetName(v).then(err => {
+      btns.forEach(b => { b.disabled = false; });
+      if (err) { $('gauntNameMsg').textContent = err; return; }
+      $('gauntName').classList.add('hidden');
+      next();
+    });
+  };
 }
-$('gauntNameGo').addEventListener('click', gauntNameSubmit);
-$('gauntNameIn').addEventListener('keydown', e => { if (e.key === 'Enter') gauntNameSubmit(); });
 
 $('btnAI').addEventListener('click', function () {
   net.role = 'solo'; mySide = 1; AI.on = true;
