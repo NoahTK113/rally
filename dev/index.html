@@ -576,6 +576,7 @@
     <div class="note" id="userWho"></div>
     <button id="btnName">NAME</button>
     <button id="btnSave">SAVE MY STATS</button>
+    <button id="btnLogin">LOG IN</button>
     <button id="btnUserBack" class="back">BACK</button>
   </div>
   <div class="card sub hidden" id="nameCard">
@@ -611,12 +612,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v21.6-dev"></script>
-<script src="ai.js?v=v21.6-dev"></script>
-<script src="gauntlet.js?v=v21.6-dev"></script>
-<script src="profile.js?v=v21.6-dev"></script>
-<script src="audio.js?v=v21.6-dev"></script>
-<script src="tutorial.js?v=v21.6-dev"></script>
+<script src="shot.js?v=v21.7-dev"></script>
+<script src="ai.js?v=v21.7-dev"></script>
+<script src="gauntlet.js?v=v21.7-dev"></script>
+<script src="profile.js?v=v21.7-dev"></script>
+<script src="audio.js?v=v21.7-dev"></script>
+<script src="tutorial.js?v=v21.7-dev"></script>
 <script>
 'use strict';
 
@@ -3044,7 +3045,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v21.6-dev';
+const BUILD = 'v21.7-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -3814,6 +3815,8 @@ function paintAccount() {
     :                 'Not signed in.';
   $('btnName').classList.toggle('hidden', !online || saved || !signedIn());
   $('btnSave').classList.toggle('hidden', !online || saved);
+  // For someone who has an account but has ended up on a guest or temp name.
+  $('btnLogin').classList.toggle('hidden', !online || saved);
 }
 
 /* The lobby. Reached once there is someone to play against — or straight away
@@ -4326,6 +4329,7 @@ $('btnMoreBack').addEventListener('click', () => menuShow('main'));
 $('btnUser').addEventListener('click', () => menuShow('user'));
 $('btnUserBack').addEventListener('click', () => menuShow('more'));
 $('btnSave').addEventListener('click', () => showLogin('new'));
+$('btnLogin').addEventListener('click', () => showLogin('in'));
 $('btnName').addEventListener('click', function () {
   $('nameIn').value = authHasName() ? authName() : '';
   $('nameMsg').textContent = '';
