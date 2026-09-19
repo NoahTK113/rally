@@ -73,6 +73,7 @@ function authAdopt(session) {
     paintAccount();
     return;
   }
+  if (acct.id !== session.user.id) acctVerified = false;   // a different account
   acct.id = session.user.id;
   acct.guest = !!session.user.is_anonymous;
   paintAccount();                       // show something immediately
@@ -219,8 +220,44 @@ function authWaitChecked() {
 
 async function authEnsure() {
   await authWaitChecked();
-  if (!authReady() || signedIn()) return;
+  if (!authReady()) return;
+  if (signedIn()) await authVerify();
+  if (signedIn()) return;
   try { await authGuest(); } catch (e) {}
+}
+
+/* A LOGIN WITH NOTHING BEHIND IT. The browser can hold a session for an
+   account that no longer exists - deleted from the dashboard, say - and the
+   token stays valid for up to an hour afterwards, so everything looks signed
+   in while every write fails against a missing profile.
+
+   So the first click on the main menu asks whether this account's profile is
+   actually there. If the database answers "no such row", the session is
+   dropped from this browser and a fresh guest takes its place; there is only
+   ever one session per browser, so nothing is left behind. If the question
+   cannot be answered - offline, a timeout - nothing is done: an unreachable
+   server is not evidence that the account is gone.
+
+   Once per page load. After one good answer there is nothing new to learn. */
+let acctVerified = false;
+
+async function authVerify() {
+  if (!sb || !acct.id || acctVerified) return;
+  let r;
+  try {
+    r = await sb.from('profiles').select('username,best_level').eq('id', acct.id).maybeSingle();
+  } catch (e) { return; }
+  if (!r || r.error) return;                  // could not tell; leave it alone
+  if (r.data) {
+    acctVerified = true;
+    acct.username = r.data.username;
+    acct.best = r.data.best_level | 0;
+    paintAccount();
+    return;
+  }
+  // Local only: the server has no such user to log out, and asking would fail.
+  try { await sb.auth.signOut({ scope: 'local' }); } catch (e) {}
+  authAdopt(null);
 }
 
 /* A name with no password. First come, first served: names are unique, and
