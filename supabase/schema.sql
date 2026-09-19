@@ -273,9 +273,23 @@ begin
   insert into public.runs (user_id) values (auth.uid())
   returning id into v_id;
 
+  -- Starting a run IS reaching level 1, so a player who never scores still
+  -- has a level to show on the board. updated_at only moves when the best
+  -- does, because it breaks ties on the leaderboard.
+  update public.profiles
+     set best_level = 1, updated_at = now()
+   where id = auth.uid()
+     and best_level < 1;
+
   return v_id;
 end;
 $$;
+
+-- Everyone who started a run before the line above existed.
+update public.profiles p
+   set best_level = 1
+ where p.best_level < 1
+   and exists (select 1 from public.runs r where r.user_id = p.id);
 
 
 /* A goal. Returns the level the run is now on — the client is told, never

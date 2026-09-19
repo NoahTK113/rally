@@ -603,12 +603,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v21.3-dev"></script>
-<script src="ai.js?v=v21.3-dev"></script>
-<script src="gauntlet.js?v=v21.3-dev"></script>
-<script src="profile.js?v=v21.3-dev"></script>
-<script src="audio.js?v=v21.3-dev"></script>
-<script src="tutorial.js?v=v21.3-dev"></script>
+<script src="shot.js?v=v21.4-dev"></script>
+<script src="ai.js?v=v21.4-dev"></script>
+<script src="gauntlet.js?v=v21.4-dev"></script>
+<script src="profile.js?v=v21.4-dev"></script>
+<script src="audio.js?v=v21.4-dev"></script>
+<script src="tutorial.js?v=v21.4-dev"></script>
 <script>
 'use strict';
 
@@ -3036,7 +3036,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v21.3-dev';
+const BUILD = 'v21.4-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -4345,19 +4345,14 @@ $('btnLogout').addEventListener('click', function () {
 });
 
 /* The same name box, on the card where a player has just found out how far
-   they got - the moment a name is most worth having. ONCE: the first game
-   over in this browser, and only for a guest with no name. After that the
-   name lives in MORE > USER SETTINGS; asking after every run is nagging. */
-const NAME_PROMPT_KEY = 'banjoball.namePrompted';
-
+   they got - the moment a name is most worth having. Asked of anyone without a
+   name, every game over until they have one; once they do, it never appears
+   again, and changing it lives in MORE > USER SETTINGS. */
 function paintGauntName() {
-  let asked = false;
-  try { asked = localStorage.getItem(NAME_PROMPT_KEY) === '1'; } catch (e) {}
-  const want = !asked && authReady() && signedIn() && authIsGuest() && !authHasName();
+  const want = authReady() && signedIn() && !authHasName();
   $('gauntName').classList.toggle('hidden', !want);
   $('gauntNameIn').value = '';
   gauntNameSay('', '');
-  if (want) { try { localStorage.setItem(NAME_PROMPT_KEY, '1'); } catch (e) {} }
 }
 
 // The line under the name box: green when it worked, red with the reason when not.
@@ -4506,6 +4501,8 @@ updateStatus();
    removed rather than ignored: a stale key that nothing reads is a trap for
    whoever finds it next. */
 try { localStorage.removeItem('banjoball.best'); } catch (e) {}
+// Likewise banjoball.namePrompted, from when the name was asked for only once.
+try { localStorage.removeItem('banjoball.namePrompted'); } catch (e) {}
 authInit();
 showMenu();
 /* A network that never answers must not leave the first click waiting on it. */
