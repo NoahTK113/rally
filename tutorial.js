@@ -63,8 +63,8 @@ const tut = {
    CAPTURE THE MOUSE card rather than joining it: two prompts on screen at once,
    one centred and one at the bottom, both asking for a click, was the first
    thing a new player saw. */
-const TUT_START  = 'First, <b>click anywhere on the field</b> to start the game.';
-const TUT_READY  = 'Press the <b>space bar</b> when you are ready.';
+const TUT_START  = 'First, <b>[Click]</b> anywhere on the field to start the game.';
+const TUT_READY  = 'Press <b>[Space]</b> when you are ready.';
 const TUT_PRAISE = 'Well done.';
 const TUT_PRAISE_T = 3.0;            // seconds the card holds before fading
 const TUT_FADE_T   = 0.3;            // and how long the fade itself takes
@@ -146,14 +146,14 @@ function tutTiltDiagram() {
 
 const STEPS = [
   {
-    text: 'Move your mouse to <b>control your paddle</b>.',
+    text: 'Move your <b>[Mouse]</b> to control your paddle.',
     hint: 'the paddle chases the cursor; the line between them is the pull',
     done: () => tut.moved > 25,
   },
   {
-    text: 'You can also <b>roll the mouse wheel</b> to tilt and spin your paddle. ' +
+    text: 'You can also <b>[Scroll]</b> to tilt and spin your paddle. ' +
           'Try rotating the paddle so that it is <b>vertical</b>.',
-    hint: 'the wheel turns in 30° steps, so upright is exactly three of them',
+    hint: 'each [Scroll] step turns 30°, so upright is exactly three of them',
     hold: 2,
     done: () => tutAngleIs(90),
   },
@@ -166,7 +166,7 @@ const STEPS = [
     done: () => { const [a, b] = tutTiltAngles(); return tutAngleIs(a) || tutAngleIs(b); },
   },
   {
-    text: 'You can also <b>spin your paddle</b> by quickly rolling the mouse wheel. ' +
+    text: 'You can also <b>spin your paddle</b> with a quick <b>[Scroll]</b>. ' +
           'This will help add speed to your shots.',
     hint: 'a flick, not a turn — half a rotation inside half a second',
     count: () => 'Spins completed ' + Math.min(tut.spins, TUT_SPINS) + '/' + TUT_SPINS,
@@ -175,17 +175,17 @@ const STEPS = [
   {
     kind: 'note',
     text: 'Your job is to <b>score on your opponent</b>.',
-    hint: 'press space to continue',
+    hint: 'press [Space] to continue',
     goals: 'theirs',
   },
   {
     kind: 'note',
     text: 'And to <b>defend your own goal</b>.',
-    hint: 'press space to continue',
+    hint: 'press [Space] to continue',
     goals: 'yours',
   },
   {
-    text: 'Press <b>space</b> to take hold of your other paddle.',
+    text: 'Press <b>[Space]</b> to take hold of your other paddle.',
     hint: 'the one you let go of stays where you left it, and is still solid',
     done: () => tut.switched >= 2,
     skip: () => MATCH.paddles < 2,
@@ -196,7 +196,7 @@ const STEPS = [
        serves and starts it. Being the first ball of the lesson and the lesson
        about F at the same time means the player never watches a serve they did
        not ask for. */
-    text: '<b>During practice mode</b>, you can press <b>F</b> to re-serve the ball. Try it now.',
+    text: '<b>During practice mode</b>, you can press <b>[F]</b> to re-serve the ball. Try it now.',
     hint: 'the ball drops again from the middle, whatever it was doing',
     hold: 0.5,
     praise: false,          // straight on: hitting it is the point of serving it
@@ -204,7 +204,7 @@ const STEPS = [
   },
   {
     text: 'Now <b>hit the ball</b>.',
-    hint: 'press <b>F</b> to re-serve the ball if you need to reset',
+    hint: 'press <b>[F]</b> to re-serve the ball if you need to reset',
     count: () => 'Touches ' + Math.min(tut.hits, TUT_HITS) + '/' + TUT_HITS,
     done: () => tut.hits >= TUT_HITS,
   },
@@ -213,7 +213,7 @@ const STEPS = [
        mySide cannot change and the goal being attacked is always side -1's. */
     text: 'Now try to score <b>3 goals</b> by hitting the ball into the <b>red goal</b>. ' +
           'Remember to <b>rotate your paddle</b> for more accurate shots.',
-    hint: 're-serve with F whenever you want the ball back',
+    hint: 're-serve with [F] whenever you want the ball back',
     count: () => 'Goals ' + Math.min(tut.goals, TUT_GOALS) + '/' + TUT_GOALS,
     praise: false,          // the finish card opens with the praise instead
     done: () => tut.goals >= TUT_GOALS,
@@ -453,9 +453,15 @@ function tutGoalMark() {
   };
 }
 
+/* The gauntlet's first-run intro labels both goals the same way, so the
+   drawing is shared and each caller only says which goal and what it reads. */
 function drawTutorialGoals(ctx) {
   const m = tutGoalMark();
-  if (!m) return;
+  if (m) drawGoalMark(ctx, m);
+  for (const g of introGoalMarks()) drawGoalMark(ctx, g);
+}
+
+function drawGoalMark(ctx, m) {
   const sx = wx => view.ox + wx * view.scale;
   const sy = wy => view.oy - wy * view.scale;
   const midY = (goalY0() + goalY1()) / 2;
@@ -463,23 +469,36 @@ function drawTutorialGoals(ctx) {
   const inward = m.x === 0 ? 1 : -1;              // into the field, whichever end
   const tipX = sx(m.x + inward * 0.25);
   const tipY = sy(midY);
-  const labX = sx(m.x + inward * 2.6);
-  const labY = sy(goalY1() + 1.6);
+
+  /* Two layouts. The tutorial's notes sit above the goal with a slanting
+     arrow, in white. A `centred` mark sits level with the goal's middle, in
+     that goal's team colour, with a heavier arrow pointing straight at it. */
+  const c = !!m.centred;
+  const labX = sx(m.x + inward * (c ? 2.2 : 2.6));
+  const labY = c ? tipY : sy(goalY1() + 1.6);
+  const tailX = c ? labX - inward * view.scale * 0.2 : labX;
+  const tailY = c ? labY : labY + view.scale * 0.18;
+  const colour = c ? goalColour(m.x === 0 ? -1 : 1) : '#ffffff';
 
   ctx.save();
-  ctx.font = `700 ${Math.max(11, Math.round(view.scale * 0.30))}px ui-monospace, Consolas, monospace`;
+  const fs = c ? Math.max(16, Math.round(view.scale * 0.46)) : Math.max(11, Math.round(view.scale * 0.30));
+  ctx.font = `700 ${fs}px ui-monospace, Consolas, monospace`;
   ctx.textBaseline = 'middle';
-  ctx.lineWidth = Math.max(1.5, view.scale * 0.035);
-  ctx.strokeStyle = '#ffffff';
-  ctx.fillStyle = '#ffffff';
+  ctx.lineWidth = c ? Math.max(3, view.scale * 0.08) : Math.max(1.5, view.scale * 0.035);
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = colour;
+  ctx.fillStyle = colour;
 
+  const ang = Math.atan2(tipY - tailY, tipX - tailX);
+  const h = c ? Math.max(12, view.scale * 0.32) : Math.max(6, view.scale * 0.16);
+
+  // The shaft stops short of the tip so a thick line does not poke through
+  // the point of the head.
   ctx.beginPath();
-  ctx.moveTo(labX, labY + view.scale * 0.18);
-  ctx.lineTo(tipX, tipY);
+  ctx.moveTo(tailX, tailY);
+  ctx.lineTo(tipX - h * 0.6 * Math.cos(ang), tipY - h * 0.6 * Math.sin(ang));
   ctx.stroke();
 
-  const ang = Math.atan2(tipY - (labY + view.scale * 0.18), tipX - labX);
-  const h = Math.max(6, view.scale * 0.16);
   ctx.beginPath();
   ctx.moveTo(tipX, tipY);
   ctx.lineTo(tipX - h * Math.cos(ang - 0.4), tipY - h * Math.sin(ang - 0.4));
