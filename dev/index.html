@@ -123,6 +123,23 @@
   /* The list scrolls; the card does not grow. Its height is matched to the
      setup card in script, because that card's height depends on its contents. */
   #lbScroll{overflow-y:auto;flex:1;min-height:0}
+  /* The scrollbar: a thin cyan bar with no track and no arrows, standing in
+     the middle of the gap between the level column and the card's edge.
+
+     A scrollbar always sits at its container's edge, so the container is
+     pulled 10px into the card's 16px padding and given 6px of its own on the
+     inside - 6px, 4px of bar, 6px - which puts the numbers back where the
+     card's padding would have put them. The gutter is kept even when nothing
+     overflows, so a short list does not sit 4px further right than a long one.
+     No horizontal scrolling: the bottom bar was only ever the table being
+     squeezed by the side one. Firefox takes only `thin` and a colour. */
+  #lbScroll{overflow-x:hidden;margin-right:-10px;padding-right:6px;
+            scrollbar-gutter:stable;scrollbar-width:thin;
+            scrollbar-color:#22d3ee transparent}
+  #lbScroll::-webkit-scrollbar{width:4px;height:0}
+  #lbScroll::-webkit-scrollbar-track{background:transparent}
+  #lbScroll::-webkit-scrollbar-thumb{background:#22d3ee;border-radius:2px}
+  #lbScroll::-webkit-scrollbar-button{display:none}
   #setup .card{width:340px;padding:26px;border:1px solid #1d2939;border-radius:14px;
                background:rgba(12,17,26,.96);box-shadow:0 24px 70px rgba(0,0,0,.5);text-align:center}
   #setup h1{font-size:15px;letter-spacing:.3em;font-weight:600;color:#ffffff}
@@ -510,16 +527,17 @@
 <div id="menu" class="hidden">
   <div class="card" id="mainCard">
     <h1>BANJOBALL</h1>
-    <button id="btnPlay">PLAY NOW</button>
+    <button id="btnPlay">PLAY NOW - GAUNTLET</button>
     <button id="btnTutorial">HOW TO PLAY</button>
     <button id="btnMore">MORE</button>
-    <div class="req">This game requires a mouse with a wheel.</div>
+    <div class="req">This game requires a mouse with a scroll wheel.</div>
   </div>
   <div class="card sub hidden" id="moreCard">
     <h1>MORE</h1>
+    <button id="btnGauntlet">GAUNTLET</button>
     <button id="btnAI">VS AI</button>
     <button id="btnSolo">PRACTICE</button>
-    <button id="btnHost">HOST A GAME</button>
+    <button id="btnHost">HOST GAME</button>
     <div class="join">
       <input id="codeIn" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false">
       <button id="btnJoin">JOIN</button>
@@ -572,12 +590,12 @@ function resetSession() { for (var i = 0; i < SESSION_RESETS.length; i++) SESSIO
 </script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="shot.js?v=v21.0-dev"></script>
-<script src="ai.js?v=v21.0-dev"></script>
-<script src="gauntlet.js?v=v21.0-dev"></script>
-<script src="profile.js?v=v21.0-dev"></script>
-<script src="audio.js?v=v21.0-dev"></script>
-<script src="tutorial.js?v=v21.0-dev"></script>
+<script src="shot.js?v=v21.1-dev"></script>
+<script src="ai.js?v=v21.1-dev"></script>
+<script src="gauntlet.js?v=v21.1-dev"></script>
+<script src="profile.js?v=v21.1-dev"></script>
+<script src="audio.js?v=v21.1-dev"></script>
+<script src="tutorial.js?v=v21.1-dev"></script>
 <script>
 'use strict';
 
@@ -3005,7 +3023,7 @@ function frame(nowMs) {
    ========================================================================== */
 // Bump on every deploy. Shown top-left on the menu and in game so both
 // players can confirm they are on the same build before blaming the netcode.
-const BUILD = 'v21.0-dev';
+const BUILD = 'v21.1-dev';
 
 
 /* One pass over the simulation's event log per frame, feeding everything that
@@ -4260,10 +4278,14 @@ function mainGo(action) {
    the moment the card appears. Still inside the click's grace period - the
    guest account is one round trip - and if the browser refuses, a click on
    the field captures it and does nothing else. */
-$('btnPlay').addEventListener('click', mainGo(function () {
+function playGauntlet() {
   gauntBegin();
   if (introOn) grabMouse();
-}));
+}
+$('btnPlay').addEventListener('click', mainGo(playGauntlet));
+// The same run from MORE, where every mode is listed. The guest account was
+// already made on the way in.
+$('btnGauntlet').addEventListener('click', playGauntlet);
 
 /* Straight into the lesson, one paddle. The setup card asked one question
    here - how many paddles - and a first-timer is not the person to ask. */
